@@ -515,7 +515,7 @@ const TABS = [
   {id:'inventory', num:'03', label:'Inventory', icon:'&#127970;'},
   {id:'outward', num:'04', label:'Outward', icon:'&#128666;'},
   {id:'logistics', num:'05', label:'Logistics', icon:'&#128667;'},
-  {id:'invoice', num:'06', label:'Invoice', icon:'&#129534;'},
+  {id:'sales', num:'06', label:'Sales', icon:'&#128200;'},
   {id:'automation', num:'07', label:'Automation', icon:'&#9881;'},
   {id:'enquiry', num:'08', label:'Enquiry', icon:'&#129489;&#8205;&#128187;'},
   {id:'accounts', num:'09', label:'Accounts', icon:'&#128176;'},
@@ -524,7 +524,7 @@ const TABS = [
 ];
 
 const ROLE_TABS = {
-  admin: ['dashboard','po','inward','inventory','outward','logistics','invoice','automation','enquiry','accounts','quotation','users'],
+  admin: ['dashboard','po','inward','inventory','outward','logistics','sales','automation','enquiry','accounts','quotation','users'],
   stores: ['dashboard','inward','inventory','outward'],
   logistics: ['dashboard','outward','logistics'],
   automation: ['dashboard','automation'],
@@ -575,10 +575,10 @@ const DEFAULT_USERS = [
 ];
 
 function emptyLocationData(){
-  return { inventory:[], po:[], vendorPO:[], customerPO:[], poContractDocs:[], inward:[], outward:[], logistics:[], futureShipments:[], invoice:[], automation:[], pendingAssembly:[], enquiry:[], purchaseAccounts:[], salesAccounts:[], quotations:[], quoteCompany:null };
+  return { inventory:[], po:[], vendorPO:[], customerPO:[], poContractDocs:[], inward:[], outward:[], logistics:[], futureShipments:[], invoice:[], sales:[], automation:[], pendingAssembly:[], enquiry:[], purchaseAccounts:[], salesAccounts:[], quotations:[], quoteCompany:null };
 }
 function ensureShape(d){
-  const keys = ['inventory','po','vendorPO','customerPO','poContractDocs','inward','outward','logistics','futureShipments','invoice','automation','pendingAssembly','enquiry','purchaseAccounts','salesAccounts','quotations'];
+  const keys = ['inventory','po','vendorPO','customerPO','poContractDocs','inward','outward','logistics','futureShipments','invoice','sales','automation','pendingAssembly','enquiry','purchaseAccounts','salesAccounts','quotations'];
   keys.forEach(k=>{ if(!Array.isArray(d[k])) d[k] = []; });
   return d;
 }
@@ -964,7 +964,7 @@ const AUDIT_MAX = 500;
 const AUDIT_TABLE_LABELS = {
   inventory:'Inventory', po:'Purchase Orders', vendorPO:'Vendor PO', customerPO:'Customer PO',
   poContractDocs:'PO Contract Docs', inward:'Inward', outward:'Outward', logistics:'Logistics',
-  futureShipments:'Future Shipments', invoice:'Invoice', automation:'Automation',
+  futureShipments:'Future Shipments', invoice:'Invoice', sales:'Sales', automation:'Automation',
   pendingAssembly:'Pending Assembly', enquiry:'Enquiry', purchaseAccounts:'Purchase Accounts',
   salesAccounts:'Sales Accounts', quotations:'Quotations'
 };
@@ -1653,7 +1653,7 @@ function renderTabContent(){
     case 'inventory': return renderInventory();
     case 'outward': return renderOutward();
     case 'logistics': return renderLogistics();
-    case 'invoice': return renderInvoice();
+    case 'sales': return renderSales();
     case 'automation': return renderAutomation();
     case 'enquiry': return renderEnquiry();
     case 'accounts': return canSeeTab('accounts') ? renderAccounts() : renderDashboard();
@@ -1829,11 +1829,15 @@ const IMPORT_SCHEMAS = {
     {key:'remarks', header:'Remarks'},
     {key:'assignedTo', header:'Assigned To'}
   ],
-  invoice: [
-    {key:'number', header:'Invoice No.'},
+  sales: [
     {key:'date', header:'Date', type:'date'},
     {key:'customer', header:'Customer'},
-    {key:'amount', header:'Amount'}
+    {key:'customerPO', header:'Customer P.O'},
+    {key:'item', header:'Item'},
+    {key:'qty', header:'Qty'},
+    {key:'unitPrice', header:'Unit Price'},
+    {key:'totalValue', header:'Total Value'},
+    {key:'remarks', header:'Remarks'}
   ],
   automation: [
     {key:'poNumber', header:'P.O Num'},
@@ -2284,8 +2288,8 @@ function renderDashboard(){
     cards.push({val:inTransit, lbl:'Shipments in transit', ico:'&#128667;'});
     cards.push({val:deliveredLogistics, lbl:'Shipments delivered', ico:'&#9989;'});
   }
-  if(allowedTabs.includes('invoice')){
-    cards.push({val:d.invoice.length, lbl:'Invoices raised', ico:'&#129534;'});
+  if(allowedTabs.includes('sales')){
+    cards.push({val:(d.sales||[]).length, lbl:'Sales entries', ico:'&#128200;'});
   }
   if(allowedTabs.includes('automation')){
     cards.push({val:d.automation.length, lbl:'Automation jobs', ico:'&#9881;'});
@@ -3631,65 +3635,83 @@ async function deleteLogistics(id){
   render();
 }
 
-/* ---------------- INVOICE ---------------- */
-function renderInvoice(){
+/* ---------------- SALES ---------------- */
+function renderSales(){
   const d = DATA[currentLocation];
-  const invcAll = applyTableTools('invoice', d.invoice.slice().reverse());
-  const invcRows = limitRows('invoice', invcAll);
+  d.sales = d.sales || [];
+  const slAll = applyTableTools('sales', d.sales.slice().reverse());
+  const slRows = limitRows('sales', slAll);
   return `
-  ${tabHeader(currentLocation, 'Invoice')}
-  <div class="panel"><div class="panel-head"><h3>New invoice</h3></div>
+  ${tabHeader(currentLocation, 'Sales')}
+  <div class="panel"><div class="panel-head"><h3>New sales entry</h3></div>
   <div class="panel-body">
-  <form onsubmit="return addInvoice(event)">
+  <form onsubmit="return addSales(event)">
     <div class="form-grid">
-      <div class="field"><label>Date</label><input type="date" id="inv-date2" value="${today()}" required></div>
-      <div class="field"><label>Invoice number</label><input type="text" id="inv-number" placeholder="Auto if blank"></div>
-      <div class="field"><label>Customer name</label><input type="text" id="inv-customer2" placeholder="Optional"></div>
-      <div class="field"><label>Amount</label><input type="number" id="inv-amount" placeholder="Optional"></div>
-      <button type="submit" class="btn">Add Invoice</button>
+      <div class="field"><label>Date</label><input type="date" id="sl-date" value="${today()}" required></div>
+      <div class="field"><label>Customer name</label><input type="text" id="sl-customer" required></div>
+      <div class="field"><label>Customer P.O</label><input type="text" id="sl-po" placeholder="Optional"></div>
+      <div class="field"><label>Item description</label><input type="text" id="sl-item" placeholder="Optional"></div>
+      <div class="field"><label>Qty</label><input type="number" id="sl-qty" step="any" placeholder="Optional" oninput="slCalcTotal()"></div>
+      <div class="field"><label>Unit price</label><input type="number" id="sl-price" step="any" placeholder="Optional" oninput="slCalcTotal()"></div>
+      <div class="field"><label>Total value</label><input type="number" id="sl-total" step="any" placeholder="Auto" readonly style="background:var(--panel-2);"></div>
+      <div class="field"><label>Remarks</label><input type="text" id="sl-remarks" placeholder="Optional"></div>
+      <button type="submit" class="btn">Add Sale</button>
     </div>
   </form>
   </div></div>
-  <div class="panel"><div class="panel-head"><h3>Invoices</h3><div class="panel-head-actions">${importBtn('invoice')}${exportBtn('exportInvoice')}</div></div>
+  <div class="panel"><div class="panel-head"><h3>Sales register</h3><div class="panel-head-actions">${importBtn('sales')}${exportBtn('exportSales')}</div></div>
   <div class="panel-body">
-  ${tableToolbar('invoice', d.invoice)}
-  <table><thead><tr><th>Invoice No.</th><th>Date</th><th>Customer</th><th>Amount</th>${cfHeaders('invoice')}<th>Added By</th><th></th></tr></thead><tbody>
-  ${invcRows.length===0 ? noMatchRow(6, d.invoice.length) :
-    invcRows.map(r=>`<tr>
-      <td>${esc(r.number)}</td><td>${fd(r.date)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.customer)}</td><td>${esc(r.amount)}</td>${cfCells('invoice', r)}${addedByCell(r)}
-      <td>${actionCell(editBtn('invoice', r.id), deleteBtn(`deleteInvoice('${r.id}')`))}</td>
+  ${tableToolbar('sales', d.sales)}
+  <table><thead><tr><th>Date</th><th>Customer</th><th>Customer P.O</th><th>Item</th><th>Qty</th><th>Unit Price</th><th>Total Value</th><th>Remarks</th>${cfHeaders('sales')}<th>Added By</th><th></th></tr></thead><tbody>
+  ${slRows.length===0 ? noMatchRow(10, d.sales.length) :
+    slRows.map(r=>`<tr>
+      <td>${fd(r.date)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.customer)}</td><td>${esc(r.customerPO||'')}</td><td>${esc(r.item||'')}</td>
+      <td>${esc(r.qty||'')}</td><td>${r.unitPrice!=='' && r.unitPrice!=null ? '&#8377; '+fmt2(r.unitPrice) : ''}</td><td>${r.totalValue!=='' && r.totalValue!=null ? '&#8377; '+fmt2(r.totalValue) : ''}</td><td>${esc(r.remarks||'')}</td>${cfCells('sales', r)}${addedByCell(r)}
+      <td>${actionCell(editBtn('sales', r.id), deleteBtn(`deleteSales('${r.id}')`))}</td>
     </tr>`).join('')}
   </tbody></table>
-  ${showMoreBar('invoice', invcAll.length)}
+  ${showMoreBar('sales', slAll.length)}
   </div></div>`;
 }
-function exportInvoice(){
-  const d = DATA[currentLocation];
-  const headers = ['Invoice No.','Date','Customer','Amount','Added By'];
-  const rows = d.invoice.map(r=>[r.number, r.date, r.customer, r.amount, r.addedBy]);
-  cfExportAppend('invoice', d.invoice, headers, rows);
-  exportToExcel(currentLocation+'_Invoices', headers, rows);
+function slCalcTotal(){
+  const q = parseFloat((document.getElementById('sl-qty')||{}).value)||0;
+  const p = parseFloat((document.getElementById('sl-price')||{}).value)||0;
+  const t = document.getElementById('sl-total');
+  if(t) t.value = (q && p) ? (q*p) : '';
 }
-async function addInvoice(e){
+function exportSales(){
+  const d = DATA[currentLocation];
+  const headers = ['Date','Customer','Customer P.O','Item','Qty','Unit Price','Total Value','Remarks','Added By'];
+  const rows = (d.sales||[]).map(r=>[r.date, r.customer, r.customerPO||'', r.item||'', r.qty||'', r.unitPrice||'', r.totalValue||'', r.remarks||'', r.addedBy]);
+  cfExportAppend('sales', d.sales||[], headers, rows);
+  exportToExcel(currentLocation+'_Sales', headers, rows);
+}
+async function addSales(e){
   e.preventDefault();
   const d = DATA[currentLocation];
-  const num = document.getElementById('inv-number').value.trim() || ('INV-'+(d.invoice.length+1).toString().padStart(4,'0'));
-  d.invoice.push({
+  d.sales = d.sales || [];
+  const qty = parseFloat(document.getElementById('sl-qty').value)||0;
+  const unitPrice = parseFloat(document.getElementById('sl-price').value)||0;
+  d.sales.push({
     id: uid(),
-    date: document.getElementById('inv-date2').value,
-    number: num,
-    customer: document.getElementById('inv-customer2').value.trim(),
-    amount: document.getElementById('inv-amount').value.trim(),
+    date: document.getElementById('sl-date').value,
+    customer: document.getElementById('sl-customer').value.trim(),
+    customerPO: document.getElementById('sl-po').value.trim(),
+    item: document.getElementById('sl-item').value.trim(),
+    qty: document.getElementById('sl-qty').value.trim(),
+    unitPrice: document.getElementById('sl-price').value.trim(),
+    totalValue: (qty && unitPrice) ? (qty*unitPrice) : '',
+    remarks: document.getElementById('sl-remarks').value.trim(),
     addedBy: actorName()
   });
   await saveLocation(currentLocation);
   render();
   return false;
 }
-async function deleteInvoice(id){
+async function deleteSales(id){
   if(!isAdmin()) return;
   const d = DATA[currentLocation];
-  d.invoice = d.invoice.filter(x=>x.id!==id);
+  d.sales = (d.sales||[]).filter(x=>x.id!==id);
   await saveLocation(currentLocation);
   render();
 }
@@ -5354,11 +5376,14 @@ const EDIT_SCHEMAS = {
     {key:'remarks', label:'Remarks', type:'text'},
     {key:'assignedTo', label:'Assigned To', type:'text'}
   ],
-  invoice: [
-    {key:'number', label:'Invoice number', type:'text'},
+  sales: [
     {key:'date', label:'Date', type:'date'},
     {key:'customer', label:'Customer name', type:'text'},
-    {key:'amount', label:'Amount', type:'number'}
+    {key:'customerPO', label:'Customer P.O', type:'text'},
+    {key:'item', label:'Item description', type:'text'},
+    {key:'qty', label:'Qty', type:'number'},
+    {key:'unitPrice', label:'Unit price', type:'number'},
+    {key:'remarks', label:'Remarks', type:'text'}
   ],
   automation: [
     {key:'poNumber', label:'P.O Num', type:'text'},
@@ -5596,7 +5621,7 @@ async function saveEditModal(){
     const unitPrice = parseFloat(record.unitPrice)||0;
     record.totalPrice = (qty && unitPrice) ? (qty*unitPrice) : '';
   }
-  if(table==='vendorPO' || table==='customerPO'){
+  if(table==='vendorPO' || table==='customerPO' || table==='sales'){
     const qty = parseFloat(record.qty)||0;
     const unitPrice = parseFloat(record.unitPrice)||0;
     record.totalValue = (qty && unitPrice) ? (qty*unitPrice) : '';
@@ -6108,11 +6133,11 @@ function exportQuotationLog(){
 let CUSTOM_FIELDS = {}; /* {table: [{key,label,type,options[]}]} - stored globally with users doc */
 const CF_TABLES = [
   ['vendorPO','Vendor P.O'],['customerPO','Customer P.O'],['inward','Inward'],['inventory','Inventory'],
-  ['outward','Outward'],['logistics','Logistics'],['futureShipments','Future Shipments'],['invoice','Invoice'],
+  ['outward','Outward'],['logistics','Logistics'],['futureShipments','Future Shipments'],['sales','Sales'],
   ['automation','Automation'],['pendingAssembly','Pending Assembly'],['enquiry','Enquiry'],
   ['purchaseAccounts','Accounts - Purchase'],['salesAccounts','Accounts - Sales']
 ];
-const CF_FORM_MAP = {addVendorPO:'vendorPO', addCustomerPO:'customerPO', addInward:'inward', addInventory:'inventory', addOutward:'outward', addLogistics:'logistics', addFutureShipment:'futureShipments', addInvoice:'invoice', addAutomation:'automation', addPendingAssembly:'pendingAssembly', addEnquiry:'enquiry', addPurchaseAccount:'purchaseAccounts', addSalesAccount:'salesAccounts'};
+const CF_FORM_MAP = {addVendorPO:'vendorPO', addCustomerPO:'customerPO', addInward:'inward', addInventory:'inventory', addOutward:'outward', addLogistics:'logistics', addFutureShipment:'futureShipments', addSales:'sales', addAutomation:'automation', addPendingAssembly:'pendingAssembly', addEnquiry:'enquiry', addPurchaseAccount:'purchaseAccounts', addSalesAccount:'salesAccounts'};
 let EDIT_SCHEMAS_BASE_LEN = null;
 function cfDefs(table){ return (CUSTOM_FIELDS && CUSTOM_FIELDS[table]) || []; }
 function cfHeaders(table){ return cfDefs(table).map(f=>`<th>${esc(f.label)}</th>`).join(''); }
