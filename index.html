@@ -1800,7 +1800,7 @@ const IMPORT_SCHEMAS = {
     {key:'date', header:'Date', type:'date'},
     {key:'customer', header:'Customer Name'},
     {key:'customerPO', header:'Customer P.O'},
-    {key:'deliveryDate', header:'Delivery Date', type:'date'},
+    {key:'poDate', header:'P.O Date', type:'date'},
     {key:'item', header:'Item'},
     {key:'qty', header:'Qty'},
     {key:'unitPrice', header:'Unit Price'}
@@ -3222,7 +3222,7 @@ function renderOutward(){
       <div class="field"><label>Date</label><input type="date" id="out-date" value="${today()}" required></div>
       <div class="field"><label>Customer name</label><input type="text" id="out-customer" required></div>
       <div class="field"><label>Customer P.O</label><input type="text" id="out-po" placeholder="Optional"></div>
-      <div class="field"><label>Delivery Date</label><input type="date" id="out-delivery-date"></div>
+      <div class="field"><label>P.O Date</label><input type="date" id="out-po-date"></div>
     </div>
     <div class="out-lines-head">Items in this dispatch</div>
     <div id="out-item-lines">${outItemLineHtml()}</div>
@@ -3234,10 +3234,10 @@ function renderOutward(){
   <div class="panel"><div class="panel-head"><h3>Outward log</h3><div class="panel-head-actions">${importBtn('outward')}${exportBtn('exportOutward')}</div></div>
   <div class="panel-body">
   ${tableToolbar('outward', d.outward)}
-  <table><thead><tr><th>Date</th><th>Customer Name</th><th>Customer P.O</th><th>Delivery Date</th><th>Item</th><th>Qty</th><th>Unit Price</th><th>Total Price</th>${cfHeaders('outward')}<th>Added By</th><th></th></tr></thead><tbody>
+  <table><thead><tr><th>Date</th><th>Customer Name</th><th>Customer P.O</th><th>P.O Date</th><th>Item</th><th>Qty</th><th>Unit Price</th><th>Total Price</th>${cfHeaders('outward')}<th>Added By</th><th></th></tr></thead><tbody>
   ${outwardRows.length===0 ? noMatchRow(10, d.outward.length) :
     outwardRows.map(r=>`<tr>
-      <td>${fd(r.date)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.customer)}</td><td>${esc(r.customerPO)}</td><td>${fd(r.deliveryDate)}</td><td>${esc(r.item)}</td><td>${esc(r.qty)}</td><td>${esc(r.unitPrice)}</td><td>${rowTotal(r.qty, r.unitPrice) || esc(r.totalPrice)}</td>${cfCells('outward', r)}${addedByCell(r)}
+      <td>${fd(r.date)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.customer)}</td><td>${esc(r.customerPO)}</td><td>${fd(r.poDate)}</td><td>${esc(r.item)}</td><td>${esc(r.qty)}</td><td>${esc(r.unitPrice)}</td><td>${rowTotal(r.qty, r.unitPrice) || esc(r.totalPrice)}</td>${cfCells('outward', r)}${addedByCell(r)}
       <td>${actionCell(editBtn('outward', r.id), deleteBtn(`deleteOutward('${r.id}')`))}</td>
     </tr>`).join('')}
   </tbody>${totalFootRow(10 + cfDefs('outward').length, 'Total Value (all matching dispatches)', sumTotal(outwardAll,'qty','unitPrice'))}</table>
@@ -3319,7 +3319,7 @@ async function addOutward(e){
     date: document.getElementById('out-date').value,
     customer: document.getElementById('out-customer').value.trim(),
     customerPO: document.getElementById('out-po').value.trim(),
-    deliveryDate: document.getElementById('out-delivery-date').value
+    poDate: document.getElementById('out-po-date').value
   };
   for(const l of lines){
     const invItem = d.inventory.find(i=>i.id===l.itemId);
@@ -3329,7 +3329,7 @@ async function addOutward(e){
       date: header.date,
       customer: header.customer,
       customerPO: header.customerPO,
-      deliveryDate: header.deliveryDate,
+      poDate: header.poDate,
       item: invItem.name,
       qty: String(l.qty),
       unitPrice: l.unitPrice,
@@ -3344,8 +3344,8 @@ async function addOutward(e){
 }
 function exportOutward(){
   const d = DATA[currentLocation];
-  const headers = ['Date','Customer Name','Customer P.O','Delivery Date','Item','Qty','Unit Price','Total Price','Added By'];
-  const rows = d.outward.map(r=>[r.date, r.customer, r.customerPO, r.deliveryDate, r.item, r.qty, r.unitPrice, r.totalPrice, r.addedBy]);
+  const headers = ['Date','Customer Name','Customer P.O','P.O Date','Item','Qty','Unit Price','Total Price','Added By'];
+  const rows = d.outward.map(r=>[r.date, r.customer, r.customerPO, r.poDate||'', r.item, r.qty, r.unitPrice, r.totalPrice, r.addedBy]);
   cfExportAppend('outward', d.outward, headers, rows);
   exportToExcel(currentLocation+'_Outward', headers, rows);
 }
@@ -5347,7 +5347,7 @@ const EDIT_SCHEMAS = {
     {key:'date', label:'Date', type:'date'},
     {key:'customer', label:'Customer name', type:'text'},
     {key:'customerPO', label:'Customer P.O', type:'text'},
-    {key:'deliveryDate', label:'Delivery Date', type:'date'},
+    {key:'poDate', label:'P.O Date', type:'date'},
     {key:'item', label:'Item', type:'text'},
     {key:'qty', label:'Quantity', type:'number'},
     {key:'unitPrice', label:'Unit Price', type:'number'}
