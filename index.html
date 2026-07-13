@@ -253,6 +253,7 @@ tbody tr:hover{background:rgba(31,68,145,0.04);}
 select.status-select{background:var(--bg); border:1px solid var(--border); color:var(--text); padding:5px 8px; font-family:'IBM Plex Mono',monospace; font-size:11.5px;}
 select.status-select.st-transit{color:#3d8bef; border-color:#3d8bef; font-weight:600;}
 select.status-select.st-delivered{color:var(--success); border-color:var(--success); font-weight:600;}
+select.status-select.st-rejected{color:#e6577a; border-color:#e6577a; font-weight:600;}
 select.status-select.st-executed{color:var(--success); border-color:var(--success); font-weight:600;}
 select.status-select.st-nonexecuted{color:var(--danger); border-color:var(--danger); font-weight:600;}
 
@@ -520,11 +521,12 @@ const TABS = [
   {id:'enquiry', num:'08', label:'Enquiry', icon:'&#129489;&#8205;&#128187;'},
   {id:'accounts', num:'09', label:'Accounts', icon:'&#128176;'},
   {id:'quotation', num:'10', label:'Quotation', icon:'&#128221;'},
+  {id:'hr', num:'11', label:'HR', icon:'&#128101;'},
   {id:'users', num:'', label:'Users', icon:'&#128100;'}
 ];
 
 const ROLE_TABS = {
-  admin: ['dashboard','po','inward','inventory','outward','logistics','sales','automation','enquiry','accounts','quotation','users'],
+  admin: ['dashboard','po','inward','inventory','outward','logistics','sales','automation','enquiry','accounts','quotation','hr','users'],
   stores: ['dashboard','inward','inventory','outward'],
   logistics: ['dashboard','outward','logistics'],
   automation: ['dashboard','automation'],
@@ -575,10 +577,10 @@ const DEFAULT_USERS = [
 ];
 
 function emptyLocationData(){
-  return { inventory:[], po:[], vendorPO:[], customerPO:[], poContractDocs:[], inward:[], outward:[], logistics:[], futureShipments:[], invoice:[], sales:[], automation:[], pendingAssembly:[], enquiry:[], purchaseAccounts:[], salesAccounts:[], quotations:[], quoteCompany:null };
+  return { inventory:[], po:[], vendorPO:[], customerPO:[], poContractDocs:[], inward:[], outward:[], logistics:[], futureShipments:[], invoice:[], sales:[], employees:[], attendance:[], leaves:[], salaries:[], automation:[], pendingAssembly:[], enquiry:[], purchaseAccounts:[], salesAccounts:[], quotations:[], quoteCompany:null };
 }
 function ensureShape(d){
-  const keys = ['inventory','po','vendorPO','customerPO','poContractDocs','inward','outward','logistics','futureShipments','invoice','sales','automation','pendingAssembly','enquiry','purchaseAccounts','salesAccounts','quotations'];
+  const keys = ['inventory','po','vendorPO','customerPO','poContractDocs','inward','outward','logistics','futureShipments','invoice','sales','employees','attendance','leaves','salaries','automation','pendingAssembly','enquiry','purchaseAccounts','salesAccounts','quotations'];
   keys.forEach(k=>{ if(!Array.isArray(d[k])) d[k] = []; });
   return d;
 }
@@ -964,7 +966,7 @@ const AUDIT_MAX = 500;
 const AUDIT_TABLE_LABELS = {
   inventory:'Inventory', po:'Purchase Orders', vendorPO:'Vendor PO', customerPO:'Customer PO',
   poContractDocs:'PO Contract Docs', inward:'Inward', outward:'Outward', logistics:'Logistics',
-  futureShipments:'Future Shipments', invoice:'Invoice', sales:'Sales', automation:'Automation',
+  futureShipments:'Future Shipments', invoice:'Invoice', sales:'Sales', employees:'HR Employees', attendance:'HR Attendance', leaves:'HR Leave', salaries:'HR Salary', automation:'Automation',
   pendingAssembly:'Pending Assembly', enquiry:'Enquiry', purchaseAccounts:'Purchase Accounts',
   salesAccounts:'Sales Accounts', quotations:'Quotations'
 };
@@ -1654,6 +1656,7 @@ function renderTabContent(){
     case 'outward': return renderOutward();
     case 'logistics': return renderLogistics();
     case 'sales': return renderSales();
+    case 'hr': return renderHR();
     case 'automation': return renderAutomation();
     case 'enquiry': return renderEnquiry();
     case 'accounts': return canSeeTab('accounts') ? renderAccounts() : renderDashboard();
@@ -1828,6 +1831,44 @@ const IMPORT_SCHEMAS = {
     {key:'transporter', header:'Transporter'},
     {key:'remarks', header:'Remarks'},
     {key:'assignedTo', header:'Assigned To'}
+  ],
+  employees: [
+    {key:'code', header:'Code'},
+    {key:'name', header:'Name'},
+    {key:'designation', header:'Designation'},
+    {key:'mobile', header:'Mobile'},
+    {key:'email', header:'Email'},
+    {key:'dob', header:'DOB', type:'date'},
+    {key:'joinDate', header:'Join Date', type:'date'},
+    {key:'salary', header:'Monthly Salary'},
+    {key:'address', header:'Address'},
+    {key:'status', header:'Status'}
+  ],
+  attendance: [
+    {key:'date', header:'Date', type:'date'},
+    {key:'employee', header:'Employee'},
+    {key:'status', header:'Status'},
+    {key:'remarks', header:'Remarks'}
+  ],
+  leaves: [
+    {key:'employee', header:'Employee'},
+    {key:'from', header:'From', type:'date'},
+    {key:'to', header:'To', type:'date'},
+    {key:'days', header:'Days'},
+    {key:'type', header:'Type'},
+    {key:'reason', header:'Reason'},
+    {key:'status', header:'Status'}
+  ],
+  salaries: [
+    {key:'month', header:'Month'},
+    {key:'employee', header:'Employee'},
+    {key:'basic', header:'Basic'},
+    {key:'allowances', header:'Allowances'},
+    {key:'deductions', header:'Deductions'},
+    {key:'net', header:'Net Pay'},
+    {key:'paidDate', header:'Paid Date', type:'date'},
+    {key:'mode', header:'Mode'},
+    {key:'remarks', header:'Remarks'}
   ],
   sales: [
     {key:'date', header:'Date', type:'date'},
@@ -2290,6 +2331,9 @@ function renderDashboard(){
   }
   if(allowedTabs.includes('sales')){
     cards.push({val:(d.sales||[]).length, lbl:'Sales entries', ico:'&#128200;'});
+  }
+  if(allowedTabs.includes('hr')){
+    cards.push({val:(d.employees||[]).filter(e=>(e.status||'Active')==='Active').length, lbl:'Active employees', ico:'&#128101;'});
   }
   if(allowedTabs.includes('automation')){
     cards.push({val:d.automation.length, lbl:'Automation jobs', ico:'&#9881;'});
@@ -3714,6 +3758,408 @@ async function deleteSales(id){
   d.sales = (d.sales||[]).filter(x=>x.id!==id);
   await saveLocation(currentLocation);
   render();
+}
+
+/* ---------------- HR ---------------- */
+let hrSection = 'employees';
+function switchHrSection(sec){ hrSection = sec; render(); }
+function hrEnsure(d){
+  d.employees = d.employees || [];
+  d.attendance = d.attendance || [];
+  d.leaves = d.leaves || [];
+  d.salaries = d.salaries || [];
+}
+function nextEmpCode(d){
+  let max = 0;
+  d.employees.forEach(e=>{
+    const m = /^EMP-(\d+)$/.exec(String(e.code||''));
+    if(m) max = Math.max(max, parseInt(m[1]));
+  });
+  return 'EMP-' + String(max+1).padStart(4,'0');
+}
+function hrEmployeeOptions(selected){
+  const d = DATA[currentLocation];
+  hrEnsure(d);
+  const active = d.employees.filter(e=>(e.status||'Active')==='Active');
+  if(active.length===0) return `<option value="">-- Add employees first --</option>`;
+  return `<option value="">-- Select employee --</option>` +
+    active.map(e=>`<option value="${esc(e.name)}" ${selected===e.name?'selected':''}>${esc(e.name)}${e.designation?' ('+esc(e.designation)+')':''}</option>`).join('');
+}
+function renderHR(){
+  const d = DATA[currentLocation];
+  hrEnsure(d);
+  const sections = {
+    employees: hrEmployeesSection(d),
+    attendance: hrAttendanceSection(d),
+    leave: hrLeaveSection(d),
+    salary: hrSalarySection(d)
+  };
+  return `
+  ${tabHeader(currentLocation, 'HR')}
+  <div style="display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap;">
+    <button type="button" class="acct-switch-btn ${hrSection==='employees'?'active':''}" onclick="switchHrSection('employees')">&#128101; Employees</button>
+    <button type="button" class="acct-switch-btn ${hrSection==='attendance'?'active':''}" onclick="switchHrSection('attendance')">&#128197; Attendance</button>
+    <button type="button" class="acct-switch-btn ${hrSection==='leave'?'active':''}" onclick="switchHrSection('leave')">&#127796; Leave</button>
+    <button type="button" class="acct-switch-btn ${hrSection==='salary'?'active':''}" onclick="switchHrSection('salary')">&#128181; Salary</button>
+  </div>
+  ${sections[hrSection] || sections.employees}`;
+}
+
+/* ----- Employees ----- */
+function hrEmployeesSection(d){
+  const all = applyTableTools('employees', d.employees.slice().reverse());
+  const rows = limitRows('employees', all);
+  return `
+  <div class="panel"><div class="panel-head"><h3>New employee</h3></div>
+  <div class="panel-body">
+  <form onsubmit="return addEmployee(event)">
+    <div class="form-grid">
+      <div class="field"><label>Employee code</label><input type="text" id="hr-emp-code" value="${nextEmpCode(d)}" readonly style="background:var(--panel-2);"></div>
+      <div class="field"><label>Name</label><input type="text" id="hr-emp-name" required></div>
+      <div class="field"><label>Designation</label><input type="text" id="hr-emp-desig" placeholder="Optional"></div>
+      <div class="field"><label>Mobile</label><input type="text" id="hr-emp-mobile" placeholder="Optional"></div>
+      <div class="field"><label>Email</label><input type="email" id="hr-emp-email" placeholder="Optional"></div>
+      <div class="field"><label>Date of Birth</label><input type="date" id="hr-emp-dob"></div>
+      <div class="field"><label>Join Date</label><input type="date" id="hr-emp-join" value="${today()}"></div>
+      <div class="field"><label>Monthly Salary</label><input type="number" step="0.01" min="0" id="hr-emp-salary" placeholder="Optional"></div>
+      <div class="field" style="grid-column:1/-1;"><label>Address</label><input type="text" id="hr-emp-address" placeholder="Optional"></div>
+      <button type="submit" class="btn">Add Employee</button>
+    </div>
+  </form>
+  </div></div>
+  <div class="panel"><div class="panel-head"><h3>Employee register</h3><div class="panel-head-actions">${importBtn('employees')}${exportBtn('exportEmployees')}</div></div>
+  <div class="panel-body">
+  ${tableToolbar('employees', d.employees)}
+  <table><thead><tr><th>Code</th><th>Name</th><th>Designation</th><th>Mobile</th><th>Email</th><th>DOB</th><th>Join Date</th><th>Status</th>${cfHeaders('employees')}<th>Added By</th><th></th></tr></thead><tbody>
+  ${rows.length===0 ? noMatchRow(10, d.employees.length) :
+    rows.map(r=>`<tr>
+      <td>${esc(r.code)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.name)}</td><td>${esc(r.designation||'')}</td><td>${esc(r.mobile||'')}</td><td>${esc(r.email||'')}</td><td>${fd(r.dob)}</td><td>${fd(r.joinDate)}</td>
+      <td>
+        <select class="status-select ${(r.status||'Active')==='Active'?'st-delivered':'st-rejected'}" onchange="updateEmployeeStatus('${r.id}', this.value)">
+          <option value="Active" ${(r.status||'Active')==='Active'?'selected':''}>Active</option>
+          <option value="Left" ${r.status==='Left'?'selected':''}>Left</option>
+        </select>
+      </td>${cfCells('employees', r)}${addedByCell(r)}
+      <td>${actionCell(editBtn('employees', r.id), deleteBtn(`deleteEmployee('${r.id}')`))}</td>
+    </tr>`).join('')}
+  </tbody></table>
+  ${showMoreBar('employees', all.length)}
+  </div></div>`;
+}
+async function addEmployee(e){
+  e.preventDefault();
+  const d = DATA[currentLocation];
+  hrEnsure(d);
+  d.employees.push({
+    id: uid(),
+    code: document.getElementById('hr-emp-code').value,
+    name: document.getElementById('hr-emp-name').value.trim(),
+    designation: document.getElementById('hr-emp-desig').value.trim(),
+    mobile: document.getElementById('hr-emp-mobile').value.trim(),
+    email: document.getElementById('hr-emp-email').value.trim(),
+    dob: document.getElementById('hr-emp-dob').value,
+    joinDate: document.getElementById('hr-emp-join').value,
+    salary: document.getElementById('hr-emp-salary').value.trim(),
+    address: document.getElementById('hr-emp-address').value.trim(),
+    status: 'Active',
+    addedBy: actorName()
+  });
+  await saveLocation(currentLocation);
+  render();
+  return false;
+}
+async function updateEmployeeStatus(id, value){
+  const d = DATA[currentLocation];
+  const r = (d.employees||[]).find(x=>x.id===id);
+  if(r){ r.status = value; await saveLocation(currentLocation); render(); }
+}
+async function deleteEmployee(id){
+  if(!isAdmin()) return;
+  const d = DATA[currentLocation];
+  d.employees = (d.employees||[]).filter(x=>x.id!==id);
+  await saveLocation(currentLocation);
+  render();
+}
+function exportEmployees(){
+  const d = DATA[currentLocation];
+  const headers = ['Code','Name','Designation','Mobile','Email','DOB','Join Date','Monthly Salary','Address','Status','Added By'];
+  const rows = (d.employees||[]).map(r=>[r.code, r.name, r.designation||'', r.mobile||'', r.email||'', r.dob||'', r.joinDate||'', r.salary||'', r.address||'', r.status||'Active', r.addedBy]);
+  cfExportAppend('employees', d.employees||[], headers, rows);
+  exportToExcel(currentLocation+'_Employees', headers, rows);
+}
+
+/* ----- Attendance ----- */
+function hrAttendanceSection(d){
+  const all = applyTableTools('attendance', d.attendance.slice().reverse());
+  const rows = limitRows('attendance', all);
+  return `
+  <div class="panel"><div class="panel-head"><h3>Mark attendance</h3></div>
+  <div class="panel-body">
+  <form onsubmit="return addAttendance(event)">
+    <div class="form-grid">
+      <div class="field"><label>Date</label><input type="date" id="hr-att-date" value="${today()}" required></div>
+      <div class="field"><label>Employee</label><select id="hr-att-emp" required>${hrEmployeeOptions()}</select></div>
+      <div class="field"><label>Status</label>
+        <select id="hr-att-status">
+          <option value="Present">Present</option>
+          <option value="Absent">Absent</option>
+          <option value="Half Day">Half Day</option>
+          <option value="On Leave">On Leave</option>
+        </select>
+      </div>
+      <div class="field"><label>Remarks</label><input type="text" id="hr-att-remarks" placeholder="Optional"></div>
+      <button type="submit" class="btn">Mark</button>
+    </div>
+  </form>
+  </div></div>
+  <div class="panel"><div class="panel-head"><h3>Attendance log</h3><div class="panel-head-actions">${importBtn('attendance')}${exportBtn('exportAttendance')}</div></div>
+  <div class="panel-body">
+  ${tableToolbar('attendance', d.attendance)}
+  <table><thead><tr><th>Date</th><th>Employee</th><th>Status</th><th>Remarks</th>${cfHeaders('attendance')}<th>Added By</th><th></th></tr></thead><tbody>
+  ${rows.length===0 ? noMatchRow(7, d.attendance.length) :
+    rows.map(r=>`<tr>
+      <td>${fd(r.date)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.employee)}</td>
+      <td><span style="font-weight:600; color:${r.status==='Present'?'var(--success)':r.status==='Absent'?'#e6577a':'#e08a2e'};">${esc(r.status)}</span></td>
+      <td>${esc(r.remarks||'')}</td>${cfCells('attendance', r)}${addedByCell(r)}
+      <td>${actionCell(editBtn('attendance', r.id), deleteBtn(`deleteAttendance('${r.id}')`))}</td>
+    </tr>`).join('')}
+  </tbody></table>
+  ${showMoreBar('attendance', all.length)}
+  </div></div>`;
+}
+async function addAttendance(e){
+  e.preventDefault();
+  const d = DATA[currentLocation];
+  hrEnsure(d);
+  const emp = document.getElementById('hr-att-emp').value;
+  if(!emp){ alert('Select an employee (add employees in the Employees section first).'); return false; }
+  d.attendance.push({
+    id: uid(),
+    date: document.getElementById('hr-att-date').value,
+    employee: emp,
+    status: document.getElementById('hr-att-status').value,
+    remarks: document.getElementById('hr-att-remarks').value.trim(),
+    addedBy: actorName()
+  });
+  await saveLocation(currentLocation);
+  render();
+  return false;
+}
+async function deleteAttendance(id){
+  if(!isAdmin()) return;
+  const d = DATA[currentLocation];
+  d.attendance = (d.attendance||[]).filter(x=>x.id!==id);
+  await saveLocation(currentLocation);
+  render();
+}
+function exportAttendance(){
+  const d = DATA[currentLocation];
+  const headers = ['Date','Employee','Status','Remarks','Added By'];
+  const rows = (d.attendance||[]).map(r=>[r.date, r.employee, r.status, r.remarks||'', r.addedBy]);
+  cfExportAppend('attendance', d.attendance||[], headers, rows);
+  exportToExcel(currentLocation+'_Attendance', headers, rows);
+}
+
+/* ----- Leave ----- */
+function hrLeaveSection(d){
+  const all = applyTableTools('leaves', d.leaves.slice().reverse());
+  const rows = limitRows('leaves', all);
+  return `
+  <div class="panel"><div class="panel-head"><h3>New leave entry</h3></div>
+  <div class="panel-body">
+  <form onsubmit="return addLeave(event)">
+    <div class="form-grid">
+      <div class="field"><label>Employee</label><select id="hr-lv-emp" required>${hrEmployeeOptions()}</select></div>
+      <div class="field"><label>From</label><input type="date" id="hr-lv-from" required oninput="lvCalcDays()"></div>
+      <div class="field"><label>To</label><input type="date" id="hr-lv-to" required oninput="lvCalcDays()"></div>
+      <div class="field"><label>Days</label><input type="number" id="hr-lv-days" placeholder="Auto" readonly style="background:var(--panel-2);"></div>
+      <div class="field"><label>Type</label>
+        <select id="hr-lv-type">
+          <option value="Casual">Casual</option>
+          <option value="Sick">Sick</option>
+          <option value="Earned">Earned</option>
+          <option value="Unpaid">Unpaid</option>
+        </select>
+      </div>
+      <div class="field"><label>Reason</label><input type="text" id="hr-lv-reason" placeholder="Optional"></div>
+      <button type="submit" class="btn">Add Leave</button>
+    </div>
+  </form>
+  </div></div>
+  <div class="panel"><div class="panel-head"><h3>Leave register</h3><div class="panel-head-actions">${importBtn('leaves')}${exportBtn('exportLeaves')}</div></div>
+  <div class="panel-body">
+  ${tableToolbar('leaves', d.leaves)}
+  <table><thead><tr><th>Employee</th><th>From</th><th>To</th><th>Days</th><th>Type</th><th>Reason</th><th>Status</th>${cfHeaders('leaves')}<th>Added By</th><th></th></tr></thead><tbody>
+  ${rows.length===0 ? noMatchRow(10, d.leaves.length) :
+    rows.map(r=>`<tr>
+      <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.employee)}</td><td>${fd(r.from)}</td><td>${fd(r.to)}</td><td>${esc(r.days)}</td><td>${esc(r.type)}</td><td>${esc(r.reason||'')}</td>
+      <td>
+        <select class="status-select ${r.status==='Approved'?'st-delivered':r.status==='Rejected'?'st-rejected':'st-transit'}" onchange="updateLeaveStatus('${r.id}', this.value)">
+          <option value="Pending" ${(r.status||'Pending')==='Pending'?'selected':''}>Pending</option>
+          <option value="Approved" ${r.status==='Approved'?'selected':''}>Approved</option>
+          <option value="Rejected" ${r.status==='Rejected'?'selected':''}>Rejected</option>
+        </select>
+      </td>${cfCells('leaves', r)}${addedByCell(r)}
+      <td>${actionCell(editBtn('leaves', r.id), deleteBtn(`deleteLeave('${r.id}')`))}</td>
+    </tr>`).join('')}
+  </tbody></table>
+  ${showMoreBar('leaves', all.length)}
+  </div></div>`;
+}
+function lvCalcDays(){
+  const f = (document.getElementById('hr-lv-from')||{}).value;
+  const t = (document.getElementById('hr-lv-to')||{}).value;
+  const el = document.getElementById('hr-lv-days');
+  if(!el) return;
+  if(f && t){
+    const days = Math.round((new Date(t) - new Date(f)) / 86400000) + 1;
+    el.value = days > 0 ? days : '';
+  } else el.value = '';
+}
+async function addLeave(e){
+  e.preventDefault();
+  const d = DATA[currentLocation];
+  hrEnsure(d);
+  const emp = document.getElementById('hr-lv-emp').value;
+  if(!emp){ alert('Select an employee (add employees in the Employees section first).'); return false; }
+  const from = document.getElementById('hr-lv-from').value;
+  const to = document.getElementById('hr-lv-to').value;
+  if(from && to && new Date(to) < new Date(from)){ alert('"To" date cannot be before "From" date.'); return false; }
+  d.leaves.push({
+    id: uid(),
+    employee: emp,
+    from: from,
+    to: to,
+    days: document.getElementById('hr-lv-days').value,
+    type: document.getElementById('hr-lv-type').value,
+    reason: document.getElementById('hr-lv-reason').value.trim(),
+    status: 'Pending',
+    addedBy: actorName()
+  });
+  await saveLocation(currentLocation);
+  render();
+  return false;
+}
+async function updateLeaveStatus(id, value){
+  const d = DATA[currentLocation];
+  const r = (d.leaves||[]).find(x=>x.id===id);
+  if(r){ r.status = value; await saveLocation(currentLocation); render(); }
+}
+async function deleteLeave(id){
+  if(!isAdmin()) return;
+  const d = DATA[currentLocation];
+  d.leaves = (d.leaves||[]).filter(x=>x.id!==id);
+  await saveLocation(currentLocation);
+  render();
+}
+function exportLeaves(){
+  const d = DATA[currentLocation];
+  const headers = ['Employee','From','To','Days','Type','Reason','Status','Added By'];
+  const rows = (d.leaves||[]).map(r=>[r.employee, r.from, r.to, r.days, r.type, r.reason||'', r.status||'Pending', r.addedBy]);
+  cfExportAppend('leaves', d.leaves||[], headers, rows);
+  exportToExcel(currentLocation+'_Leaves', headers, rows);
+}
+
+/* ----- Salary ----- */
+function hrSalarySection(d){
+  const all = applyTableTools('salaries', d.salaries.slice().reverse());
+  const rows = limitRows('salaries', all);
+  return `
+  <div class="panel"><div class="panel-head"><h3>New salary entry</h3></div>
+  <div class="panel-body">
+  <form onsubmit="return addSalary(event)">
+    <div class="form-grid">
+      <div class="field"><label>Month</label><input type="month" id="hr-sal-month" required></div>
+      <div class="field"><label>Employee</label><select id="hr-sal-emp" onchange="salPrefillBasic()" required>${hrEmployeeOptions()}</select></div>
+      <div class="field"><label>Basic</label><input type="number" step="0.01" min="0" id="hr-sal-basic" oninput="salCalcNet()" required></div>
+      <div class="field"><label>Allowances</label><input type="number" step="0.01" min="0" id="hr-sal-allow" placeholder="Optional" oninput="salCalcNet()"></div>
+      <div class="field"><label>Deductions</label><input type="number" step="0.01" min="0" id="hr-sal-ded" placeholder="Optional" oninput="salCalcNet()"></div>
+      <div class="field"><label>Net Pay</label><input type="number" step="0.01" id="hr-sal-net" placeholder="Auto" readonly style="background:var(--panel-2);"></div>
+      <div class="field"><label>Paid Date</label><input type="date" id="hr-sal-paiddate"></div>
+      <div class="field"><label>Mode</label>
+        <select id="hr-sal-mode">
+          <option value="Bank Transfer">Bank Transfer</option>
+          <option value="Cash">Cash</option>
+          <option value="UPI">UPI</option>
+          <option value="Cheque">Cheque</option>
+        </select>
+      </div>
+      <div class="field"><label>Remarks</label><input type="text" id="hr-sal-remarks" placeholder="Optional"></div>
+      <button type="submit" class="btn">Add Salary</button>
+    </div>
+  </form>
+  </div></div>
+  <div class="panel"><div class="panel-head"><h3>Salary register</h3><div class="panel-head-actions">${importBtn('salaries')}${exportBtn('exportSalaries')}</div></div>
+  <div class="panel-body">
+  ${tableToolbar('salaries', d.salaries)}
+  <table><thead><tr><th>Month</th><th>Employee</th><th>Basic</th><th>Allowances</th><th>Deductions</th><th>Net Pay</th><th>Paid Date</th><th>Mode</th>${cfHeaders('salaries')}<th>Added By</th><th></th></tr></thead><tbody>
+  ${rows.length===0 ? noMatchRow(11, d.salaries.length) :
+    rows.map(r=>`<tr>
+      <td>${esc(r.month)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.employee)}</td>
+      <td>${r.basic!=='' && r.basic!=null ? '&#8377; '+fmt2(r.basic) : ''}</td>
+      <td>${r.allowances!=='' && r.allowances!=null ? '&#8377; '+fmt2(r.allowances) : ''}</td>
+      <td>${r.deductions!=='' && r.deductions!=null ? '&#8377; '+fmt2(r.deductions) : ''}</td>
+      <td style="font-weight:600;">${r.net!=='' && r.net!=null ? '&#8377; '+fmt2(r.net) : ''}</td>
+      <td>${fd(r.paidDate)}</td><td>${esc(r.mode||'')}</td>${cfCells('salaries', r)}${addedByCell(r)}
+      <td>${actionCell(editBtn('salaries', r.id), deleteBtn(`deleteSalary('${r.id}')`))}</td>
+    </tr>`).join('')}
+  </tbody></table>
+  ${showMoreBar('salaries', all.length)}
+  </div></div>`;
+}
+function salPrefillBasic(){
+  const d = DATA[currentLocation];
+  const name = (document.getElementById('hr-sal-emp')||{}).value;
+  const emp = (d.employees||[]).find(e=>e.name===name);
+  const el = document.getElementById('hr-sal-basic');
+  if(el && emp && emp.salary && !el.value){ el.value = emp.salary; salCalcNet(); }
+}
+function salCalcNet(){
+  const b = parseFloat((document.getElementById('hr-sal-basic')||{}).value)||0;
+  const a = parseFloat((document.getElementById('hr-sal-allow')||{}).value)||0;
+  const dd = parseFloat((document.getElementById('hr-sal-ded')||{}).value)||0;
+  const el = document.getElementById('hr-sal-net');
+  if(el) el.value = (b||a||dd) ? (b + a - dd).toFixed(2) : '';
+}
+async function addSalary(e){
+  e.preventDefault();
+  const d = DATA[currentLocation];
+  hrEnsure(d);
+  const emp = document.getElementById('hr-sal-emp').value;
+  if(!emp){ alert('Select an employee (add employees in the Employees section first).'); return false; }
+  const b = parseFloat(document.getElementById('hr-sal-basic').value)||0;
+  const a = parseFloat(document.getElementById('hr-sal-allow').value)||0;
+  const dd = parseFloat(document.getElementById('hr-sal-ded').value)||0;
+  d.salaries.push({
+    id: uid(),
+    month: document.getElementById('hr-sal-month').value,
+    employee: emp,
+    basic: b || '',
+    allowances: a || '',
+    deductions: dd || '',
+    net: (b||a||dd) ? +(b + a - dd).toFixed(2) : '',
+    paidDate: document.getElementById('hr-sal-paiddate').value,
+    mode: document.getElementById('hr-sal-mode').value,
+    remarks: document.getElementById('hr-sal-remarks').value.trim(),
+    addedBy: actorName()
+  });
+  await saveLocation(currentLocation);
+  render();
+  return false;
+}
+async function deleteSalary(id){
+  if(!isAdmin()) return;
+  const d = DATA[currentLocation];
+  d.salaries = (d.salaries||[]).filter(x=>x.id!==id);
+  await saveLocation(currentLocation);
+  render();
+}
+function exportSalaries(){
+  const d = DATA[currentLocation];
+  const headers = ['Month','Employee','Basic','Allowances','Deductions','Net Pay','Paid Date','Mode','Remarks','Added By'];
+  const rows = (d.salaries||[]).map(r=>[r.month, r.employee, r.basic, r.allowances, r.deductions, r.net, r.paidDate||'', r.mode||'', r.remarks||'', r.addedBy]);
+  cfExportAppend('salaries', d.salaries||[], headers, rows);
+  exportToExcel(currentLocation+'_Salaries', headers, rows);
 }
 
 /* ---------------- AUTOMATION ---------------- */
@@ -5376,6 +5822,43 @@ const EDIT_SCHEMAS = {
     {key:'remarks', label:'Remarks', type:'text'},
     {key:'assignedTo', label:'Assigned To', type:'text'}
   ],
+  employees: [
+    {key:'code', label:'Employee code', type:'text'},
+    {key:'name', label:'Name', type:'text'},
+    {key:'designation', label:'Designation', type:'text'},
+    {key:'mobile', label:'Mobile', type:'text'},
+    {key:'email', label:'Email', type:'text'},
+    {key:'dob', label:'Date of Birth', type:'date'},
+    {key:'joinDate', label:'Join Date', type:'date'},
+    {key:'salary', label:'Monthly Salary', type:'number'},
+    {key:'address', label:'Address', type:'text'},
+    {key:'status', label:'Status', type:'select', options:['Active','Left']}
+  ],
+  attendance: [
+    {key:'date', label:'Date', type:'date'},
+    {key:'employee', label:'Employee', type:'text'},
+    {key:'status', label:'Status', type:'select', options:['Present','Absent','Half Day','On Leave']},
+    {key:'remarks', label:'Remarks', type:'text'}
+  ],
+  leaves: [
+    {key:'employee', label:'Employee', type:'text'},
+    {key:'from', label:'From', type:'date'},
+    {key:'to', label:'To', type:'date'},
+    {key:'days', label:'Days', type:'number'},
+    {key:'type', label:'Type', type:'select', options:['Casual','Sick','Earned','Unpaid']},
+    {key:'reason', label:'Reason', type:'text'},
+    {key:'status', label:'Status', type:'select', options:['Pending','Approved','Rejected']}
+  ],
+  salaries: [
+    {key:'month', label:'Month (YYYY-MM)', type:'text'},
+    {key:'employee', label:'Employee', type:'text'},
+    {key:'basic', label:'Basic', type:'number'},
+    {key:'allowances', label:'Allowances', type:'number'},
+    {key:'deductions', label:'Deductions', type:'number'},
+    {key:'paidDate', label:'Paid Date', type:'date'},
+    {key:'mode', label:'Mode', type:'select', options:['Bank Transfer','Cash','UPI','Cheque']},
+    {key:'remarks', label:'Remarks', type:'text'}
+  ],
   sales: [
     {key:'date', label:'Date', type:'date'},
     {key:'customer', label:'Customer name', type:'text'},
@@ -5625,6 +6108,14 @@ async function saveEditModal(){
     const qty = parseFloat(record.qty)||0;
     const unitPrice = parseFloat(record.unitPrice)||0;
     record.totalValue = (qty && unitPrice) ? (qty*unitPrice) : '';
+  }
+  if(table==='salaries'){
+    const b = parseFloat(record.basic)||0, a = parseFloat(record.allowances)||0, dd = parseFloat(record.deductions)||0;
+    record.net = (b||a||dd) ? +(b + a - dd).toFixed(2) : '';
+  }
+  if(table==='leaves' && record.from && record.to){
+    const days = Math.round((new Date(record.to) - new Date(record.from)) / 86400000) + 1;
+    if(days > 0) record.days = days;
   }
   if(table==='enquiry' && !record.action) record.action = 'Pending';
   if(table==='salesAccounts' && String(record.taxable||'').trim()!==''){
@@ -6133,11 +6624,11 @@ function exportQuotationLog(){
 let CUSTOM_FIELDS = {}; /* {table: [{key,label,type,options[]}]} - stored globally with users doc */
 const CF_TABLES = [
   ['vendorPO','Vendor P.O'],['customerPO','Customer P.O'],['inward','Inward'],['inventory','Inventory'],
-  ['outward','Outward'],['logistics','Logistics'],['futureShipments','Future Shipments'],['sales','Sales'],
+  ['outward','Outward'],['logistics','Logistics'],['futureShipments','Future Shipments'],['sales','Sales'],['employees','HR - Employees'],['attendance','HR - Attendance'],['leaves','HR - Leave'],['salaries','HR - Salary'],
   ['automation','Automation'],['pendingAssembly','Pending Assembly'],['enquiry','Enquiry'],
   ['purchaseAccounts','Accounts - Purchase'],['salesAccounts','Accounts - Sales']
 ];
-const CF_FORM_MAP = {addVendorPO:'vendorPO', addCustomerPO:'customerPO', addInward:'inward', addInventory:'inventory', addOutward:'outward', addLogistics:'logistics', addFutureShipment:'futureShipments', addSales:'sales', addAutomation:'automation', addPendingAssembly:'pendingAssembly', addEnquiry:'enquiry', addPurchaseAccount:'purchaseAccounts', addSalesAccount:'salesAccounts'};
+const CF_FORM_MAP = {addVendorPO:'vendorPO', addCustomerPO:'customerPO', addInward:'inward', addInventory:'inventory', addOutward:'outward', addLogistics:'logistics', addFutureShipment:'futureShipments', addSales:'sales', addEmployee:'employees', addAttendance:'attendance', addLeave:'leaves', addSalary:'salaries', addAutomation:'automation', addPendingAssembly:'pendingAssembly', addEnquiry:'enquiry', addPurchaseAccount:'purchaseAccounts', addSalesAccount:'salesAccounts'};
 let EDIT_SCHEMAS_BASE_LEN = null;
 function cfDefs(table){ return (CUSTOM_FIELDS && CUSTOM_FIELDS[table]) || []; }
 function cfHeaders(table){ return cfDefs(table).map(f=>`<th>${esc(f.label)}</th>`).join(''); }

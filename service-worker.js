@@ -24,7 +24,7 @@
  * ============================================================
  */
 
-const CACHE_NAME = 'tekflow-erp-v1';
+const CACHE_NAME = 'tekflow-erp-v2';
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
@@ -47,9 +47,27 @@ self.addEventListener('fetch', (event) => {
   // go straight to the network so the app never shows stale business data.
   if (req.url.includes('googleapis.com')) return;
 
-  // Stale-while-revalidate for everything else (the app shell itself,
-  // fonts, the xlsx library, etc.) - instant load from cache, then
-  // quietly refreshes the cache in the background for next time.
+  // NETWORK-FIRST for the app page itself: always try to fetch the
+  // latest index.html when online so every deploy shows up on the very
+  // next reload. Fall back to the cached copy only when offline.
+  if (req.mode === 'navigate' || req.destination === 'document') {
+    event.respondWith(
+      fetch(req)
+        .then((response) => {
+          if (response && response.status === 200) {
+            const copy = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
+          }
+          return response;
+        })
+        .catch(() => caches.match(req))
+    );
+    return;
+  }
+
+  // Stale-while-revalidate for static assets (fonts, the xlsx library,
+  // icons, etc.) - instant load from cache, then quietly refreshes the
+  // cache in the background for next time.
   event.respondWith(
     caches.match(req).then((cached) => {
       const network = fetch(req)
