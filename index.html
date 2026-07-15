@@ -124,6 +124,8 @@ h1,h2,h3,.stencil{font-family:'Oswald', sans-serif; text-transform:uppercase; le
 .btn-danger{background:var(--danger); color:#fff;}
 .btn-sm{padding:6px 12px; font-size:11px;}
 .login-error{background:rgba(224,85,90,0.12); border:1px solid var(--danger); color:#ffb4b6; padding:10px 12px; font-size:13px; margin-bottom:16px;}
+.login-success{background:rgba(72,187,120,0.12); border:1px solid var(--success); color:#9be3b4; padding:10px 12px; font-size:13px; margin-bottom:16px;}
+.forgot-row{margin-top:12px; text-align:center;}
 
 /* ---------- APP SHELL ---------- */
 .shell{display:flex; min-height:100vh;}
@@ -836,7 +838,7 @@ async function fsGet(docId){
       fetch(FS_REST_BASE + docId, { method:'GET' }),
       FS_TIMEOUT_MS, 'Reading '+docId
     );
-    if(res.status === 404) return null;
+    if(res.status === 404){ firebaseLoadError = null; fsGetLastStatus = 'missing'; return null; }
     if(!res.ok){
       let detail = '';
       try{ const j = await res.json(); detail = (j.error && j.error.message) || ''; }catch(e2){}
@@ -845,13 +847,17 @@ async function fsGet(docId){
     const json = await res.json();
     const raw = json.fields && json.fields.data && json.fields.data.stringValue;
     firebaseLoadError = null;
+    fsGetLastStatus = 'ok';
     return raw ? JSON.parse(raw) : null;
   }catch(e){
     console.error('fsGet failed', docId, e);
     firebaseLoadError = 'DB error (read '+docId+'): '+e.message;
+    fsGetLastStatus = 'error';
     return null;
   }
 }
+/* 'ok' | 'missing' (confirmed 404) | 'error' (network/timeout - data may still exist!) */
+let fsGetLastStatus = 'ok';
 async function fsSet(docId, data){
   if(!firebaseReady) return false;
   try{
@@ -894,7 +900,16 @@ function readSessionLocal(){
 }
 
 async function loadUsers(){
-  const doc = await fsGet('users');
+  /* Retry up to 3 times - a temporary network failure must NEVER be treated
+     as "no users exist", otherwise the cloud user list gets overwritten
+     with defaults and every real user is wiped. */
+  let doc = null;
+  for(let attempt = 1; attempt <= 3; attempt++){
+    doc = await fsGet('users');
+    if(doc || fsGetLastStatus === 'missing') break;   /* got data, or confirmed 404 */
+    console.warn('loadUsers: read attempt '+attempt+' failed, retrying...');
+    await new Promise(r => setTimeout(r, 800 * attempt));
+  }
   if(doc && Array.isArray(doc.list)){
     USERS = doc.list;
     CUSTOM_ROLES = (doc.roles && typeof doc.roles==='object' && !Array.isArray(doc.roles)) ? doc.roles : {};
@@ -936,7 +951,15 @@ async function loadUsers(){
   syncRoleOptions();
   syncCustomFieldSchemas();
   snapshotUsersState();
-  await fsSet('users', {list: USERS, roles: CUSTOM_ROLES, customFields: CUSTOM_FIELDS});
+  if(fsGetLastStatus === 'missing'){
+    /* Confirmed: the users document really does not exist -> safe to seed defaults. */
+    await fsSet('users', {list: USERS, roles: CUSTOM_ROLES, customFields: CUSTOM_FIELDS});
+  }else{
+    /* The read FAILED (network/timeout). The real users very likely still exist
+       in Firestore - do NOT overwrite them. Use defaults in memory only and
+       surface the DB error banner so the problem is visible. */
+    console.error('loadUsers: could not read users after retries - NOT overwriting cloud users.');
+  }
 }
 
 async function saveUsers(){
@@ -1276,8 +1299,10 @@ const GA_ICON_SVG = `<svg width="24" height="24" viewBox="0 0 48 48" xmlns="http
   <line x1="24" y1="24" x2="32.5" y2="38.7" stroke="#34A853" stroke-width="9" stroke-linecap="round"/>
 </svg>`;
 const MAX_LOGIN_ATTEMPTS = 3;
-let loginStage = 'creds';        /* 'creds' | 'totp-setup' | 'totp-verify' */
+let loginStage = 'creds';        /* 'creds' | 'totp-setup' | 'totp-verify' | 'forgot-user' | 'forgot-totp' | 'forgot-reset' */
 let pendingLoginUser = null;     /* username that passed the password check */
+let forgotUser = null;           /* username going through the forgot-password flow */
+let loginNotice = '';            /* green success message on the login screen */
 let pendingTotpSecret = null;    /* secret being registered during first-time setup */
 
 const B32_ALPH = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
@@ -1362,7 +1387,9 @@ function resetLoginStage(){
   loginStage = 'creds';
   pendingLoginUser = null;
   pendingTotpSecret = null;
+  forgotUser = null;
   loginError = '';
+  loginNotice = '';
   render();
 }
 async function completeLogin(found){
@@ -1439,6 +1466,132 @@ async function resetUserTotp(username){
   render();
 }
 
+/* ---------------- FORGOT PASSWORD ---------------- */
+function startForgotPassword(){
+  loginStage = 'forgot-user';
+  forgotUser = null;
+  loginError = '';
+  loginNotice = '';
+  render();
+}
+function forgotSubmitUser(e){
+  if(e) e.preventDefault();
+  const u = (document.getElementById('forgot-user')||{value:''}).value.trim();
+  const found = USERS.find(x=>x.username===u);
+  if(!found){
+    loginError = 'Username not found.';
+    render();
+    return false;
+  }
+  if(found.blocked){
+    loginError = blockedMsg();
+    render();
+    return false;
+  }
+  if(!found.totpSecret){
+    loginError = 'This account has not registered Google Authenticator yet, so the password cannot be reset here. Ask an admin to set a new password from the Users tab.';
+    render();
+    return false;
+  }
+  forgotUser = found.username;
+  loginError = '';
+  loginStage = 'forgot-totp';
+  render();
+  return false;
+}
+async function forgotVerifyTotp(e){
+  if(e) e.preventDefault();
+  const found = USERS.find(x=>x.username===forgotUser);
+  if(!found){ resetLoginStage(); return false; }
+  if(found.blocked){ loginError = blockedMsg(); loginStage='creds'; forgotUser=null; render(); return false; }
+  const code = (document.getElementById('forgot-totp-code')||{}).value || '';
+  if(await verifyTotp(found.totpSecret, code)){
+    loginError = '';
+    loginStage = 'forgot-reset';
+    render();
+  }else{
+    await recordFailedAttempt(found, 'wrong authenticator code (forgot password)');
+    if(found.blocked){
+      loginError = blockedMsg();
+      loginStage = 'creds';
+      forgotUser = null;
+    }else{
+      loginError = 'Wrong authenticator code.' + attemptsLeftMsg(found);
+    }
+    render();
+  }
+  return false;
+}
+async function forgotSetPassword(e){
+  if(e) e.preventDefault();
+  const found = USERS.find(x=>x.username===forgotUser);
+  if(!found){ resetLoginStage(); return false; }
+  const p1 = (document.getElementById('forgot-new-pass')||{value:''}).value;
+  const p2 = (document.getElementById('forgot-confirm-pass')||{value:''}).value;
+  if(p1.length < 6){ loginError = 'New password must be at least 6 characters.'; render(); return false; }
+  if(p1 !== p2){ loginError = 'Passwords do not match.'; render(); return false; }
+  if(p1 === found.password){ loginError = 'New password must be different from the old password.'; render(); return false; }
+  found.password = p1;
+  found.failedAttempts = 0;
+  await saveUsers();
+  logAudit('USER ADMIN', 'Password reset via forgot-password for "'+found.username+'"');
+  loginStage = 'creds';
+  forgotUser = null;
+  loginError = '';
+  loginNotice = 'Password changed. Sign in with your new password.';
+  render();
+  return false;
+}
+
+/* ---------------- CHANGE PASSWORD (logged in) ---------------- */
+function openChangePassword(){
+  closeChangePassword();
+  const modalHtml = `
+  <div id="change-pass-modal-root" class="modal-overlay">
+    <div class="modal-card" style="max-width:420px;">
+      <div class="modal-head"><h3>Change Password</h3><button class="icon-btn" onclick="closeChangePassword()">Close</button></div>
+      <div class="modal-body">
+        <div id="cp-error" class="login-error" style="display:none;"></div>
+        <div class="field"><label>Current password</label><input type="password" id="cp-current" autocomplete="current-password"></div>
+        <div class="field"><label>New password (min 6 characters)</label><input type="password" id="cp-new" autocomplete="new-password"></div>
+        <div class="field"><label>Confirm new password</label><input type="password" id="cp-confirm" autocomplete="new-password"></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeChangePassword()">Cancel</button>
+        <button class="btn" onclick="submitChangePassword()">Change Password</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend', modalHtml);
+  const el = document.getElementById('cp-current');
+  if(el) el.focus();
+}
+function closeChangePassword(){
+  const el = document.getElementById('change-pass-modal-root');
+  if(el) el.remove();
+}
+function cpError(msg){
+  const el = document.getElementById('cp-error');
+  if(el){ el.textContent = msg; el.style.display = 'block'; }
+}
+async function submitChangePassword(){
+  if(!session) return;
+  const me = USERS.find(x=>x.username===session.username);
+  if(!me){ cpError('Your account could not be found. Sign in again.'); return; }
+  const cur = (document.getElementById('cp-current')||{value:''}).value;
+  const p1 = (document.getElementById('cp-new')||{value:''}).value;
+  const p2 = (document.getElementById('cp-confirm')||{value:''}).value;
+  if(cur !== me.password){ cpError('Current password is incorrect.'); return; }
+  if(p1.length < 6){ cpError('New password must be at least 6 characters.'); return; }
+  if(p1 === cur){ cpError('New password must be different from the current password.'); return; }
+  if(p1 !== p2){ cpError('New passwords do not match.'); return; }
+  me.password = p1;
+  await saveUsers();
+  logAudit('USER ADMIN', 'Password changed by "'+me.username+'" (change password)');
+  closeChangePassword();
+  alert('Password changed successfully. Use the new password at your next sign in.');
+}
+
 /* ---------------- LOGIN ---------------- */
 function renderLogin(){
   return `
@@ -1448,6 +1601,7 @@ function renderLogin(){
       <div class="login-logo"><img src="${LOGO_DATA_URI}" alt="Somtek Valves &amp; Pumping Solutions"></div>
       <div class="login-sub">Inventory &amp; Logistics Control &mdash; SOMTEK / EVISSAT</div>
       ${loginError ? `<div class="login-error">${esc(loginError)}</div>` : ''}
+      ${loginNotice ? `<div class="login-success">${esc(loginNotice)}</div>` : ''}
       ${loginStage==='totp-setup' ? `
       <div style="text-align:center;">
         <div style="font-family:'Oswald',sans-serif; font-size:14px; letter-spacing:0.06em; text-transform:uppercase; margin-bottom:6px;">Register Google Authenticator</div>
@@ -1483,6 +1637,61 @@ function renderLogin(){
         </form>
         <div style="margin-top:10px;"><span class="logout-link" onclick="resetLoginStage()">&larr; Back to sign in</span></div>
       </div>
+      ` : loginStage==='forgot-user' ? `
+      <div>
+        <div style="font-family:'Oswald',sans-serif; font-size:14px; letter-spacing:0.06em; text-transform:uppercase; margin-bottom:6px; text-align:center;">Forgot Password</div>
+        <p style="font-size:12px; color:var(--muted); margin:0 0 12px 0;">Enter your username. You will verify with your <b>Google Authenticator</b> code and then set a new password.</p>
+        <form onsubmit="return forgotSubmitUser(event)">
+          <div class="field icon-field">
+            <label>Username</label>
+            <div class="icon-field-row">
+              <span class="field-ico">&#128100;</span>
+              <input type="text" id="forgot-user" autocomplete="username" required>
+            </div>
+          </div>
+          <button type="submit" class="btn btn-block">Continue</button>
+        </form>
+        <div style="margin-top:10px; text-align:center;"><span class="logout-link" onclick="resetLoginStage()">&larr; Back to sign in</span></div>
+      </div>
+      ` : loginStage==='forgot-totp' ? `
+      <div style="text-align:center;">
+        <div style="font-family:'Oswald',sans-serif; font-size:14px; letter-spacing:0.06em; text-transform:uppercase; margin-bottom:6px;">Verify It's You</div>
+        <p style="font-size:12px; color:var(--muted); margin:0 0 12px 0;">Enter the 6-digit code from <b>Google Authenticator</b> for <b>${esc(forgotUser||'')}</b>.</p>
+        <form onsubmit="return forgotVerifyTotp(event)">
+          <div class="field icon-field">
+            <label>Authenticator code</label>
+            <div class="icon-field-row">
+              <span class="field-ico" style="display:flex; align-items:center;">${GA_ICON_SVG}</span>
+              <input type="text" id="forgot-totp-code" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" placeholder="123456" required>
+            </div>
+          </div>
+          <button type="submit" class="btn btn-block">Verify</button>
+        </form>
+        <div style="margin-top:10px;"><span class="logout-link" onclick="resetLoginStage()">&larr; Back to sign in</span></div>
+      </div>
+      ` : loginStage==='forgot-reset' ? `
+      <div>
+        <div style="font-family:'Oswald',sans-serif; font-size:14px; letter-spacing:0.06em; text-transform:uppercase; margin-bottom:6px; text-align:center;">Set New Password</div>
+        <p style="font-size:12px; color:var(--muted); margin:0 0 12px 0;">Choose a new password for <b>${esc(forgotUser||'')}</b> (minimum 6 characters).</p>
+        <form onsubmit="return forgotSetPassword(event)">
+          <div class="field icon-field">
+            <label>New password</label>
+            <div class="icon-field-row">
+              <span class="field-ico">&#128274;</span>
+              <input type="password" id="forgot-new-pass" autocomplete="new-password" required>
+            </div>
+          </div>
+          <div class="field icon-field">
+            <label>Confirm new password</label>
+            <div class="icon-field-row">
+              <span class="field-ico">&#128274;</span>
+              <input type="password" id="forgot-confirm-pass" autocomplete="new-password" required>
+            </div>
+          </div>
+          <button type="submit" class="btn btn-block">Save New Password</button>
+        </form>
+        <div style="margin-top:10px; text-align:center;"><span class="logout-link" onclick="resetLoginStage()">&larr; Back to sign in</span></div>
+      </div>
       ` : `
       <form onsubmit="return handleLogin(event)">
         <div class="field icon-field">
@@ -1501,6 +1710,7 @@ function renderLogin(){
         </div>
         <button type="submit" class="btn btn-block">Sign In</button>
       </form>
+      <div class="forgot-row"><span class="logout-link" onclick="startForgotPassword()">Forgot password?</span></div>
       `}
     </div>
   </div>`;
@@ -1508,6 +1718,7 @@ function renderLogin(){
 
 async function handleLogin(e){
   e.preventDefault();
+  loginNotice = '';
   const u = document.getElementById('login-user').value.trim();
   const p = document.getElementById('login-pass').value;
   const found = USERS.find(x=>x.username===u);
@@ -1678,6 +1889,7 @@ function topbarUserBadge(){
   return `<div class="topbar-user">
     ${avatar}
     <div class="info"><div class="u-name">${esc(session.name)}</div><div class="u-role">${esc(session.role)} &middot; ${esc(session.username)}</div></div>
+    <div class="logout-link" onclick="openChangePassword()">Change password</div>
     <div class="logout-link" onclick="handleLogout()">Sign out</div>
   </div>`;
 }
