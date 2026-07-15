@@ -1356,12 +1356,40 @@ function applyLocationBranding(){
     if(link) link.href = inEvissat ? EVISSAT_ICON_DATA_URI : LOGO_DATA_URI;
   }catch(e){}
 }
+/* Remember where every scrollable element inside #app is scrolled to, so a
+   re-render (auto-sync, recalculation, etc.) does not jump tables back to
+   the left / top. Positions are matched by element order, which is stable
+   because the same tab re-renders with the same structure. */
+function captureScrollPositions(){
+  const app = document.getElementById('app');
+  if(!app) return [];
+  const snap = [];
+  const els = app.querySelectorAll('*');
+  for(let i=0; i<els.length; i++){
+    const el = els[i];
+    if(el.scrollLeft || el.scrollTop) snap.push({i: i, left: el.scrollLeft, top: el.scrollTop});
+  }
+  return snap;
+}
+function restoreScrollPositions(snap){
+  if(!snap || !snap.length) return;
+  const app = document.getElementById('app');
+  if(!app) return;
+  const els = app.querySelectorAll('*');
+  snap.forEach(s=>{
+    const el = els[s.i];
+    if(el){ el.scrollLeft = s.left; el.scrollTop = s.top; }
+  });
+}
 function render(customHtml){
+  const scrollSnap = captureScrollPositions();
   applyLocationBranding();
   const app = document.getElementById('app');
   const banner = errorBanner();
   if(customHtml){ app.innerHTML = banner + customHtml; return; }
   app.innerHTML = banner + (session ? (locationChosen ? renderShell() : renderLocationPicker()) : renderLogin());
+  restoreScrollPositions(scrollSnap);
+  setTimeout(()=>restoreScrollPositions(scrollSnap), 0);
   if(!session && loginStage==='totp-setup'){ setTimeout(()=>{ try{ renderLoginTotpQr(); }catch(e){} }, 0); }
   if(!session){ setTimeout(()=>{ const el=document.getElementById('totp-code'); if(el) el.focus(); }, 0); }
   if(session && locationChosen && currentTab==='quotation'){ setTimeout(()=>{ try{ updateQuoteTotals(); }catch(e){} }, 0); }
@@ -2298,7 +2326,8 @@ const IMPORT_SCHEMAS = {
     {key:'poDate', header:'PO DATE', type:'date'},
     {key:'placeOfSupply', header:'PLACE OF SUPPLY'},
     {key:'stateCode', header:'STATE CODE'},
-    {key:'contactPerson', header:'CONTACT PERSON & PHONE'},
+    {key:'contactPerson', header:'CONTACT PERSON'},
+    {key:'contactMobile', header:'MOBILE NUMBER'},
     {key:'description', header:'DESCRIPTION OF GOODS'},
     {key:'hsnSac', header:'HSN/SAC CODE'},
     {key:'qty', header:'QTY'},
@@ -5024,7 +5053,8 @@ function renderAccounts(){
       <div class="field"><label>Bill To (Name &amp; Address)</label><input type="text" id="sa-billto" placeholder="Optional"></div>
       <div class="field"><label>Place of Supply</label><input type="text" id="sa-pos" placeholder="Optional"></div>
       <div class="field"><label>State Code</label><input type="text" id="sa-statecode" placeholder="e.g. 36"></div>
-      <div class="field"><label>Contact Person &amp; Phone</label><input type="text" id="sa-contact" placeholder="Optional"></div>
+      <div class="field"><label>Contact Person</label><input type="text" id="sa-contact" placeholder="Optional"></div>
+      <div class="field"><label>Mobile Number</label><input type="text" id="sa-mobile" placeholder="Optional"></div>
       <div class="field"><label>GST No.</label><input type="text" id="sa-gstin" placeholder="Optional"></div>
     </div>
     <div class="out-lines-head">Description of Goods</div>
@@ -5083,7 +5113,7 @@ function renderAccounts(){
       <td>${esc(r.invNo)}</td><td>${fd(r.date)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.customer)}</td>
       <td style="font-family:'IBM Plex Sans',sans-serif; max-width:180px; white-space:normal;" title="${esc(r.billTo)}"><div class="cell-clamp">${esc(r.billTo)}</div></td><td>${esc(r.gstin)}</td>
       <td>${esc(r.dcNo)}</td><td>${fd(r.dcDate)}</td><td>${esc(r.poNo)}</td><td>${fd(r.poDate)}</td>
-      <td style="max-width:160px; white-space:normal;" title="${esc(r.placeOfSupply)}"><div class="cell-clamp">${esc(r.placeOfSupply)}</div></td><td>${esc(r.stateCode)}</td><td style="max-width:150px; white-space:normal;" title="${esc(r.contactPerson)}"><div class="cell-clamp">${esc(r.contactPerson)}</div></td>
+      <td style="max-width:160px; white-space:normal;" title="${esc(r.placeOfSupply)}"><div class="cell-clamp">${esc(r.placeOfSupply)}</div></td><td>${esc(r.stateCode)}</td><td style="max-width:150px; white-space:normal;" title="${esc(saContactDisplay(r))}"><div class="cell-clamp">${esc(saContactDisplay(r))}</div></td>
       <td style="font-family:'IBM Plex Sans',sans-serif; max-width:260px; min-width:180px; white-space:normal; vertical-align:top;">${saDescCellHtml(r)}</td><td>${esc(hsn)}</td>
       <td>${totQty||esc(r.qty)}</td><td>${esc(uom||r.uom)}</td><td>${esc(rate)}</td>
       <td>${esc(r.taxable)}</td><td>${esc(r.freight)}</td><td>${esc(r.cgst)}${(parseFloat(r.cgstPct)||0)?` <span style="color:var(--muted); font-size:10px;">(${esc(r.cgstPct)}%)</span>`:''}</td><td>${esc(r.sgst)}${(parseFloat(r.sgstPct)||0)?` <span style="color:var(--muted); font-size:10px;">(${esc(r.sgstPct)}%)</span>`:''}</td><td>${esc(r.igst)}${(parseFloat(r.igstPct)||0)?` <span style="color:var(--muted); font-size:10px;">(${esc(r.igstPct)}%)</span>`:''}</td><td>${esc(r.cess)}</td><td>${esc(r.roundOff)}</td><td><b>${esc(r.invoiceValue)}</b></td>
@@ -5369,6 +5399,10 @@ function saCustomerAutofill(name){
   sv('sa-pos', r.placeOfSupply);
   sv('sa-statecode', r.stateCode);
   sv('sa-contact', r.contactPerson);
+  sv('sa-mobile', r.contactMobile);
+}
+function saContactDisplay(r){
+  return [r.contactPerson, r.contactMobile].map(v=>String(v==null?'':v).trim()).filter(Boolean).join(', ');
 }
 function invoicePrefix(loc){ return loc==='SOMTEK' ? 'ST-INV-' : 'ET-INV-'; }
 function nextInvoiceNumber(d){
@@ -5398,6 +5432,7 @@ async function addSalesAccount(e){
     placeOfSupply: gv('sa-pos'),
     stateCode: gv('sa-statecode'),
     contactPerson: gv('sa-contact'),
+    contactMobile: gv('sa-mobile'),
     items: items,
     description: items.map(it=>it.description).filter(Boolean).join('; '),
     hsnSac: [...new Set(items.map(it=>it.hsnSac).filter(Boolean))].join(', '),
@@ -5430,6 +5465,22 @@ async function addSalesAccount(e){
   await saveLocation(currentLocation);
   render();
   return false;
+}
+/* GST state code -> state name, printed on the Tax Invoice */
+const GST_STATE_CODES = {
+  '01':'JAMMU & KASHMIR','02':'HIMACHAL PRADESH','03':'PUNJAB','04':'CHANDIGARH',
+  '05':'UTTARAKHAND','06':'HARYANA','07':'DELHI','08':'RAJASTHAN','09':'UTTAR PRADESH',
+  '10':'BIHAR','11':'SIKKIM','12':'ARUNACHAL PRADESH','13':'NAGALAND','14':'MANIPUR',
+  '15':'MIZORAM','16':'TRIPURA','17':'MEGHALAYA','18':'ASSAM','19':'WEST BENGAL',
+  '20':'JHARKHAND','21':'ODISHA','22':'CHHATTISGARH','23':'MADHYA PRADESH',
+  '24':'GUJARAT','26':'DADRA & NAGAR HAVELI AND DAMAN & DIU','27':'MAHARASHTRA',
+  '28':'ANDHRA PRADESH (OLD)','29':'KARNATAKA','30':'GOA','31':'LAKSHADWEEP',
+  '32':'KERALA','33':'TAMIL NADU','34':'PUDUCHERRY','35':'ANDAMAN & NICOBAR ISLANDS',
+  '36':'TELANGANA','37':'ANDHRA PRADESH','38':'LADAKH','97':'OTHER TERRITORY'
+};
+function gstStateName(r){
+  const code = String(r.stateCode||'').trim().padStart(2,'0');
+  return GST_STATE_CODES[code] || String(r.placeOfSupply||'').trim();
 }
 /* ---------------- SALES INVOICE GENERATOR ---------------- */
 function invoiceCompanyName(loc){ return loc==='SOMTEK' ? 'SOMTEK EQUIPMENTS LLP' : 'EVISSAT TECHNOLOGIES'; }
@@ -5536,7 +5587,7 @@ function salesDocTopHtml(r, title){
       <td style="${cellBody}">
         <div style="font-weight:800;">${esc(dash(r.customer))}</div>
         ${(r.billTo && String(r.billTo).trim() && String(r.billTo).trim() !== String(r.customer||'').trim()) ? `<div style="font-weight:700; margin-top:2px;">${esc(r.billTo)}</div>` : ''}
-        <div style="margin-top:8px;">Contact Person : ${esc(dash(r.contactPerson))}</div>
+        <div style="margin-top:8px;">Contact Person : ${esc(dash(saContactDisplay(r) || ''))}</div>
         <div>GSTIN No. ${esc(dash(r.gstin))}</div>
       </td>
       <td style="${cellBody}">${esc(ci.godown)}</td>
@@ -5544,7 +5595,7 @@ function salesDocTopHtml(r, title){
         <div style="font-weight:700;">${esc(dash(shipTo))}</div>
         <div style="margin-top:8px;">Place of Supply: ${esc(dash(r.placeOfSupply))}</div>
         <div>STATE CODE: ${esc(dash(r.stateCode))}</div>
-        <div style="margin-top:8px;">Contact Person : ${esc(dash(r.contactPerson))}</div>
+        <div style="margin-top:8px;">Contact Person : ${esc(dash(saContactDisplay(r) || ''))}</div>
         <div>GSTIN No. ${esc(dash(r.gstin))}</div>
       </td>
     </tr>
@@ -5681,7 +5732,8 @@ const SA_DOC_DEFS = {
       {key:'gstin', label:'Customer GST No.', type:'text'},
       {key:'placeOfSupply', label:'Place of Supply', type:'text'},
       {key:'stateCode', label:'State Code', type:'text'},
-      {key:'contactPerson', label:'Contact Person & Phone', type:'text'},
+      {key:'contactPerson', label:'Contact Person', type:'text'},
+      {key:'contactMobile', label:'Mobile Number', type:'text'},
       {key:'modeOfTransport', label:'Mode of Transport', type:'text'},
       {key:'vehicleNo', label:'Vehicle No', type:'text'},
       {key:'dateOfRemoval', label:'Date of Removal', type:'date'},
@@ -5706,7 +5758,8 @@ const SA_DOC_DEFS = {
       {key:'gstin', label:'Customer GST No.', type:'text'},
       {key:'placeOfSupply', label:'Place of Supply', type:'text'},
       {key:'stateCode', label:'State Code', type:'text'},
-      {key:'contactPerson', label:'Contact Person & Phone', type:'text'},
+      {key:'contactPerson', label:'Contact Person', type:'text'},
+      {key:'contactMobile', label:'Mobile Number', type:'text'},
       {key:'termsOfDelivery', label:'Terms of Delivery & Payment', type:'text'}
     ]
   },
@@ -5719,7 +5772,8 @@ const SA_DOC_DEFS = {
       {key:'poNo', label:'PO No', type:'text'},
       {key:'poDate', label:'PO Date', type:'date'},
       {key:'shipTo', label:'Ship To Address', type:'text'},
-      {key:'contactPerson', label:'Contact Person & Phone', type:'text'},
+      {key:'contactPerson', label:'Contact Person', type:'text'},
+      {key:'contactMobile', label:'Mobile Number', type:'text'},
       {key:'netWeight', label:'Total Net Weight (KGS)', type:'text'},
       {key:'grossWeight', label:'Total Gross Weight (KGS)', type:'text'},
       {key:'dimension', label:'Dimension', type:'text'},
@@ -5938,12 +5992,12 @@ function invoiceDocumentHtml(r, heading){
         <td rowspan="3" style="${cell} width:33%;">
           <div style="font-size:9.5px; font-weight:700;">Bill To:</div>
           <div style="font-weight:800; font-size:12px; margin-top:2px;">${esc(dash(r.customer))}</div>
-          ${(r.billTo && String(r.billTo).trim() && String(r.billTo).trim() !== String(r.customer||'').trim()) ? `<div style="font-weight:800; font-size:11px; line-height:1.5; margin-top:2px;">${esc(r.billTo)}</div>` : ''}
+          ${(r.billTo && String(r.billTo).trim() && String(r.billTo).trim() !== String(r.customer||'').trim()) ? `<div style="font-weight:400; font-size:11px; line-height:1.5; margin-top:2px;">${esc(r.billTo)}</div>` : ''}
         </td>
         <td rowspan="3" style="${cell} width:31%;">
           <div style="font-size:9.5px; font-weight:700;">Place of Supply:</div>
           <div style="font-weight:800; font-size:11.5px; margin-top:2px; line-height:1.5;">${esc(dash(r.shipTo || r.customer || r.billTo))}</div>
-          <div style="margin-top:8px;">Place of Supply: ${esc(dash(r.placeOfSupply))}</div>
+          <div style="margin-top:8px;"><b>STATE: ${esc(dash(gstStateName(r)))}</b></div>
           <div><b>STATE CODE: ${esc(dash(r.stateCode))}</b></div>
         </td>
         <td colspan="2" style="${box} font-weight:800;">${esc(copyLabel)}</td>
@@ -5958,11 +6012,11 @@ function invoiceDocumentHtml(r, heading){
       </tr>
       <tr>
         <td style="${cell}">
-          <div>Contact Person : ${esc(dash(r.contactPerson))}</div>
+          <div>Contact Person : ${esc(dash(saContactDisplay(r) || ''))}</div>
           <div style="font-weight:800; margin-top:4px;">GSTIN : ${esc(dash(r.gstin))}</div>
         </td>
         <td style="${cell}">
-          <div>Contact Person : ${esc(dash(r.contactPerson))}</div>
+          <div>Contact Person : ${esc(dash(saContactDisplay(r) || ''))}</div>
           <div style="font-weight:800; margin-top:4px;">GSTIN : ${esc(dash(r.gstin))}</div>
         </td>
         <td style="${box} font-weight:800;">PO NO<div style="font-weight:400; margin-top:4px;">${esc(dash(r.poNo))}</div></td>
@@ -6147,8 +6201,8 @@ async function deleteSalesAccount(id){
 }
 function exportSalesAccounts(){
   const d = DATA[currentLocation];
-  const headers = ['INVOICE NO','INVOICE DATE','NAME OF THE CUSTOMER','BILL TO','GST NO.','DC NO.','DC DATE','PO NO','PO DATE','PLACE OF SUPPLY','STATE CODE','CONTACT PERSON & PHONE','DESCRIPTION OF GOODS','HSN/SAC CODE','QTY','UOM','RATE','AMOUNT','TAXABLE VALUE','FREIGHT CHARGES','CGST %','CGST','SGST %','SGST','IGST %','IGST','Cess','ROUND OFF','TOTAL INVOICE VALUE','Value In Words','INSURANCE DETAILS','OUR BANK DETAILS','AMOUNT RECEIVED','PAYMENT DATE','BALANCE OUTSTANDING','CREDIT DAYS','DUE DATE','Payment Status','Added By'];
-  const rows = d.salesAccounts.map(r=>[r.invNo, r.date, r.customer, r.billTo, r.gstin, r.dcNo, r.dcDate, r.poNo, r.poDate, r.placeOfSupply, r.stateCode, r.contactPerson, (r.description || saItems(r).map(it=>it.description).filter(Boolean).join('; ')), r.hsnSac, r.qty, r.uom, r.rate, r.amount, r.taxable, r.freight, r.cgstPct, r.cgst, r.sgstPct, r.sgst, r.igstPct, r.igst, r.cess, r.roundOff, r.invoiceValue, (r.valueInWords || (r.invoiceValue ? numberToWordsINR(r.invoiceValue) : '')), r.insurance, r.bankDetails, r.amountReceived, r.paymentDate, salesBalance(r), r.creditDays, salesDueInfo(r).dueDate, r.paymentStatus||'Pending', r.addedBy]);
+  const headers = ['INVOICE NO','INVOICE DATE','NAME OF THE CUSTOMER','BILL TO','GST NO.','DC NO.','DC DATE','PO NO','PO DATE','PLACE OF SUPPLY','STATE CODE','CONTACT PERSON','MOBILE NUMBER','DESCRIPTION OF GOODS','HSN/SAC CODE','QTY','UOM','RATE','AMOUNT','TAXABLE VALUE','FREIGHT CHARGES','CGST %','CGST','SGST %','SGST','IGST %','IGST','Cess','ROUND OFF','TOTAL INVOICE VALUE','Value In Words','INSURANCE DETAILS','OUR BANK DETAILS','AMOUNT RECEIVED','PAYMENT DATE','BALANCE OUTSTANDING','CREDIT DAYS','DUE DATE','Payment Status','Added By'];
+  const rows = d.salesAccounts.map(r=>[r.invNo, r.date, r.customer, r.billTo, r.gstin, r.dcNo, r.dcDate, r.poNo, r.poDate, r.placeOfSupply, r.stateCode, r.contactPerson, r.contactMobile, (r.description || saItems(r).map(it=>it.description).filter(Boolean).join('; ')), r.hsnSac, r.qty, r.uom, r.rate, r.amount, r.taxable, r.freight, r.cgstPct, r.cgst, r.sgstPct, r.sgst, r.igstPct, r.igst, r.cess, r.roundOff, r.invoiceValue, (r.valueInWords || (r.invoiceValue ? numberToWordsINR(r.invoiceValue) : '')), r.insurance, r.bankDetails, r.amountReceived, r.paymentDate, salesBalance(r), r.creditDays, salesDueInfo(r).dueDate, r.paymentStatus||'Pending', r.addedBy]);
   cfExportAppend('salesAccounts', d.salesAccounts, headers, rows);
   exportToExcel(currentLocation+'_Sales_Accounts', headers, rows);
 }
@@ -6369,7 +6423,8 @@ const EDIT_SCHEMAS = {
     {key:'poDate', label:'PO Date', type:'date'},
     {key:'placeOfSupply', label:'Place of Supply', type:'text'},
     {key:'stateCode', label:'State Code', type:'text'},
-    {key:'contactPerson', label:'Contact Person & Phone', type:'text'},
+    {key:'contactPerson', label:'Contact Person', type:'text'},
+    {key:'contactMobile', label:'Mobile Number', type:'text'},
     {key:'description', label:'Description of Goods', type:'text'},
     {key:'hsnSac', label:'HSN/SAC Code', type:'text'},
     {key:'qty', label:'Qty', type:'number'},
@@ -6445,8 +6500,80 @@ function closeEditModal(){
   if(el) el.remove();
 }
 
+/* Item-line editor used inside the salesAccounts edit modal, so items are
+   edited one row at a time instead of merged into single flat fields. */
+function editItemLineHtml(it){
+  it = it || {};
+  return `<div class="out-line em-item-line" style="flex-wrap:wrap;">
+    <input type="text" class="em-line-desc" placeholder="Description of goods" value="${esc(it.description||'')}" oninput="editItemsRecalc()" style="flex:3 1 220px; min-width:180px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:'IBM Plex Sans',sans-serif; font-size:13px; border-radius:4px;">
+    <input type="text" class="em-line-hsn" placeholder="HSN/SAC" value="${esc(it.hsnSac||'')}" style="flex:1 1 90px; min-width:80px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:'IBM Plex Mono',monospace; font-size:12.5px; border-radius:4px;">
+    <input type="number" class="out-line-qty em-line-qty" step="any" min="0" placeholder="Qty" value="${esc(it.qty||'')}" oninput="editItemsRecalc()">
+    <select class="em-line-uom" style="background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 8px; font-family:'IBM Plex Sans',sans-serif; font-size:12.5px; border-radius:4px;">${SA_UOMS.map(u=>`<option value="${u}" ${it.uom===u?'selected':''}>${u}</option>`).join('')}</select>
+    <input type="number" class="em-line-rate" step="0.01" min="0" placeholder="Rate" value="${esc(it.rate||'')}" oninput="editItemsRecalc()" style="flex:0 1 110px; min-width:90px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:'IBM Plex Mono',monospace; font-size:12.5px; border-radius:4px;">
+    <input type="number" class="em-line-amount" step="0.01" placeholder="Amount" readonly tabindex="-1" value="${esc(it.amount||'')}" style="flex:0 1 120px; min-width:100px; background:var(--bg); border:1px solid var(--border); color:var(--muted); padding:9px 10px; font-family:'IBM Plex Mono',monospace; font-size:12.5px; border-radius:4px;">
+    <button type="button" class="icon-btn out-line-remove" onclick="removeEditItemLine(this)" title="Remove this item">&#10005;</button>
+  </div>`;
+}
+function addEditItemLine(){
+  const wrap = document.getElementById('edit-item-lines');
+  if(wrap){ wrap.insertAdjacentHTML('beforeend', editItemLineHtml()); editItemsRecalc(); }
+}
+function removeEditItemLine(btn){
+  const wrap = document.getElementById('edit-item-lines');
+  const line = btn.closest('.em-item-line');
+  if(!wrap || !line) return;
+  if(wrap.querySelectorAll('.em-item-line').length <= 1){
+    line.querySelectorAll('input').forEach(el=>el.value='');
+  } else {
+    line.remove();
+  }
+  editItemsRecalc();
+}
+function readEditItemLines(){
+  return [...document.querySelectorAll('#edit-item-lines .em-item-line')].map(line=>{
+    const gv = sel => { const el = line.querySelector(sel); return el ? (el.value||'').trim() : ''; };
+    const qty = parseFloat(gv('.em-line-qty'))||0;
+    const rate = parseFloat(gv('.em-line-rate'))||0;
+    const amount = Math.round(qty*rate*100)/100;
+    return {description: gv('.em-line-desc'), hsnSac: gv('.em-line-hsn'), qty: gv('.em-line-qty'), uom: gv('.em-line-uom')||'Nos', rate: gv('.em-line-rate'), amount: amount ? String(amount) : ''};
+  }).filter(it => it.description!=='' || it.qty!=='' || it.rate!=='');
+}
+/* Live totals inside the edit modal: per-line Amount, Taxable, GST and Total */
+function editItemsRecalc(){
+  const r2 = n => Math.round(n*100)/100;
+  let taxable = 0;
+  document.querySelectorAll('#edit-item-lines .em-item-line').forEach(line=>{
+    const qty = parseFloat((line.querySelector('.em-line-qty')||{}).value)||0;
+    const rate = parseFloat((line.querySelector('.em-line-rate')||{}).value)||0;
+    const amt = r2(qty*rate);
+    const amtEl = line.querySelector('.em-line-amount');
+    if(amtEl) amtEl.value = amt ? amt.toFixed(2) : '';
+    taxable += amt;
+  });
+  taxable = r2(taxable);
+  const gv = id => { const el = document.getElementById(id); return el ? (parseFloat(el.value)||0) : 0; };
+  const sv = (id, v) => { const el = document.getElementById(id); if(el) el.value = v; };
+  sv('edit-f-taxable', taxable ? taxable.toFixed(2) : '');
+  const gstBase = r2(taxable + gv('edit-f-freight'));
+  [['edit-f-cgstPct','edit-f-cgst'],['edit-f-sgstPct','edit-f-sgst'],['edit-f-igstPct','edit-f-igst']].forEach(pair=>{
+    const p = gv(pair[0]);
+    if(p) sv(pair[1], gstBase ? r2(gstBase*p/100).toFixed(2) : '');
+  });
+  const total = r2(taxable + gv('edit-f-freight') + gv('edit-f-cgst') + gv('edit-f-sgst') + gv('edit-f-igst') + gv('edit-f-cess') + gv('edit-f-roundOff'));
+  if(total) sv('edit-f-invoiceValue', total.toFixed(2));
+}
+
 function renderEditModal(record){
-  const schema = EDIT_SCHEMAS[editModalState.table];
+  const schema0 = EDIT_SCHEMAS[editModalState.table];
+  const isSalesAcct = editModalState.table === 'salesAccounts';
+  /* For sales entries the item details are edited line by line below,
+     so the merged flat fields are hidden from the modal. */
+  const itemKeys = ['description','hsnSac','qty','uom','rate'];
+  const schema = isSalesAcct ? schema0.filter(f=>itemKeys.indexOf(f.key)===-1) : schema0;
+  const itemsSection = isSalesAcct ? `
+    <div class="out-lines-head" style="margin-top:14px;">Description of Goods &mdash; item lines</div>
+    <div id="edit-item-lines">${(saItems(record).map(it=>editItemLineHtml(it)).join('')) || editItemLineHtml()}</div>
+    <div style="margin:10px 0 4px 0;"><button type="button" class="btn btn-ghost" onclick="addEditItemLine()">+ Add another item</button></div>` : '';
   const fieldsHtml = schema.map(f=>{
     const val = record[f.key]==null ? '' : record[f.key];
     if(f.type==='select'){
@@ -6472,7 +6599,7 @@ function renderEditModal(record){
   <div id="edit-modal-root" class="modal-overlay">
     <div class="modal-card">
       <div class="modal-head"><h3>Edit Record</h3><button class="icon-btn" onclick="closeEditModal()">Close</button></div>
-      <div class="modal-body"><div class="form-grid">${fieldsHtml}</div></div>
+      <div class="modal-body"><div class="form-grid">${fieldsHtml}</div>${itemsSection}</div>
       <div class="modal-actions">
         <button class="btn btn-ghost" onclick="closeEditModal()">Cancel</button>
         <button class="btn" onclick="saveEditModal()">Save Changes</button>
@@ -6530,6 +6657,23 @@ async function saveEditModal(){
     if(days > 0) record.days = days;
   }
   if(table==='enquiry' && !record.action) record.action = 'Pending';
+  if(table==='salesAccounts'){
+    /* Rebuild the record's items from the line editor and re-derive the
+       flat fields that the register and documents rely on. */
+    const items = readEditItemLines();
+    record.items = items;
+    const first = items[0] || {};
+    record.description = items.map(it=>it.description).filter(Boolean).join('; ');
+    record.hsnSac = [...new Set(items.map(it=>it.hsnSac).filter(Boolean))].join(', ');
+    record.qty = String(items.reduce((a,it)=>a+(parseFloat(it.qty)||0),0) || '');
+    record.uom = first.uom || '';
+    record.rate = first.rate || '';
+    const taxable = Math.round(items.reduce((a,it)=>a+(parseFloat(it.amount)||0),0)*100)/100;
+    if(items.length){
+      record.taxable = taxable ? String(taxable) : '';
+      record.amount = record.taxable;
+    }
+  }
   if(table==='salesAccounts' && String(record.taxable||'').trim()!==''){
     const n = v => parseFloat(v)||0;
     /* If a GST % is chosen, re-derive the tax amount from the taxable value */
