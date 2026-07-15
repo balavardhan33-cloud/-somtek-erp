@@ -900,6 +900,7 @@ function readSessionLocal(){
 }
 
 async function loadUsers(){
+  loadUsersBackupMeta(); /* fire-and-forget: fills the restore button label */
   /* Retry up to 3 times - a temporary network failure must NEVER be treated
      as "no users exist", otherwise the cloud user list gets overwritten
      with defaults and every real user is wiped. */
@@ -962,11 +963,64 @@ async function loadUsers(){
   }
 }
 
+let USERS_BACKUP_META = null; /* {savedAt, count} of the users_backup doc, for the Users tab */
+
+async function backupUsersDoc(){
+  /* Copy the CURRENT cloud users doc to users_backup before it is overwritten,
+     so there is always one previous version to restore from. */
+  try{
+    const cur = await fsGet('users');
+    if(cur && Array.isArray(cur.list) && cur.list.length > 0){
+      const backup = {list: cur.list, roles: cur.roles||{}, customFields: cur.customFields||{}, savedAt: new Date().toISOString()};
+      await fsSet('users_backup', backup);
+      USERS_BACKUP_META = {savedAt: backup.savedAt, count: backup.list.length};
+    }
+  }catch(e){ console.error('backupUsersDoc failed', e); }
+}
+
 async function saveUsers(){
+  /* Safety guard: never push an empty / invalid user list to the cloud. */
+  if(!Array.isArray(USERS) || USERS.length === 0){
+    console.error('saveUsers blocked: refusing to save an empty user list.');
+    return;
+  }
   const msg = usersDiffMsg();
+  await backupUsersDoc();
   const ok = await fsSet('users', {list: USERS, roles: CUSTOM_ROLES, customFields: CUSTOM_FIELDS});
   snapshotUsersState();
   if(ok && session && msg) logAudit('USER ADMIN', msg);
+}
+
+async function loadUsersBackupMeta(){
+  try{
+    const b = await fsGet('users_backup');
+    USERS_BACKUP_META = (b && Array.isArray(b.list)) ? {savedAt: b.savedAt||'', count: b.list.length} : null;
+  }catch(e){ USERS_BACKUP_META = null; }
+}
+
+async function restoreUsersFromBackup(){
+  if(!isAdmin()) return;
+  const b = await fsGet('users_backup');
+  if(!b || !Array.isArray(b.list) || b.list.length === 0){
+    alert('No backup found yet. A backup is created automatically every time the user list changes.');
+    return;
+  }
+  const when = b.savedAt ? new Date(b.savedAt).toLocaleString() : 'unknown time';
+  if(!confirm('Restore ' + b.list.length + ' user(s) from the backup taken on ' + when + '?\n\nThis will REPLACE the current user list.')) return;
+  USERS = b.list;
+  CUSTOM_ROLES = (b.roles && typeof b.roles==='object' && !Array.isArray(b.roles)) ? b.roles : CUSTOM_ROLES;
+  CUSTOM_FIELDS = (b.customFields && typeof b.customFields==='object' && !Array.isArray(b.customFields)) ? b.customFields : CUSTOM_FIELDS;
+  syncRoleOptions();
+  syncCustomFieldSchemas();
+  snapshotUsersState();
+  const ok = await fsSet('users', {list: USERS, roles: CUSTOM_ROLES, customFields: CUSTOM_FIELDS});
+  if(ok){
+    logAudit('USER ADMIN', 'Restored ' + USERS.length + ' user(s) from backup (' + when + ')');
+    alert('Users restored successfully.');
+  }else{
+    alert('Restore could not be saved to the database. Check the connection and try again.');
+  }
+  render();
 }
 
 async function loadNotice(){
@@ -2241,6 +2295,7 @@ async function handleImportFile(e){
   if(!isAdmin()) return;
   if(!file || !table) return;
   if(typeof XLSX === 'undefined'){ alert('Excel import library failed to load. Check your connection.'); return; }
+  if(table === 'users'){ await importUsersFile(file); return; }
   const schema = IMPORT_SCHEMAS[table];
   if(!schema){ alert('Import is not available for this table.'); return; }
 
@@ -2307,6 +2362,79 @@ async function handleImportFile(e){
     alert(`Imported ${imported} row(s).` + (missed>0 ? ` Note: ${missed} column(s) from the template were not found in this file and were left blank.` : ''));
   }catch(err){
     console.error('Import failed', err);
+    alert('Import failed: ' + err.message);
+  }
+}
+
+/* ---- Users import (admin only). Users live in their own cloud document,
+   not in location data, so they need this dedicated importer. -------- */
+async function importUsersFile(file){
+  if(!isAdmin()) return;
+  const DEFAULT_IMPORT_PASSWORD = 'Welcome123';
+  try{
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, {type:'array'});
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, {header:1, defval:'', raw:true});
+    if(!rows.length){ alert('That file has no rows.'); return; }
+
+    const headerRow = rows[0].map(h=>String(h==null?'':h).trim().toLowerCase());
+    const col = names => { for(const n of names){ const i = headerRow.indexOf(n); if(i!==-1) return i; } return -1; };
+    const cName  = col(['name','full name']);
+    const cUser  = col(['username','user name','login']);
+    const cPass  = col(['password']);
+    const cRole  = col(['role']);
+    const cMob   = col(['mobile number','mobile','phone']);
+    const cDob   = col(['date of birth','dob']);
+    const cAddr  = col(['address']);
+    if(cUser === -1){
+      alert('Could not find a "Username" column.\n\nTip: click "Export Excel" on this panel first to get the exact column headers (Name, Username, Role, Mobile Number, Date of Birth, Address), add a Password column if you want, fill it in, then import.');
+      return;
+    }
+
+    const roles = allRoleNames();
+    let added = 0, skippedDup = 0, skippedBlank = 0, defaultedPass = 0;
+    const seenInFile = {};
+    for(let i=1; i<rows.length; i++){
+      const row = rows[i];
+      if(!row || row.every(c=>c===''||c==null)) continue;
+      const username = String(cUser!==-1 ? row[cUser] : '').trim();
+      if(!username){ skippedBlank++; continue; }
+      if(seenInFile[username] || USERS.some(u=>u.username===username)){ skippedDup++; continue; }
+      seenInFile[username] = true;
+      let password = String(cPass!==-1 ? row[cPass] : '').trim();
+      if(!password){ password = DEFAULT_IMPORT_PASSWORD; defaultedPass++; }
+      let role = normalizeToOption(cRole!==-1 ? row[cRole] : '', roles);
+      if(!roles.includes(role)) role = 'enquiry';
+      USERS.push({
+        name: String(cName!==-1 ? row[cName] : '').trim() || username,
+        username: username,
+        password: password,
+        role: role,
+        mobile: String(cMob!==-1 ? row[cMob] : '').trim(),
+        dob: cDob!==-1 ? excelCellToDateStr(row[cDob]) : '',
+        address: String(cAddr!==-1 ? row[cAddr] : '').trim(),
+        extraTabs: [],
+        deniedTabs: []
+      });
+      added++;
+    }
+
+    if(added === 0){
+      alert('No new users imported.' + (skippedDup ? ' ' + skippedDup + ' username(s) already exist.' : '') + (skippedBlank ? ' ' + skippedBlank + ' row(s) had no username.' : ''));
+      return;
+    }
+    await saveUsers();
+    logAudit('USER ADMIN', 'Imported ' + added + ' user(s) from Excel');
+    render();
+    let msg = 'Imported ' + added + ' user(s).';
+    if(skippedDup) msg += '\nSkipped ' + skippedDup + ' duplicate username(s).';
+    if(skippedBlank) msg += '\nSkipped ' + skippedBlank + ' row(s) with no username.';
+    if(defaultedPass) msg += '\n' + defaultedPass + ' user(s) had no password in the file - they were given the default password "' + DEFAULT_IMPORT_PASSWORD + '". Ask them to change it after first sign in (Change password, top right).';
+    msg += '\n\nEach new user will register Google Authenticator at their first sign in.';
+    alert(msg);
+  }catch(err){
+    console.error('Users import failed', err);
     alert('Import failed: ' + err.message);
   }
 }
@@ -7225,7 +7353,7 @@ function renderUsers(){
     </div>
   </form>
   </div></div>
-  <div class="panel"><div class="panel-head"><h3>All logins <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(click a user to view &amp; manage their access)</span></h3><div class="panel-head-actions">${exportBtn('exportUsers')}</div></div>
+  <div class="panel"><div class="panel-head"><h3>All logins <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(click a user to view &amp; manage their access)</span></h3><div class="panel-head-actions">${importBtn('users')}<button class="icon-btn" onclick="restoreUsersFromBackup()" title="Restore the user list from the automatic backup">&#8634; Restore from backup${USERS_BACKUP_META ? ' ('+USERS_BACKUP_META.count+' users, '+new Date(USERS_BACKUP_META.savedAt).toLocaleDateString()+')' : ''}</button>${exportBtn('exportUsers')}</div></div>
   <div class="panel-body">
   <table><thead><tr><th>Photo</th><th>Name</th><th>Username</th><th>Role</th><th>Mobile</th><th>DOB</th><th>Address</th><th>Access</th><th>Security</th><th></th></tr></thead><tbody>
   ${USERS.map(u=>{
