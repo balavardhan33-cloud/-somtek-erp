@@ -10,6 +10,27 @@
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 
+html[data-theme="dark"]{
+  --bg:#171a21;
+  --panel:#1f242e;
+  --panel-2:#262c38;
+  --border:#353d4c;
+  --accent:#e05560;
+  --accent-dim:#e0556099;
+  --accent-2:#5b8def;
+  --text:#e6e9f0;
+  --muted:#9aa2b1;
+  --success:#48bb78;
+  --danger:#e05560;
+  --grid-line:rgba(91,141,239,0.05);
+}
+@media print{
+  /* Printing must always come out on white, whatever theme is active. */
+  html[data-theme="dark"]{
+    --bg:#ffffff; --panel:#ffffff; --panel-2:#f7f6f3; --border:#e3e0d9;
+    --text:#1c2230; --muted:#6b7180; --grid-line:transparent;
+  }
+}
 :root{
   --bg:#f4f3f0;
   --panel:#ffffff;
@@ -350,7 +371,14 @@ form input[readonly]{background:var(--panel-2); color:var(--muted); cursor:defau
 .logout-link:hover{color:var(--danger);}
 
 /* ---------- TOP-RIGHT LOGIN BADGE ---------- */
-.topbar-user{display:flex; align-items:center; gap:10px; background:var(--panel); border:1px solid var(--border); padding:8px 14px 8px 10px; flex-shrink:0;}
+.topbar-user{display:flex; align-items:center; gap:10px; background:var(--panel); border:1px solid var(--border); padding:8px 14px 8px 10px; flex-shrink:0; position:relative;}
+.settings-gear{cursor:pointer; font-size:17px; line-height:1; color:var(--muted); margin-left:10px; padding-left:10px; border-left:1px solid var(--border); user-select:none;}
+.settings-gear:hover{color:var(--accent-2);}
+.settings-menu{position:absolute; top:calc(100% + 6px); right:0; background:var(--panel); border:1px solid var(--border); min-width:230px; z-index:400; box-shadow:0 10px 28px rgba(0,0,0,0.22);}
+.settings-item{padding:11px 14px; font-size:12.5px; cursor:pointer; display:flex; gap:9px; align-items:center; border-bottom:1px solid var(--border); color:var(--text);}
+.settings-item:hover{background:var(--panel-2);}
+.settings-item .si-ico{width:18px; text-align:center; flex-shrink:0;}
+.settings-foot{padding:8px 14px; font-size:10.5px; color:var(--muted); font-family:'IBM Plex Mono',monospace;}
 .topbar-user .role-icon{
   width:30px; height:30px; border-radius:50%; flex-shrink:0; display:flex; align-items:center; justify-content:center;
   font-size:15px; background:var(--panel-2); border:1px solid var(--border);
@@ -1597,6 +1625,50 @@ async function forgotSetPassword(e){
   return false;
 }
 
+/* ---------------- THEME (dark / light, saved per device) ---------------- */
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.8';
+function currentTheme(){
+  try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
+}
+function applyTheme(t){
+  document.documentElement.setAttribute('data-theme', t === 'dark' ? 'dark' : 'light');
+}
+function toggleTheme(){
+  const t = currentTheme() === 'dark' ? 'light' : 'dark';
+  try{ localStorage.setItem('somtek_theme', t); }catch(e){}
+  applyTheme(t);
+  closeSettingsMenu();
+}
+applyTheme(currentTheme());
+
+/* ---------------- SETTINGS MENU (gear in topbar) ---------------- */
+function closeSettingsMenu(){
+  const el = document.getElementById('settings-menu');
+  if(el) el.remove();
+}
+function closeSettingsMenuOutside(ev){
+  const m = document.getElementById('settings-menu');
+  if(m && !m.contains(ev.target)) closeSettingsMenu();
+}
+function toggleSettingsMenu(ev){
+  ev.stopPropagation();
+  const existing = document.getElementById('settings-menu');
+  if(existing){ existing.remove(); return; }
+  const host = ev.currentTarget.closest('.topbar-user');
+  if(!host) return;
+  const dark = currentTheme() === 'dark';
+  const menu = document.createElement('div');
+  menu.id = 'settings-menu';
+  menu.className = 'settings-menu';
+  menu.innerHTML = `
+    <div class="settings-item" onclick="closeSettingsMenu(); openChangePassword();"><span class="si-ico">&#128274;</span> Change Password</div>
+    <div class="settings-item" onclick="toggleTheme()"><span class="si-ico">${dark ? '&#9728;' : '&#127769;'}</span> Switch to ${dark ? 'Light' : 'Dark'} Theme</div>
+    <div class="settings-item" onclick="closeSettingsMenu(); manualRefresh();"><span class="si-ico">&#8634;</span> Refresh Data</div>
+    <div class="settings-foot">${APP_VERSION_LABEL} &middot; ${esc(session ? session.username : '')}</div>`;
+  host.appendChild(menu);
+  setTimeout(()=>{ document.addEventListener('click', closeSettingsMenuOutside, {once:true}); }, 0);
+}
+
 /* ---------------- CHANGE PASSWORD (logged in) ---------------- */
 function openChangePassword(){
   closeChangePassword();
@@ -1943,7 +2015,7 @@ function topbarUserBadge(){
   return `<div class="topbar-user">
     ${avatar}
     <div class="info"><div class="u-name">${esc(session.name)}</div><div class="u-role">${esc(session.role)} &middot; ${esc(session.username)}</div></div>
-    <div class="logout-link" onclick="openChangePassword()">Change password</div>
+    <div class="settings-gear" onclick="toggleSettingsMenu(event)" title="Settings">&#9881;</div>
     <div class="logout-link" onclick="handleLogout()">Sign out</div>
   </div>`;
 }
