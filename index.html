@@ -1808,7 +1808,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.17';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.18';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -5969,7 +5969,9 @@ function salesDocTopHtml(r, title){
   const boxL = 'border:1px solid #444; padding:4px 8px; font-weight:700; font-size:10.5px; text-align:center; vertical-align:middle;';
   const cellHead = 'border:1px solid #444; padding:4px 8px; font-size:10px; font-weight:700; text-decoration:underline; vertical-align:top;';
   const cellBody = 'border:1px solid #444; padding:6px 8px; font-size:10.5px; vertical-align:top; line-height:1.5;';
-  const shipTo = r.shipTo || r.billTo || r.customer || '';
+  /* Ship To box: never fall back to the Bill To address, and strip any
+     pasted "Bill To:" label from the value itself. */
+  const shipTo = String(r.shipTo || r.customer || '').replace(/^\s*bill\s*to\s*:?\s*/i, '');
   return `
   <table style="border-collapse:collapse; width:100%;">
     <tr>
