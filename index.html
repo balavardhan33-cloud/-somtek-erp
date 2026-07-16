@@ -407,6 +407,9 @@ form input[readonly]{background:var(--panel-2); color:var(--muted); cursor:defau
 .kpi-star{cursor:pointer; font-size:15px; line-height:1; opacity:0.3; margin-left:8px; user-select:none;}
 .kpi-star:hover{opacity:0.7;}
 .kpi-star.faved{opacity:1; color:#f0a500;}
+.ps-strip{position:fixed; left:14px; bottom:14px; z-index:650; background:#123d24; color:#b9f3cd; border:1px solid #2e8a56; padding:9px 14px; font-size:12px; font-family:'IBM Plex Mono',monospace; border-radius:6px; box-shadow:0 6px 18px rgba(0,0,0,0.3); display:flex; align-items:center; gap:12px;}
+.ps-strip button{background:#2e8a56; color:#fff; border:none; padding:5px 10px; cursor:pointer; font-size:11px; border-radius:4px;}
+.ps-strip.ps-err{background:#4a1518; color:#ffc4c6; border-color:#a33;}
 .age-chip{display:inline-block; padding:2px 8px; font-size:10px; font-weight:700; border-radius:3px; font-family:'IBM Plex Mono',monospace; letter-spacing:0.02em; white-space:nowrap;}
 .age-red{background:#fdecea; color:#c62828; border:1px solid #f2b8b5;}
 .age-yellow{background:#fff8e1; color:#8a6100; border:1px solid #eeda9a;}
@@ -1170,13 +1173,33 @@ function togglePrintStation(){
   }
   render();
 }
+let psPrintedCount = 0;
+function psStripUpdate(msg, isErr){
+  let el = document.getElementById('ps-strip');
+  if(!isPrintStation()){ if(el) el.remove(); return; }
+  if(!el){
+    document.body.insertAdjacentHTML('beforeend', '<div id="ps-strip" class="ps-strip"><span id="ps-strip-msg"></span><button onclick="psTestPrint()">Test Print</button></div>');
+    el = document.getElementById('ps-strip');
+  }
+  el.classList.toggle('ps-err', !!isErr);
+  const m = document.getElementById('ps-strip-msg');
+  if(m) m.innerHTML = msg;
+}
+async function psTestPrint(){
+  psStripUpdate('&#128424; Printing test page&hellip;');
+  await printJobInIframe({ title:'TEKFLOW Test Page', html:'<div class="quote-sheet" style="padding:40mm 20mm; font-family:sans-serif; text-align:center;"><h1>TEKFLOW PRINT STATION</h1><p>Test page printed at '+new Date().toLocaleString()+'</p><p>If you can read this on paper, automatic printing works.</p></div>' });
+  psStripUpdate('&#128424; Test page sent to the printer at '+new Date().toLocaleTimeString()+'. Did paper come out?');
+}
 function startPrintStation(){
   stopPrintStation();
-  printStationTimer = setInterval(()=>{ processPrintJobs().catch(e=>console.error('print station', e)); }, 20000);
-  processPrintJobs().catch(e=>console.error('print station', e));
+  printStationTimer = setInterval(()=>{ processPrintJobs().catch(e=>{ console.error('print station', e); psStripUpdate('&#9888; Error: '+esc(e.message)+' &mdash; retrying in 20s', true); }); }, 20000);
+  psStripUpdate('&#128424; PRINT STATION ACTIVE &mdash; starting&hellip;');
+  processPrintJobs().catch(e=>{ console.error('print station', e); psStripUpdate('&#9888; Error: '+esc(e.message), true); });
 }
 function stopPrintStation(){
   if(printStationTimer){ clearInterval(printStationTimer); printStationTimer = null; }
+  const el = document.getElementById('ps-strip');
+  if(el) el.remove();
 }
 function printJobHtmlDoc(job){
   return '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
@@ -1204,14 +1227,18 @@ async function processPrintJobs(){
   try{
     await loadPrintJobs();
     const pending = (PRINT_JOBS.list||[]).slice();
+    psStripUpdate('&#128424; PRINT STATION ACTIVE &mdash; checked '+new Date().toLocaleTimeString()+' &mdash; '+pending.length+' waiting &mdash; '+psPrintedCount+' printed this session');
     for(const job of pending){
+      psStripUpdate('&#128424; Printing: '+esc(job.title||'document')+'&hellip;');
       await printJobInIframe(job);
+      psPrintedCount++;
       /* mark done: drop the heavy html, keep a light log entry */
       PRINT_JOBS.list = (PRINT_JOBS.list||[]).filter(j=>j.id!==job.id);
       PRINT_JOBS.done = [{ title: job.title, by: job.by, at: job.at, printedAt: new Date().toISOString() }, ...(PRINT_JOBS.done||[])].slice(0, 20);
       await savePrintJobs();
       logAudit('DATA CHANGE', 'Printed at station: "'+(job.title||'document')+'"');
     }
+    if(pending.length) psStripUpdate('&#128424; PRINT STATION ACTIVE &mdash; '+psPrintedCount+' printed this session &mdash; queue clear at '+new Date().toLocaleTimeString());
   }finally{
     printStationBusy = false;
   }
@@ -2204,7 +2231,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.28';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.29';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
