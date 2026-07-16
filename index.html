@@ -205,7 +205,10 @@ h1,h2,h3,.stencil{font-family:'Oswald', sans-serif; text-transform:uppercase; le
 .panel{background:var(--panel); border:1px solid var(--border); margin-bottom:20px;}
 .panel-head{padding:14px 18px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;}
 .panel-head h3{font-size:14px; letter-spacing:0.05em;}
-.panel-body{padding:18px;}
+.panel-body{padding:18px; overflow-x:auto;}
+.panel-body table{min-width:max-content; width:100%;}
+.panel-body table td, .panel-body table th{white-space:nowrap;}
+.panel-body table td[style*="white-space:normal"], .panel-body .cell-clamp{white-space:normal;}
 
 .form-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:14px; align-items:end;}
 
@@ -1137,6 +1140,200 @@ async function restoreUsersFromBackup(){
   render();
 }
 
+/* ---------------- SCHEDULED REPORTS (admin) ---------------- */
+let REPORT_SCHEDULES = { list: [] };   /* Firestore doc 'report_schedules' */
+
+const REPORT_SECTIONS = [
+  {key:'summary', label:'Summary (totals & KPIs)'},
+  {key:'salesAccounts', label:'Sales (Accounts)'},
+  {key:'purchaseAccounts', label:'Purchases (Accounts)'},
+  {key:'outstanding', label:'Outstanding & Overdue'},
+  {key:'inventory', label:'Inventory (with Aging & Dead flags)'},
+  {key:'inward', label:'Inward log'},
+  {key:'outward', label:'Outward log'},
+  {key:'enquiry', label:'Enquiries'},
+  {key:'attendance', label:'HR Attendance'}
+];
+
+async function loadReportSchedules(){
+  const doc = await fsGet('report_schedules');
+  REPORT_SCHEDULES = (doc && Array.isArray(doc.list)) ? doc : { list: [] };
+}
+async function saveReportSchedules(){
+  await fsSet('report_schedules', REPORT_SCHEDULES);
+}
+
+/* Is this schedule due, given when it last ran? */
+function reportIsDue(s){
+  if(!s.lastRun) return true;
+  const last = new Date(s.lastRun);
+  const now = new Date();
+  const dayKey = dt => dt.getFullYear()+'-'+(dt.getMonth()+1)+'-'+dt.getDate();
+  if(s.freq === 'Daily') return dayKey(last) !== dayKey(now);
+  if(s.freq === 'Weekly'){
+    /* due once the Monday-based week changes */
+    const weekStart = dt => { const d = new Date(dt); const day = (d.getDay()+6)%7; d.setDate(d.getDate()-day); return dayKey(d); };
+    return weekStart(last) !== weekStart(now);
+  }
+  if(s.freq === 'Monthly') return last.getFullYear()!==now.getFullYear() || last.getMonth()!==now.getMonth();
+  return false;
+}
+
+/* Multi-sheet Excel writer */
+function exportWorkbook(filename, sheets){
+  try{
+    if(typeof XLSX === 'undefined'){ alert('Excel library failed to load. Check your connection.'); return false; }
+    const wb = XLSX.utils.book_new();
+    const used = {};
+    sheets.forEach(s=>{
+      let nm = String(s.name||'Sheet').replace(/[\\\/\?\*\[\]:]/g,' ').slice(0,31) || 'Sheet';
+      let base = nm, k = 2;
+      while(used[nm]){ nm = (base.slice(0,28) + ' ' + k); k++; }
+      used[nm] = true;
+      const ws = XLSX.utils.aoa_to_sheet([s.headers, ...s.rows]);
+      XLSX.utils.book_append_sheet(wb, ws, nm);
+    });
+    XLSX.writeFile(wb, filename.replace(/[^a-z0-9_\-]+/gi,'_') + '.xlsx');
+    return true;
+  }catch(e){ console.error('report export failed', e); alert('Report export failed: ' + e.message); return false; }
+}
+
+/* Build one section's sheet rows for a location's data */
+function reportSheetFor(section, loc, d){
+  const money = v => Math.round((parseFloat(v)||0)*100)/100;
+  if(section === 'summary'){
+    const sa = d.salesAccounts||[], pa = d.purchaseAccounts||[], inv = d.inventory||[];
+    const invValue = inv.reduce((a,i)=>a+(Number(i.qty)||0)*(Number(i.cost)||0),0);
+    const rows = [
+      ['Report generated', new Date().toLocaleString()],
+      ['Location', loc],
+      ['Total Sales (Invoice Value)', money(sa.reduce((a,r)=>a+(parseFloat(r.invoiceValue)||0),0))],
+      ['Sales Outstanding', money(sa.reduce((a,r)=>a+(parseFloat(salesBalance(r))||0),0))],
+      ['Sales Payments Pending', sa.filter(r=>(r.paymentStatus||'Pending')==='Pending').length],
+      ['Sales Payments Overdue', sa.filter(r=>salesDueInfo(r).overdue).length],
+      ['Total Purchase Value', money(pa.reduce((a,r)=>a+(parseFloat(r.grossTotal)||0),0))],
+      ['Purchase Outstanding', money(pa.reduce((a,r)=>a+(parseFloat(r.balanceOutstanding)||0),0))],
+      ['Purchase Payments Overdue', pa.filter(r=>purchaseDueInfo(r).overdue).length],
+      ['Inventory Items', inv.length],
+      ['Inventory Value', money(invValue)],
+      ['Aging Stock (>90 days)', inv.filter(i=>!(i.deadStock==='Yes'||(Number(i.qty)||0)===0) && (invAgeDays(i)||0)>90).length],
+      ['Dead Stock Items', inv.filter(i=>i.deadStock==='Yes'||(Number(i.qty)||0)===0).length],
+      ['Pending Enquiries', (d.enquiry||[]).filter(r=>(r.action||'Pending')==='Pending').length]
+    ];
+    return { name: loc+' Summary', headers: ['Metric','Value'], rows: rows };
+  }
+  if(section === 'outstanding'){
+    const rows = [];
+    (d.salesAccounts||[]).filter(r=>(r.paymentStatus||'Pending')==='Pending').forEach(r=>{
+      rows.push(['SALE', r.date||'', r.invNo||'', r.customer||'', money(r.invoiceValue), money(salesBalance(r)), salesDueInfo(r).overdue?'OVERDUE':'Pending']);
+    });
+    (d.purchaseAccounts||[]).filter(r=>(r.paymentStatus||'Pending')==='Pending').forEach(r=>{
+      rows.push(['PURCHASE', r.date||'', r.invoiceNo||r.billNo||'', r.vendor||r.supplier||'', money(r.grossTotal), money(r.balanceOutstanding), purchaseDueInfo(r).overdue?'OVERDUE':'Pending']);
+    });
+    return { name: loc+' Outstanding', headers: ['Type','Date','Invoice No','Party','Amount','Balance','Status'], rows: rows };
+  }
+  if(section === 'inventory'){
+    const rows = (d.inventory||[]).map(i=>{
+      const days = invAgeDays(i);
+      const flag = (i.deadStock==='Yes'||(Number(i.qty)||0)===0) ? 'DEAD STOCK' : (days>365?'>1 yr':(days>90?'>90 days':''));
+      return [i.name, i.qty, i.cost, ((parseFloat(i.qty)||0)*(parseFloat(i.cost)||0))||'', i.category||'', i.lastInwardOn||i.addedOn||'', days==null?'':days, flag];
+    });
+    return { name: loc+' Inventory', headers: ['Item','Qty','Cost','Total Value','Category','Stock Since','Age (days)','Flag'], rows: rows };
+  }
+  /* generic table dump using the table's field definitions */
+  const fields = ttFields(section);
+  const list = d[section] || [];
+  return {
+    name: loc+' '+section,
+    headers: fields.map(f=>f.label).concat(['Added By']),
+    rows: list.map(r=>fields.map(f=>r[f.key]==null?'':r[f.key]).concat([r.addedBy||'']))
+  };
+}
+
+async function generateReport(s, auto){
+  const locs = s.loc === 'Both' ? Object.keys(LOCATIONS) : [s.loc];
+  const sheets = [];
+  for(const loc of locs){
+    if(!DATA[loc] || !Object.keys(DATA[loc]||{}).length){ await loadLocation(loc); }
+    const d = DATA[loc] || {};
+    (s.sections||[]).forEach(sec=>{ sheets.push(reportSheetFor(sec, loc, d)); });
+  }
+  if(sheets.length === 0){ alert('This schedule has no sections selected.'); return; }
+  const stamp = today();
+  const ok = exportWorkbook((s.name||'TEKFLOW_Report') + '_' + stamp, sheets);
+  if(ok){
+    s.lastRun = new Date().toISOString();
+    await saveReportSchedules();
+    logAudit('DATA CHANGE', 'Report "'+(s.name||'')+'" generated' + (auto?' (scheduled)':''));
+    if(!auto) render();
+  }
+}
+
+async function checkDueReports(){
+  if(!isAdmin()) return;
+  await loadReportSchedules();
+  const due = (REPORT_SCHEDULES.list||[]).filter(reportIsDue);
+  for(const s of due){
+    await generateReport(s, true);
+  }
+  if(due.length) alert(due.length + ' scheduled report(s) were due and have been downloaded:\n' + due.map(s=>'- '+s.name).join('\n'));
+}
+
+async function addReportSchedule(){
+  if(!isAdmin()) return;
+  const gv = id => { const el = document.getElementById(id); return el ? (el.value||'').trim() : ''; };
+  const name = gv('rs-name');
+  if(!name){ alert('Give the report a name.'); return; }
+  const sections = [...document.querySelectorAll('.rs-section:checked')].map(el=>el.value);
+  if(sections.length === 0){ alert('Tick at least one section to include.'); return; }
+  REPORT_SCHEDULES.list = REPORT_SCHEDULES.list || [];
+  REPORT_SCHEDULES.list.push({ id: uid(), name: name, freq: gv('rs-freq')||'Weekly', loc: gv('rs-loc')||currentLocation, sections: sections, lastRun: '' });
+  await saveReportSchedules();
+  logAudit('USER ADMIN', 'Report schedule added: "'+name+'"');
+  render();
+}
+async function deleteReportSchedule(id){
+  if(!isAdmin()) return;
+  const s = (REPORT_SCHEDULES.list||[]).find(x=>x.id===id);
+  if(s && !confirm('Delete the schedule "'+(s.name||'')+'"?')) return;
+  REPORT_SCHEDULES.list = (REPORT_SCHEDULES.list||[]).filter(x=>x.id!==id);
+  await saveReportSchedules();
+  render();
+}
+function runReportNow(id){
+  const s = (REPORT_SCHEDULES.list||[]).find(x=>x.id===id);
+  if(s) generateReport(s, false);
+}
+
+function reportSchedulesPanelHtml(){
+  const list = REPORT_SCHEDULES.list || [];
+  return `
+  <div class="panel"><div class="panel-head"><h3>&#128200; Scheduled Reports <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(generated &amp; downloaded automatically when an admin opens the ERP after they fall due)</span></h3></div>
+  <div class="panel-body">
+    <div class="form-grid">
+      <div class="field"><label>Report name</label><input type="text" id="rs-name" placeholder="e.g. Weekly Sales &amp; Outstanding"></div>
+      <div class="field"><label>Frequency</label><select id="rs-freq"><option>Daily</option><option selected>Weekly</option><option>Monthly</option></select></div>
+      <div class="field"><label>Location</label><select id="rs-loc">${Object.keys(LOCATIONS).map(l=>`<option ${l===currentLocation?'selected':''}>${l}</option>`).join('')}<option>Both</option></select></div>
+    </div>
+    <div class="field" style="margin-top:10px;"><label>Sections to include</label>
+      <div style="display:flex; flex-wrap:wrap; gap:10px 18px; margin-top:6px;">
+        ${REPORT_SECTIONS.map(sec=>`<label style="display:flex; align-items:center; gap:6px; font-size:12.5px; cursor:pointer; text-transform:none; letter-spacing:normal;"><input type="checkbox" class="rs-section" value="${sec.key}" ${sec.key==='summary'?'checked':''}> ${sec.label}</label>`).join('')}
+      </div>
+    </div>
+    <button type="button" class="btn" style="margin-top:10px;" onclick="addReportSchedule()">Add Schedule</button>
+    ${list.length ? `
+    <table style="margin-top:16px;"><thead><tr><th>Name</th><th>Frequency</th><th>Location</th><th>Sections</th><th>Last Run</th><th>Next</th><th></th></tr></thead><tbody>
+    ${list.map(s=>`<tr>
+      <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(s.name)}</td><td>${esc(s.freq)}</td><td>${esc(s.loc)}</td>
+      <td style="max-width:220px; white-space:normal;">${esc((s.sections||[]).map(k=>{const f=REPORT_SECTIONS.find(x=>x.key===k); return f?f.label.split(' (')[0]:k;}).join(', '))}</td>
+      <td>${s.lastRun ? esc(new Date(s.lastRun).toLocaleString()) : '<span style="color:var(--muted);">never</span>'}</td>
+      <td>${reportIsDue(s) ? '<span class="age-chip age-yellow">DUE NOW</span>' : 'scheduled'}</td>
+      <td>${actionCell(`<button class="icon-btn" onclick="runReportNow('${s.id}')" title="Generate and download this report now">&#9654; Run Now</button>`, deleteBtn(`deleteReportSchedule('${s.id}')`))}</td>
+    </tr>`).join('')}
+    </tbody></table>` : ''}
+  </div></div>`;
+}
+
 /* ---------------- NOTIFICATIONS (admin -> all users) ---------------- */
 let NOTIFS = { list: [] };
 async function loadNotifications(){
@@ -1426,6 +1623,7 @@ async function loadAll(){
   await loadUsers();
   await loadNotice();
   await loadNotifications();
+  await loadReportSchedules();
   await loadAudit();
   for(const loc of LOCATIONS){ await loadLocation(loc); }
 }
@@ -1893,7 +2091,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.24';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.26';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -2366,6 +2564,8 @@ async function chooseLocation(loc){
   await loadLocation(loc);
   subscribeLocation(loc);
   render();
+  /* generate any scheduled reports that fell due (admins only) */
+  setTimeout(()=>{ checkDueReports().catch(e=>console.error('report check failed', e)); }, 1500);
 }
 
 async function handleLogout(){
@@ -4117,11 +4317,23 @@ async function deleteInward(id){
 /* ---- Stock aging: age counted from the last inward receipt of the item,
    or from the day the item record was created. ---- */
 function invAgeDays(i){
-  const basis = i.lastInwardOn || i.addedOn;
-  if(!basis) return null;
-  const t = Date.parse(basis);
-  if(!t) return null;
-  return Math.max(0, Math.floor((Date.now() - t) / 86400000));
+  /* Age is derived AUTOMATICALLY from the Inward history: the item's most
+     recent inward receipt date (matched by item name). Falls back to the
+     item's own lastInwardOn / addedOn / Stock Since date. */
+  const d = DATA[currentLocation] || {};
+  const nm = String(i.name||'').trim().toLowerCase();
+  let ts = 0;
+  if(nm){
+    (d.inward||[]).forEach(r=>{
+      if(String(r.item||'').trim().toLowerCase() === nm){
+        const t = Date.parse(r.date) || 0;
+        if(t > ts) ts = t;
+      }
+    });
+  }
+  if(!ts) ts = Date.parse(i.lastInwardOn || i.addedOn || '') || 0;
+  if(!ts) return null;
+  return Math.max(0, Math.floor((Date.now() - ts) / 86400000));
 }
 function ageChip(days){
   if(days === null || days === undefined) return '';
@@ -8228,6 +8440,7 @@ function renderUsers(){
   ${tabHeader('Access Control', 'Users')}
   ${importantNoticePanelHtml()}
   ${sendNotificationPanelHtml()}
+  ${reportSchedulesPanelHtml()}
   <div class="panel"><div class="panel-head"><h3>Add user login</h3></div>
   <div class="panel-body">
   <form onsubmit="return addUser(event)">
