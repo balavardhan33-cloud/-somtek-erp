@@ -2305,7 +2305,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.31';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.32';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -4333,6 +4333,7 @@ function renderInward(){
   ${agingStockPanelHtml()}`;
   }
   const poPrefix = inwardPoPrefix(currentLocation);
+  const prevPaidVendors = [...new Set(d.inward.flatMap(r => [r.vendor, r.paidVendor]).filter(Boolean).map(v => String(v).trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
   const inwardAll = applyTableTools('inward', d.inward.slice().reverse());
   const inwardRows = limitRows('inward', inwardAll);
   return `
@@ -4355,7 +4356,7 @@ function renderInward(){
           <option value="Paid by vendor">Paid by vendor</option>
         </select>
       </div>
-      <div class="field" id="in-paid-vendor-wrap" style="display:none;"><label>Paying Vendor Name</label><input type="text" id="in-paid-vendor" placeholder="Who paid the freight"></div>
+      <div class="field" id="in-paid-vendor-wrap" style="display:none;"><label>Paying Vendor Name</label><input type="text" id="in-paid-vendor" list="in-paid-vendor-list" autocomplete="off" placeholder="Pick previous vendor or type new"><datalist id="in-paid-vendor-list">${prevPaidVendors.map(v=>`<option value="${esc(v)}">`).join('')}</datalist></div>
     </div>
     <div class="out-lines-head">Items in this receipt (multiple items allowed, including items of the same category)</div>
     <div id="in-item-lines">${inItemLineHtml()}</div>
