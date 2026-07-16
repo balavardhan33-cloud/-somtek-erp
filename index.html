@@ -1023,6 +1023,10 @@ async function backupUsersDoc(){
   }catch(e){ console.error('backupUsersDoc failed', e); }
 }
 
+/* Usernames this session INTENTIONALLY deleted (via the Delete button).
+   Anything else missing from the local list is stale data, not a deletion. */
+let sessionDeletedUsers = [];
+
 async function saveUsers(){
   /* Safety guard: never push an empty / invalid user list to the cloud. */
   if(!Array.isArray(USERS) || USERS.length === 0){
@@ -1030,6 +1034,24 @@ async function saveUsers(){
     return;
   }
   const msg = usersDiffMsg();
+  /* Merge-safety: if the cloud has users this session does not know about
+     (added by an admin after this browser loaded), keep them - unless this
+     session explicitly deleted them. Prevents stale sessions from silently
+     dropping newly added users on any save (even a failed-login save). */
+  try{
+    const cloud = await fsGet('users');
+    if(cloud && Array.isArray(cloud.list)){
+      cloud.list.forEach(cu=>{
+        if(!cu || !cu.username) return;
+        const knownLocally = USERS.some(u=>u.username===cu.username);
+        const deletedHere = sessionDeletedUsers.indexOf(cu.username) !== -1;
+        if(!knownLocally && !deletedHere){
+          USERS.push(cu);
+          console.warn('saveUsers merge: preserved user "'+cu.username+'" added by another session.');
+        }
+      });
+    }
+  }catch(e){ console.error('saveUsers merge check failed', e); }
   await backupUsersDoc();
   const ok = await fsSet('users', {list: USERS, roles: CUSTOM_ROLES, customFields: CUSTOM_FIELDS});
   snapshotUsersState();
@@ -1786,7 +1808,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.15';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.16';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -8118,6 +8140,7 @@ async function addUser(e){
 }
 async function deleteUser(username){
   if(!isAdmin()) return;
+  sessionDeletedUsers.push(username);
   USERS = USERS.filter(u=>u.username!==username);
   await saveUsers();
   render();
