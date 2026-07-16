@@ -745,6 +745,19 @@ function applyTableTools(name, rows){
       if(isNum) return ((parseFloat(va)||0) - (parseFloat(vb)||0)) * dir;
       return String(va==null?'':va).localeCompare(String(vb==null?'':vb), undefined, {numeric:true}) * dir;
     });
+  } else {
+    /* Default order everywhere: freshest dates first. Uses the table's first
+       date field; entries without a date go last; equal dates keep their
+       existing (newest-entry-first) order. Choosing a sort in the toolbar
+       overrides this. */
+    const df = fields.find(x=>x.type==='date');
+    if(df){
+      out = out.slice().sort((a,b)=>{
+        const ta = Date.parse(a[df.key]) || 0;
+        const tb = Date.parse(b[df.key]) || 0;
+        return tb - ta;
+      });
+    }
   }
   return out;
 }
@@ -1880,7 +1893,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.22';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.23';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -2588,6 +2601,11 @@ const IMPORT_SCHEMAS = {
     {key:'itemType', header:'Item Type'},
     {key:'qty', header:'Qty'},
     {key:'price', header:'Price'},
+    {key:'transporter', header:'Transporter'},
+    {key:'lrNumber', header:'LR Number'},
+    {key:'amountPaid', header:'Amount Paid'},
+    {key:'paidBy', header:'Paid By', options:['Paid by us','Paid by vendor']},
+    {key:'paidVendor', header:'Paying Vendor'},
     {key:'deadStock', header:'Dead Stock', options:['No','Yes']}
   ],
   outward: [
@@ -3888,6 +3906,16 @@ function renderInward(){
       <div class="field"><label>Vendor name</label><input type="text" id="in-vendor" required></div>
       <div class="field"><label>PO Number (starts with ${poPrefix})</label><input type="text" id="in-po-number" placeholder="${poPrefix}-001"></div>
       <div class="field"><label>PO Date</label><input type="date" id="in-po-date"></div>
+      <div class="field"><label>Transporter Name</label><input type="text" id="in-transporter" placeholder="Optional"></div>
+      <div class="field"><label>L.R Number</label><input type="text" id="in-lr" placeholder="Optional"></div>
+      <div class="field"><label>Amount Paid</label><input type="number" step="0.01" id="in-amount-paid" placeholder="Freight / transport amount"></div>
+      <div class="field"><label>Paid By</label>
+        <select id="in-paid-by" onchange="toggleInPaidVendor()">
+          <option value="Paid by us" selected>Paid by us</option>
+          <option value="Paid by vendor">Paid by vendor</option>
+        </select>
+      </div>
+      <div class="field" id="in-paid-vendor-wrap" style="display:none;"><label>Paying Vendor Name</label><input type="text" id="in-paid-vendor" placeholder="Who paid the freight"></div>
     </div>
     <div class="out-lines-head">Items in this receipt (multiple items allowed, including items of the same category)</div>
     <div id="in-item-lines">${inItemLineHtml()}</div>
@@ -3900,15 +3928,25 @@ function renderInward(){
   <div class="panel"><div class="panel-head"><h3>Inward log</h3><div class="panel-head-actions">${importBtn('inward')}${exportBtn('exportInward')}</div></div>
   <div class="panel-body">
   ${tableToolbar('inward', d.inward)}
-  <table><thead><tr><th>Date</th><th>Vendor Name</th><th>PO Number</th><th>PO Date</th><th>ITEM</th><th>Item Type</th><th>Qty</th><th>Price</th><th>Total Value</th><th>Dead Stock</th>${cfHeaders('inward')}<th>Added By</th><th></th></tr></thead><tbody>
-  ${inwardRows.length===0 ? noMatchRow(12, d.inward.length) :
+  <table><thead><tr><th>Date</th><th>Vendor Name</th><th>PO Number</th><th>PO Date</th><th>ITEM</th><th>Item Type</th><th>Qty</th><th>Price</th><th>Total Value</th><th>Transporter</th><th>L.R No</th><th>Amount Paid</th><th>Paid By</th><th>Dead Stock</th>${cfHeaders('inward')}<th>Added By</th><th></th></tr></thead><tbody>
+  ${inwardRows.length===0 ? noMatchRow(16, d.inward.length) :
     inwardRows.map(r=>`<tr>
-      <td>${fd(r.date)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.vendor)}</td><td>${esc(r.poNumber)}</td><td>${fd(r.poDate)}</td><td>${esc(r.item)}</td><td>${esc(r.itemType)}</td><td>${esc(r.qty)}</td><td>${esc(r.price)}</td><td>${rowTotal(r.qty, r.price)}</td><td>${esc(r.deadStock||'No')}</td>${cfCells('inward', r)}${addedByCell(r)}
+      <td>${fd(r.date)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.vendor)}</td><td>${esc(r.poNumber)}</td><td>${fd(r.poDate)}</td><td>${esc(r.item)}</td><td>${esc(r.itemType)}</td><td>${esc(r.qty)}</td><td>${esc(r.price)}</td><td>${rowTotal(r.qty, r.price)}</td><td>${esc(r.transporter)}</td><td>${esc(r.lrNumber)}</td><td>${esc(r.amountPaid)}</td><td>${esc(inPaidByDisplay(r))}</td><td>${esc(r.deadStock||'No')}</td>${cfCells('inward', r)}${addedByCell(r)}
       <td>${actionCell(editBtn('inward', r.id), deleteBtn(`deleteInward('${r.id}')`))}</td>
     </tr>`).join('')}
-  </tbody>${totalFootRow(12 + cfDefs('inward').length, 'Total Value (all matching entries)', sumTotal(inwardAll,'qty','price'))}</table>
+  </tbody>${totalFootRow(16 + cfDefs('inward').length, 'Total Value (all matching entries)', sumTotal(inwardAll,'qty','price'))}</table>
   ${showMoreBar('inward', inwardAll.length)}
-  </div></div>`;
+  </div></div>
+  ${agingStockPanelHtml()}`;
+}
+function toggleInPaidVendor(){
+  const sel = document.getElementById('in-paid-by');
+  const wrap = document.getElementById('in-paid-vendor-wrap');
+  if(sel && wrap) wrap.style.display = sel.value === 'Paid by vendor' ? '' : 'none';
+}
+function inPaidByDisplay(r){
+  if(!r.paidBy) return '';
+  return r.paidBy === 'Paid by vendor' ? 'Vendor' + (r.paidVendor ? ': ' + r.paidVendor : '') : 'Us';
 }
 function inItemLineHtml(){
   return `<div class="out-line in-line">
@@ -3966,12 +4004,22 @@ async function addInward(e){
   if(poNumber && !poNumber.toUpperCase().startsWith(prefix)){
     poNumber = prefix + '-' + poNumber;
   }
+  const paidBy = document.getElementById('in-paid-by').value || 'Paid by us';
   const header = {
     date: document.getElementById('in-date').value,
     vendor: document.getElementById('in-vendor').value.trim(),
     poNumber: poNumber,
-    poDate: document.getElementById('in-po-date').value
+    poDate: document.getElementById('in-po-date').value,
+    transporter: document.getElementById('in-transporter').value.trim(),
+    lrNumber: document.getElementById('in-lr').value.trim(),
+    amountPaid: document.getElementById('in-amount-paid').value.trim(),
+    paidBy: paidBy,
+    paidVendor: paidBy === 'Paid by vendor' ? document.getElementById('in-paid-vendor').value.trim() : ''
   };
+  if(paidBy === 'Paid by vendor' && !header.paidVendor){
+    alert('You chose "Paid by vendor" - enter the paying vendor name.');
+    return false;
+  }
   let lines = [...document.querySelectorAll('#in-item-lines .in-line')].map(line => ({
     item: line.querySelector('.in-line-item').value.trim(),
     itemType: line.querySelector('.in-line-type').value.trim(),
@@ -3988,6 +4036,11 @@ async function addInward(e){
       vendor: header.vendor,
       poNumber: header.poNumber,
       poDate: header.poDate,
+      transporter: header.transporter,
+      lrNumber: header.lrNumber,
+      amountPaid: header.amountPaid,
+      paidBy: header.paidBy,
+      paidVendor: header.paidVendor,
       item: l.item,
       itemType: l.itemType,
       qty: l.qty,
@@ -4026,8 +4079,8 @@ async function addInward(e){
 }
 function exportInward(){
   const d = DATA[currentLocation];
-  const headers = ['Date','Vendor Name','PO Number','PO Date','ITEM','Item Type','Qty','Price','Total Value','Dead Stock','Added By'];
-  const rows = d.inward.map(r=>[r.date, r.vendor, r.poNumber, r.poDate, r.item, r.itemType, r.qty, r.price, ((parseFloat(r.qty)||0)*(parseFloat(r.price)||0))||'', r.deadStock||'No', r.addedBy]);
+  const headers = ['Date','Vendor Name','PO Number','PO Date','ITEM','Item Type','Qty','Price','Total Value','Transporter','LR Number','Amount Paid','Paid By','Paying Vendor','Dead Stock','Added By'];
+  const rows = d.inward.map(r=>[r.date, r.vendor, r.poNumber, r.poDate, r.item, r.itemType, r.qty, r.price, ((parseFloat(r.qty)||0)*(parseFloat(r.price)||0))||'', r.transporter||'', r.lrNumber||'', r.amountPaid||'', r.paidBy||'', r.paidVendor||'', r.deadStock||'No', r.addedBy]);
   cfExportAppend('inward', d.inward, headers, rows);
   exportToExcel(currentLocation+'_Inward', headers, rows);
 }
@@ -4066,15 +4119,11 @@ function renderInventory(){
   const d = DATA[currentLocation];
   invStampDates(d);
   const deadStock = d.inventory.filter(i => i.deadStock==='Yes' || (Number(i.qty)||0) === 0);
-  const aging = d.inventory
-    .filter(i => !(i.deadStock==='Yes' || (Number(i.qty)||0)===0) && (invAgeDays(i)||0) > 90)
-    .sort((a,b)=>(invAgeDays(b)||0)-(invAgeDays(a)||0));
   const invAll = applyTableTools('inventory', d.inventory);
   const invRows = limitRows('inventory', invAll);
   const switcher = `
   <div class="acct-switch" style="margin-bottom:14px;">
     <button type="button" class="acct-switch-btn ${invSection==='stock'?'active':''}" onclick="switchInvSection('stock')">&#128230; Stock</button>
-    <button type="button" class="acct-switch-btn ${invSection==='aging'?'active':''}" onclick="switchInvSection('aging')">&#9203; Aging Stock${aging.length?` (${aging.length})`:''}</button>
     <button type="button" class="acct-switch-btn ${invSection==='dead'?'active':''}" onclick="switchInvSection('dead')">&#9888;&#65039; Dead Stock${deadStock.length?` (${deadStock.length})`:''}</button>
   </div>`;
   const stockSection = `
@@ -4115,21 +4164,6 @@ function renderInventory(){
   </tbody>${totalFootRow(10 + cfDefs('inventory').length, 'Total Stock Value (all matching items)', sumTotal(invAll,'qty','cost'))}</table>
   ${showMoreBar('inventory', invAll.length)}
   </div></div>`;
-  const agingSection = `
-  <div class="panel"><div class="panel-head"><h3>&#9203; Aging Stock &mdash; ${locationLabel(currentLocation, 14)} <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(in stock for more than 90 days &mdash; oldest first)</span></h3><div class="panel-head-actions">${exportBtn('exportAgingStock')}</div></div>
-  <div class="panel-body">
-  <table><thead><tr><th>Item</th><th>Qty</th><th>Cost</th><th>Total Value</th><th>Category</th><th>Stock Since</th><th>Age</th><th></th></tr></thead><tbody>
-  ${aging.length===0 ? `<tr class="empty-row"><td colspan="8">No aging stock &mdash; nothing has been sitting for more than 90 days.</td></tr>` :
-    aging.map(i=>{
-      const days = invAgeDays(i);
-      return `<tr>
-      <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(i.name)}</td><td>${esc(i.qty)}</td><td>${esc(i.cost)}</td><td>${rowTotal(i.qty, i.cost)}</td><td>${esc(i.category)}</td>
-      <td>${esc(i.lastInwardOn || i.addedOn || '')}</td>
-      <td>${days} days ${ageChip(days)}</td>
-      <td>${actionCell(editBtn('inventory', i.id), deleteBtn(`deleteInventory('${i.id}')`))}</td>
-    </tr>`;}).join('')}
-  </tbody></table>
-  </div></div>`;
   const deadSection = `
   <div class="panel"><div class="panel-head"><h3>&#9888;&#65039; Dead Stock &mdash; ${locationLabel(currentLocation, 14)} <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(marked as dead stock, or zero quantity on hand)</span></h3><div class="panel-head-actions">${exportBtn('exportDeadStock')}</div></div>
   <div class="panel-body">
@@ -4144,7 +4178,30 @@ function renderInventory(){
   return `
   ${tabHeader(currentLocation, 'Inventory')}
   ${switcher}
-  ${invSection==='aging' ? agingSection : invSection==='dead' ? deadSection : stockSection}`;
+  ${invSection==='dead' ? deadSection : stockSection}`;
+}
+/* Aging Stock panel - shown in the INWARD tab */
+function agingStockPanelHtml(){
+  const d = DATA[currentLocation];
+  invStampDates(d);
+  const aging = d.inventory
+    .filter(i => !(i.deadStock==='Yes' || (Number(i.qty)||0)===0) && (invAgeDays(i)||0) > 90)
+    .sort((a,b)=>(invAgeDays(b)||0)-(invAgeDays(a)||0));
+  return `
+  <div class="panel"><div class="panel-head"><h3>&#9203; Aging Stock &mdash; ${locationLabel(currentLocation, 14)} <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(in stock for more than 90 days &mdash; oldest first)</span></h3><div class="panel-head-actions">${exportBtn('exportAgingStock')}</div></div>
+  <div class="panel-body">
+  <table><thead><tr><th>Item</th><th>Qty</th><th>Cost</th><th>Total Value</th><th>Category</th><th>Stock Since</th><th>Age</th><th></th></tr></thead><tbody>
+  ${aging.length===0 ? `<tr class="empty-row"><td colspan="8">No aging stock &mdash; nothing has been sitting for more than 90 days.</td></tr>` :
+    aging.map(i=>{
+      const days = invAgeDays(i);
+      return `<tr>
+      <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(i.name)}</td><td>${esc(i.qty)}</td><td>${esc(i.cost)}</td><td>${rowTotal(i.qty, i.cost)}</td><td>${esc(i.category)}</td>
+      <td>${esc(i.lastInwardOn || i.addedOn || '')}</td>
+      <td>${days} days ${ageChip(days)}</td>
+      <td>${actionCell(editBtn('inventory', i.id), deleteBtn(`deleteInventory('${i.id}')`))}</td>
+    </tr>`;}).join('')}
+  </tbody></table>
+  </div></div>`;
 }
 function exportAgingStock(){
   const d = DATA[currentLocation];
@@ -6844,6 +6901,11 @@ const EDIT_SCHEMAS = {
     {key:'itemType', label:'Item Type', type:'text'},
     {key:'qty', label:'Quantity', type:'number'},
     {key:'price', label:'Price', type:'number'},
+    {key:'transporter', label:'Transporter Name', type:'text'},
+    {key:'lrNumber', label:'L.R Number', type:'text'},
+    {key:'amountPaid', label:'Amount Paid', type:'number'},
+    {key:'paidBy', label:'Paid By', type:'select', options:['Paid by us','Paid by vendor']},
+    {key:'paidVendor', label:'Paying Vendor Name', type:'text'},
     {key:'deadStock', label:'Dead Stock', type:'select', options:['No','Yes']}
   ],
   outward: [
