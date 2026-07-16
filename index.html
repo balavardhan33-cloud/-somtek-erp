@@ -974,6 +974,12 @@ function readSessionLocal(){
   try{ const v = sessionStorage.getItem('somtek_erp_session'); return v ? JSON.parse(v) : null; }catch(e){ return null; }
 }
 
+/* User accounts live in USERS_DOC ('users_v2'). Old cached app versions
+   only know the legacy 'users' document - whatever they write there is
+   ignored, so no outdated device can ever wipe or reset accounts again. */
+const USERS_DOC = 'users_v2';
+const USERS_DOC_LEGACY = 'users';
+
 async function loadUsers(){
   loadUsersBackupMeta(); /* fire-and-forget: fills the restore button label */
   /* Retry up to 3 times - a temporary network failure must NEVER be treated
@@ -981,10 +987,19 @@ async function loadUsers(){
      with defaults and every real user is wiped. */
   let doc = null;
   for(let attempt = 1; attempt <= 3; attempt++){
-    doc = await fsGet('users');
+    doc = await fsGet(USERS_DOC);
     if(doc || fsGetLastStatus === 'missing') break;   /* got data, or confirmed 404 */
     console.warn('loadUsers: read attempt '+attempt+' failed, retrying...');
     await new Promise(r => setTimeout(r, 800 * attempt));
+  }
+  if(!doc && fsGetLastStatus === 'missing'){
+    /* users_v2 does not exist yet -> one-time migration from the legacy doc */
+    const legacy = await fsGet(USERS_DOC_LEGACY);
+    if(legacy && Array.isArray(legacy.list) && legacy.list.length){
+      doc = legacy;
+      await fsSet(USERS_DOC, legacy);
+      console.warn('loadUsers: migrated '+legacy.list.length+' user(s) from legacy doc to '+USERS_DOC+'.');
+    }
   }
   if(doc && Array.isArray(doc.list)){
     USERS = doc.list;
@@ -1029,7 +1044,7 @@ async function loadUsers(){
   snapshotUsersState();
   if(fsGetLastStatus === 'missing'){
     /* Confirmed: the users document really does not exist -> safe to seed defaults. */
-    await fsSet('users', {list: USERS, roles: CUSTOM_ROLES, customFields: CUSTOM_FIELDS});
+    await fsSet(USERS_DOC, {list: USERS, roles: CUSTOM_ROLES, customFields: CUSTOM_FIELDS});
   }else{
     /* The read FAILED (network/timeout). The real users very likely still exist
        in Firestore - do NOT overwrite them. Use defaults in memory only and
@@ -1044,7 +1059,7 @@ async function backupUsersDoc(){
   /* Copy the CURRENT cloud users doc to users_backup before it is overwritten,
      so there is always one previous version to restore from. */
   try{
-    const cur = await fsGet('users');
+    const cur = await fsGet(USERS_DOC);
     if(cur && Array.isArray(cur.list) && cur.list.length > 0){
       const backup = {list: cur.list, roles: cur.roles||{}, customFields: cur.customFields||{}, savedAt: new Date().toISOString()};
       await fsSet('users_backup', backup);
@@ -1081,7 +1096,7 @@ async function saveUsers(){
       if(!u || !u.username) return;
       if(!snapMap[u.username] || snapMap[u.username] !== JSON.stringify(u)) u.updatedAt = nowIso;
     });
-    const cloud = await fsGet('users');
+    const cloud = await fsGet(USERS_DOC);
     if(cloud && Array.isArray(cloud.list)){
       const ts = u => (u && u.updatedAt) ? (Date.parse(u.updatedAt) || 0) : 0;
       const cloudMap = {};
@@ -1106,7 +1121,7 @@ async function saveUsers(){
     }
   }catch(e){ console.error('saveUsers merge check failed', e); }
   await backupUsersDoc();
-  const ok = await fsSet('users', {list: USERS, roles: CUSTOM_ROLES, customFields: CUSTOM_FIELDS});
+  const ok = await fsSet(USERS_DOC, {list: USERS, roles: CUSTOM_ROLES, customFields: CUSTOM_FIELDS});
   snapshotUsersState();
   if(ok && session && msg) logAudit('USER ADMIN', msg);
 }
@@ -1133,7 +1148,7 @@ async function restoreUsersFromBackup(){
   syncRoleOptions();
   syncCustomFieldSchemas();
   snapshotUsersState();
-  const ok = await fsSet('users', {list: USERS, roles: CUSTOM_ROLES, customFields: CUSTOM_FIELDS});
+  const ok = await fsSet(USERS_DOC, {list: USERS, roles: CUSTOM_ROLES, customFields: CUSTOM_FIELDS});
   if(ok){
     logAudit('USER ADMIN', 'Restored ' + USERS.length + ' user(s) from backup (' + when + ')');
     alert('Users restored successfully.');
@@ -1777,7 +1792,7 @@ const SYNC_INTERVAL_MS = 6000;
 async function syncTick(){
   if(!firebaseReady || isUserTyping() || hasUnsavedFormInput() || !session) return;
   const loc = currentLocation;
-  const [locDoc, usersDoc, noticeDoc] = await Promise.all([ fsGet('loc_'+loc), fsGet('users'), fsGet('notice') ]);
+  const [locDoc, usersDoc, noticeDoc] = await Promise.all([ fsGet('loc_'+loc), fsGet(USERS_DOC), fsGet('notice') ]);
   let changed = false;
   if(locDoc){ DATA[loc] = ensureShape(locDoc); snapshotLocation(loc); changed = true; }
   if(usersDoc && Array.isArray(usersDoc.list)){
@@ -2231,7 +2246,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.29';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.30';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
