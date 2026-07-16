@@ -404,6 +404,9 @@ form input[readonly]{background:var(--panel-2); color:var(--muted); cursor:defau
 .kpi-star{cursor:pointer; font-size:15px; line-height:1; opacity:0.3; margin-left:8px; user-select:none;}
 .kpi-star:hover{opacity:0.7;}
 .kpi-star.faved{opacity:1; color:#f0a500;}
+.age-chip{display:inline-block; padding:2px 8px; font-size:10px; font-weight:700; border-radius:3px; font-family:'IBM Plex Mono',monospace; letter-spacing:0.02em; white-space:nowrap;}
+.age-red{background:#fdecea; color:#c62828; border:1px solid #f2b8b5;}
+.age-yellow{background:#fff8e1; color:#8a6100; border:1px solid #eeda9a;}
 .topbar-user .role-icon{
   width:30px; height:30px; border-radius:50%; flex-shrink:0; display:flex; align-items:center; justify-content:center;
   font-size:15px; background:var(--panel-2); border:1px solid var(--border);
@@ -1877,7 +1880,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.21';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.22';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -2466,7 +2469,7 @@ function topbarUserBadge(){
     <div class="info"><div class="u-name">${esc(session.name)}</div><div class="u-role">${esc(session.role)} &middot; ${esc(session.username)}</div></div>
     <div class="notif-bell" onclick="toggleNotifMenu(event)" title="Notifications">&#128276;${unreadNotifCount() ? `<span class="notif-badge" id="notif-badge">${unreadNotifCount()}</span>` : ''}</div>
     <div class="settings-gear" onclick="toggleSettingsMenu(event)" title="Settings">&#9881;</div>
-    <div class="logout-link" onclick="handleLogout()">Sign out</div>
+    <div class="logout-link" onclick="handleLogout()" title="Sign out" style="display:flex; align-items:center;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg></div>
   </div>`;
 }
 /* ---------------- BIRTHDAY BANNER ---------------- */
@@ -4000,6 +4003,7 @@ async function addInward(e){
         existing.qty = String((parseFloat(existing.qty)||0) + qtyNum);
         if(l.price && !existing.cost) existing.cost = l.price;
         if(l.deadStock==='Yes') existing.deadStock = 'Yes';
+        existing.lastInwardOn = today();
       } else {
         d.inventory.push({
           id: uid(),
@@ -4009,6 +4013,8 @@ async function addInward(e){
           cost: l.price,
           category: l.itemType,
           deadStock: l.deadStock,
+          addedOn: today(),
+          lastInwardOn: today(),
           addedBy: actorName()
         });
       }
@@ -4034,13 +4040,44 @@ async function deleteInward(id){
 }
 
 /* ---------------- INVENTORY ---------------- */
+/* ---- Stock aging: age counted from the last inward receipt of the item,
+   or from the day the item record was created. ---- */
+function invAgeDays(i){
+  const basis = i.lastInwardOn || i.addedOn;
+  if(!basis) return null;
+  const t = Date.parse(basis);
+  if(!t) return null;
+  return Math.max(0, Math.floor((Date.now() - t) / 86400000));
+}
+function ageChip(days){
+  if(days === null || days === undefined) return '';
+  if(days > 365) return '<span class="age-chip age-red">&gt;1 yr</span>';
+  if(days > 90) return '<span class="age-chip age-yellow">&gt;90 days</span>';
+  return '';
+}
+function invStampDates(d){
+  /* Legacy items have no date - stamp them once so aging starts counting. */
+  const t = today();
+  (d.inventory||[]).forEach(i=>{ if(!i.addedOn && !i.lastInwardOn) i.addedOn = t; });
+}
+let invSection = 'stock';
+function switchInvSection(s){ invSection = s; render(); }
 function renderInventory(){
   const d = DATA[currentLocation];
+  invStampDates(d);
   const deadStock = d.inventory.filter(i => i.deadStock==='Yes' || (Number(i.qty)||0) === 0);
+  const aging = d.inventory
+    .filter(i => !(i.deadStock==='Yes' || (Number(i.qty)||0)===0) && (invAgeDays(i)||0) > 90)
+    .sort((a,b)=>(invAgeDays(b)||0)-(invAgeDays(a)||0));
   const invAll = applyTableTools('inventory', d.inventory);
   const invRows = limitRows('inventory', invAll);
-  return `
-  ${tabHeader(currentLocation, 'Inventory')}
+  const switcher = `
+  <div class="acct-switch" style="margin-bottom:14px;">
+    <button type="button" class="acct-switch-btn ${invSection==='stock'?'active':''}" onclick="switchInvSection('stock')">&#128230; Stock</button>
+    <button type="button" class="acct-switch-btn ${invSection==='aging'?'active':''}" onclick="switchInvSection('aging')">&#9203; Aging Stock${aging.length?` (${aging.length})`:''}</button>
+    <button type="button" class="acct-switch-btn ${invSection==='dead'?'active':''}" onclick="switchInvSection('dead')">&#9888;&#65039; Dead Stock${deadStock.length?` (${deadStock.length})`:''}</button>
+  </div>`;
+  const stockSection = `
   <div class="panel"><div class="panel-head"><h3>Add stock item</h3></div>
   <div class="panel-body">
   <form onsubmit="return addInventory(event)">
@@ -4063,10 +4100,11 @@ function renderInventory(){
   <div class="panel"><div class="panel-head"><h3>Stock &mdash; ${locationLabel(currentLocation, 14)}</h3><div class="panel-head-actions">${importBtn('inventory')}${exportBtn('exportInventory')}</div></div>
   <div class="panel-body">
   ${tableToolbar('inventory', d.inventory)}
-  <table><thead><tr><th>Item</th><th>Qty</th><th>Specifications</th><th>Cost</th><th>Total Value</th><th>Category</th><th>Dead Stock</th>${cfHeaders('inventory')}<th>Added By</th><th></th></tr></thead><tbody>
-  ${invRows.length===0 ? noMatchRow(9, d.inventory.length) :
+  <table><thead><tr><th>Item</th><th>Qty</th><th>Specifications</th><th>Cost</th><th>Total Value</th><th>Category</th><th>Aging</th><th>Dead Stock</th>${cfHeaders('inventory')}<th>Added By</th><th></th></tr></thead><tbody>
+  ${invRows.length===0 ? noMatchRow(10, d.inventory.length) :
     invRows.map(i=>`<tr>
       <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(i.name)}</td><td>${esc(i.qty)}</td><td>${esc(i.specs)}</td><td>${esc(i.cost)}</td><td>${rowTotal(i.qty, i.cost)}</td><td>${esc(i.category)}</td>
+      <td>${ageChip(invAgeDays(i)) || '<span style="color:var(--muted); font-size:11px;">&mdash;</span>'}</td>
       <td><select class="status-select" onchange="updateInventoryDeadStock('${i.id}', this.value)">
         <option value="No" ${(i.deadStock||'No')==='No'?'selected':''}>No</option>
         <option value="Yes" ${i.deadStock==='Yes'?'selected':''}>Yes</option>
@@ -4074,10 +4112,26 @@ function renderInventory(){
       ${cfCells('inventory', i)}${addedByCell(i)}
       <td>${actionCell(editBtn('inventory', i.id), deleteBtn(`deleteInventory('${i.id}')`))}</td>
     </tr>`).join('')}
-  </tbody>${totalFootRow(9 + cfDefs('inventory').length, 'Total Stock Value (all matching items)', sumTotal(invAll,'qty','cost'))}</table>
+  </tbody>${totalFootRow(10 + cfDefs('inventory').length, 'Total Stock Value (all matching items)', sumTotal(invAll,'qty','cost'))}</table>
   ${showMoreBar('inventory', invAll.length)}
-  </div></div>
-  <div class="panel"><div class="panel-head"><h3>Dead Stock &mdash; ${locationLabel(currentLocation, 14)} <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(marked as dead stock, or zero quantity on hand)</span></h3><div class="panel-head-actions">${exportBtn('exportDeadStock')}</div></div>
+  </div></div>`;
+  const agingSection = `
+  <div class="panel"><div class="panel-head"><h3>&#9203; Aging Stock &mdash; ${locationLabel(currentLocation, 14)} <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(in stock for more than 90 days &mdash; oldest first)</span></h3><div class="panel-head-actions">${exportBtn('exportAgingStock')}</div></div>
+  <div class="panel-body">
+  <table><thead><tr><th>Item</th><th>Qty</th><th>Cost</th><th>Total Value</th><th>Category</th><th>Stock Since</th><th>Age</th><th></th></tr></thead><tbody>
+  ${aging.length===0 ? `<tr class="empty-row"><td colspan="8">No aging stock &mdash; nothing has been sitting for more than 90 days.</td></tr>` :
+    aging.map(i=>{
+      const days = invAgeDays(i);
+      return `<tr>
+      <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(i.name)}</td><td>${esc(i.qty)}</td><td>${esc(i.cost)}</td><td>${rowTotal(i.qty, i.cost)}</td><td>${esc(i.category)}</td>
+      <td>${esc(i.lastInwardOn || i.addedOn || '')}</td>
+      <td>${days} days ${ageChip(days)}</td>
+      <td>${actionCell(editBtn('inventory', i.id), deleteBtn(`deleteInventory('${i.id}')`))}</td>
+    </tr>`;}).join('')}
+  </tbody></table>
+  </div></div>`;
+  const deadSection = `
+  <div class="panel"><div class="panel-head"><h3>&#9888;&#65039; Dead Stock &mdash; ${locationLabel(currentLocation, 14)} <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(marked as dead stock, or zero quantity on hand)</span></h3><div class="panel-head-actions">${exportBtn('exportDeadStock')}</div></div>
   <div class="panel-body">
   <table><thead><tr><th>Item</th><th>Qty</th><th>Specifications</th><th>Cost</th><th>Category</th><th>Added By</th><th></th></tr></thead><tbody>
   ${deadStock.length===0 ? `<tr class="empty-row"><td colspan="7">No dead stock &mdash; every item currently has quantity on hand.</td></tr>` :
@@ -4087,6 +4141,22 @@ function renderInventory(){
     </tr>`).join('')}
   </tbody></table>
   </div></div>`;
+  return `
+  ${tabHeader(currentLocation, 'Inventory')}
+  ${switcher}
+  ${invSection==='aging' ? agingSection : invSection==='dead' ? deadSection : stockSection}`;
+}
+function exportAgingStock(){
+  const d = DATA[currentLocation];
+  const aging = d.inventory
+    .filter(i => !(i.deadStock==='Yes' || (Number(i.qty)||0)===0) && (invAgeDays(i)||0) > 90)
+    .sort((a,b)=>(invAgeDays(b)||0)-(invAgeDays(a)||0));
+  const headers = ['Item','Qty','Cost','Total Value','Category','Stock Since','Age (days)','Flag'];
+  const rows = aging.map(i=>{
+    const days = invAgeDays(i);
+    return [i.name, i.qty, i.cost, ((parseFloat(i.qty)||0)*(parseFloat(i.cost)||0))||'', i.category, i.lastInwardOn||i.addedOn||'', days, days>365?'>1 yr':'>90 days'];
+  });
+  exportToExcel(currentLocation+'_Aging_Stock', headers, rows);
 }
 async function addInventory(e){
   e.preventDefault();
@@ -4099,6 +4169,7 @@ async function addInventory(e){
     cost: document.getElementById('inv-cost').value.trim(),
     category: document.getElementById('inv-cat').value.trim(),
     deadStock: document.getElementById('inv-deadstock').value || 'No',
+    addedOn: today(),
     addedBy: actorName()
   });
   await saveLocation(currentLocation);
@@ -6734,7 +6805,8 @@ const EDIT_SCHEMAS = {
     {key:'specs', label:'Specifications', type:'text'},
     {key:'cost', label:'Cost', type:'number'},
     {key:'category', label:'Category', type:'text'},
-    {key:'deadStock', label:'Dead Stock', type:'select', options:['No','Yes']}
+    {key:'deadStock', label:'Dead Stock', type:'select', options:['No','Yes']},
+    {key:'addedOn', label:'Stock Since (date)', type:'date'}
   ],
   vendorPO: [
     {key:'poNumber', label:'P.O Number', type:'text'},
