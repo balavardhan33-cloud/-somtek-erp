@@ -2305,7 +2305,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.32';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.33';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -4344,7 +4344,7 @@ function renderInward(){
   <form onsubmit="return addInward(event)">
     <div class="form-grid">
       <div class="field"><label>Date</label><input type="date" id="in-date" value="${today()}" required></div>
-      <div class="field"><label>Vendor name</label><input type="text" id="in-vendor" required></div>
+      <div class="field"><label>Vendor name</label><input type="text" id="in-vendor" oninput="syncInPaidVendor(this.value)" required></div>
       <div class="field"><label>PO Number (starts with ${poPrefix})</label><input type="text" id="in-po-number" placeholder="${poPrefix}-001"></div>
       <div class="field"><label>PO Date</label><input type="date" id="in-po-date"></div>
       <div class="field"><label>Transporter Name</label><input type="text" id="in-transporter" placeholder="Optional"></div>
@@ -4356,7 +4356,7 @@ function renderInward(){
           <option value="Paid by vendor">Paid by vendor</option>
         </select>
       </div>
-      <div class="field" id="in-paid-vendor-wrap" style="display:none;"><label>Paying Vendor Name</label><input type="text" id="in-paid-vendor" list="in-paid-vendor-list" autocomplete="off" placeholder="Pick previous vendor or type new"><datalist id="in-paid-vendor-list">${prevPaidVendors.map(v=>`<option value="${esc(v)}">`).join('')}</datalist></div>
+      <div class="field" id="in-paid-vendor-wrap" style="display:none;"><label>Paying Vendor Name</label><input type="text" id="in-paid-vendor" list="in-paid-vendor-list" autocomplete="off" oninput="this.dataset.manual='1'" placeholder="Auto-fills vendor name, or type"><datalist id="in-paid-vendor-list">${prevPaidVendors.map(v=>`<option value="${esc(v)}">`).join('')}</datalist></div>
     </div>
     <div class="out-lines-head">Items in this receipt (multiple items allowed, including items of the same category)</div>
     <div id="in-item-lines">${inItemLineHtml()}</div>
@@ -4383,6 +4383,18 @@ function toggleInPaidVendor(){
   const sel = document.getElementById('in-paid-by');
   const wrap = document.getElementById('in-paid-vendor-wrap');
   if(sel && wrap) wrap.style.display = sel.value === 'Paid by vendor' ? '' : 'none';
+  if(sel && sel.value === 'Paid by vendor'){
+    const pv = document.getElementById('in-paid-vendor');
+    const vn = document.getElementById('in-vendor');
+    if(pv && vn && !pv.value.trim() && vn.value.trim()) pv.value = vn.value.trim();
+  }
+}
+function syncInPaidVendor(val){
+  const sel = document.getElementById('in-paid-by');
+  const pv = document.getElementById('in-paid-vendor');
+  if(!sel || !pv || sel.value !== 'Paid by vendor') return;
+  if(pv.dataset.manual === '1') return;
+  pv.value = (val || '').trim();
 }
 function inPaidByDisplay(r){
   if(!r.paidBy) return '';
