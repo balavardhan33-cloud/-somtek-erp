@@ -202,6 +202,13 @@ h1,h2,h3,.stencil{font-family:'Oswald', sans-serif; text-transform:uppercase; le
 .topbar h2{font-size:24px; font-weight:600;}
 .topbar .eyebrow{color:var(--accent); font-size:11px; letter-spacing:0.12em; margin-bottom:4px; font-family:'Oswald',sans-serif;}
 
+.tabsec-switch{margin:4px 0 20px 0; flex-wrap:wrap;}
+.tabsec-switch .acct-switch-btn{padding:11px 20px;}
+.sec-head{display:flex; align-items:center; gap:10px; margin:6px 0 12px 0; font-family:'Oswald',sans-serif; text-transform:uppercase;}
+.sec-head:first-child{margin-top:0;}
+.sec-head .sec-bar{width:5px; height:20px; background:var(--accent); flex:0 0 auto;}
+.sec-head .sec-label{font-size:13px; letter-spacing:0.12em; color:var(--text); font-weight:600;}
+.sec-head .sec-line{flex:1; height:1px; background:var(--border);}
 .panel{background:var(--panel); border:1px solid var(--border); margin-bottom:20px;}
 .panel-head{padding:14px 18px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;}
 .panel-head h3{font-size:14px; letter-spacing:0.05em;}
@@ -1284,6 +1291,7 @@ function printJobsPanelHtml(){
   const list = PRINT_JOBS.list || [];
   const done = PRINT_JOBS.done || [];
   return `
+  ${secHead('&#128424;', 'Print Jobs')}
   <div class="panel"><div class="panel-head"><h3>&#128424; Print Jobs <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(Print Station on this device: <b>${isPrintStation()?'ON':'OFF'}</b> &mdash; toggle it in the &#9881; settings menu on the printer PC)</span></h3></div>
   <div class="panel-body">
     ${list.length===0 ? '<p style="font-size:12.5px; color:var(--muted); margin:0;">No documents waiting to print.</p>' : `
@@ -1462,6 +1470,7 @@ function runReportNow(id){
 function reportSchedulesPanelHtml(){
   const list = REPORT_SCHEDULES.list || [];
   return `
+  ${secHead('&#128200;', 'Scheduled Reports')}
   <div class="panel"><div class="panel-head"><h3>&#128200; Scheduled Reports <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(generated &amp; downloaded automatically when an admin opens the ERP after they fall due)</span></h3></div>
   <div class="panel-body">
     <div class="form-grid">
@@ -1593,6 +1602,7 @@ async function sendNotification(){
 }
 function sendNotificationPanelHtml(){
   return `
+  ${secHead('&#128276;', 'Notifications')}
   <div class="panel"><div class="panel-head"><h3>&#128276; Send Notification <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(appears on every user's bell icon)</span></h3></div>
   <div class="panel-body">
     <div class="form-grid">
@@ -2039,6 +2049,7 @@ function render(customHtml){
   const banner = errorBanner();
   if(customHtml){ app.innerHTML = banner + customHtml; return; }
   app.innerHTML = banner + (session ? (locationChosen ? renderShell() : renderLocationPicker()) : renderLogin());
+  if(session && locationChosen) applyTabSections();
   restoreScrollPositions(scrollSnap);
   setTimeout(()=>restoreScrollPositions(scrollSnap), 0);
   if(!session && loginStage==='totp-setup'){ setTimeout(()=>{ try{ renderLoginTotpQr(); }catch(e){} }, 0); }
@@ -2305,7 +2316,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.33';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.35';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -3596,6 +3607,47 @@ function renderInventoryBISection(){
   </div>`;
 }
 
+function secHead(icon, label){
+  return `<div class="sec-head"><span class="sec-bar"></span><span class="sec-label">${icon ? icon + ' ' : ''}${label}</span><span class="sec-line"></span></div>`;
+}
+let tabSectionActive = {};
+function applyTabSections(){
+  try{
+    const main = document.querySelector('#app .main');
+    if(!main) return;
+    const first = main.querySelector('.sec-head');
+    if(!first) return;
+    const parent = first.parentElement;
+    const kids = [...parent.children];
+    const heads = kids.filter(el => el.classList && el.classList.contains('sec-head'));
+    if(heads.length < 2) return;
+    let idx = -1;
+    kids.forEach(ch => {
+      if(heads.includes(ch)) idx++;
+      if(idx >= 0) ch.setAttribute('data-tabsec', idx);
+    });
+    const labels = heads.map(h => { const l = h.querySelector('.sec-label'); return l ? l.innerHTML : h.innerHTML; });
+    const key = currentTab + '|' + heads.length;
+    let active = tabSectionActive[key];
+    if(active == null || active < 0 || active >= heads.length) active = 0;
+    if(currentTab === 'quotation' && typeof editingQuoteId !== 'undefined' && editingQuoteId) active = 0;
+    tabSectionActive[key] = active;
+    const sw = document.createElement('div');
+    sw.className = 'acct-switch tabsec-switch';
+    sw.innerHTML = labels.map((l,i)=>`<button type="button" class="acct-switch-btn tabsec-btn ${i===active?'active':''}" data-idx="${i}" onclick="showTabSection('${key}', ${i})">${l}</button>`).join('');
+    parent.insertBefore(sw, heads[0]);
+    showTabSection(key, active);
+  }catch(e){}
+}
+function showTabSection(key, idx){
+  tabSectionActive[key] = idx;
+  const main = document.querySelector('#app .main');
+  if(!main) return;
+  main.querySelectorAll('[data-tabsec]').forEach(el => {
+    el.style.display = (el.getAttribute('data-tabsec') === String(idx)) ? '' : 'none';
+  });
+  main.querySelectorAll('.tabsec-btn').forEach(b => b.classList.toggle('active', Number(b.dataset.idx) === idx));
+}
 function renderDashboard(){
   const d = DATA[currentLocation];
   const allowedTabs = sessionAllowedTabs();
@@ -3672,7 +3724,8 @@ function renderDashboard(){
   let extraPanels = '';
   if(allowedTabs.includes('inventory')){
     extraPanels += `
-    <div class="panel"><div class="panel-head"><h3>Item register &mdash; ${locationLabel(currentLocation, 14)}</h3><div class="panel-head-actions">${exportBtn('exportDashboardInventory')}</div></div>
+    ${secHead('&#128230;', 'Inventory Overview')}
+  <div class="panel"><div class="panel-head"><h3>Item register &mdash; ${locationLabel(currentLocation, 14)}</h3><div class="panel-head-actions">${exportBtn('exportDashboardInventory')}</div></div>
     <div class="panel-body">
     <table><thead><tr><th>Item</th><th>Qty</th><th>Specifications</th><th>Cost</th></tr></thead><tbody>
     ${d.inventory.length===0 ? `<tr class="empty-row"><td colspan="4">No stock recorded yet.</td></tr>` :
@@ -3683,7 +3736,8 @@ function renderDashboard(){
   if(allowedTabs.includes('inward')){
     const recentInward = d.inward.slice().reverse().slice(0,8);
     extraPanels += `
-    <div class="panel"><div class="panel-head"><h3>Recent inward &mdash; ${locationLabel(currentLocation, 14)}</h3><div class="panel-head-actions">${exportBtn('exportInward')}</div></div>
+    ${secHead('&#128229;', 'Recent Activity')}
+  <div class="panel"><div class="panel-head"><h3>Recent inward &mdash; ${locationLabel(currentLocation, 14)}</h3><div class="panel-head-actions">${exportBtn('exportInward')}</div></div>
     <div class="panel-body table-scroll">
     <table><thead><tr><th>Date</th><th>Vendor</th><th>PO Number</th><th>Item</th><th>Item Type</th><th>Qty</th></tr></thead><tbody>
     ${recentInward.length===0 ? `<tr class="empty-row"><td colspan="6">No inward entries yet.</td></tr>` :
@@ -3700,7 +3754,8 @@ function renderDashboard(){
       return (b.date||'').localeCompare(a.date||'');
     }).slice(0,8);
     extraPanels += `
-    <div class="panel"><div class="panel-head"><h3>Recent enquiries &mdash; ${locationLabel(currentLocation, 14)} <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(sorted by priority, high first &mdash; click a row for full details)</span></h3><div class="panel-head-actions">${exportBtn('exportEnquiry')}</div></div>
+    ${secHead('&#128222;', 'Enquiries')}
+  <div class="panel"><div class="panel-head"><h3>Recent enquiries &mdash; ${locationLabel(currentLocation, 14)} <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(sorted by priority, high first &mdash; click a row for full details)</span></h3><div class="panel-head-actions">${exportBtn('exportEnquiry')}</div></div>
     <div class="panel-body table-scroll">
     <table><thead><tr><th>Date</th><th>E.Num</th><th>Customer</th><th>Region</th><th>Sales Person</th><th>Priority</th><th>Action</th></tr></thead><tbody>
     ${enq.length===0 ? `<tr class="empty-row"><td colspan="7">No enquiries recorded yet.</td></tr>` :
@@ -3872,6 +3927,7 @@ function renderPO(){
 
   const vendorSection = `
   <div class="subsection-title">Vendor P.O</div>
+  ${secHead('&#10133;', 'New Entry')}
   <div class="panel"><div class="panel-head"><h3>New vendor purchase order</h3></div>
   <div class="panel-body">
   <form onsubmit="return addVendorPO(event)">
@@ -3899,6 +3955,7 @@ function renderPO(){
   </form>
   <p style="margin:10px 0 0 0; font-size:11.5px; color:var(--muted);">All items are saved under the same P.O number, vendor and customer in one go. Total value per item is calculated automatically from Qty &times; Unit Price.</p>
   </div></div>
+  ${secHead('&#128203;', 'Records')}
   <div class="panel"><div class="panel-head"><h3>Vendor purchase orders</h3><div class="panel-head-actions">${importBtn('vendorPO')}${exportBtn('exportVendorPO')}</div></div>
   <div class="panel-body table-scroll">
   ${tableToolbar('vendorPO', d.vendorPO)}
@@ -3921,6 +3978,7 @@ function renderPO(){
 
   const customerSection = `
   <div class="subsection-title alt">Customer P.O</div>
+  ${secHead('&#10133;', 'New Entry')}
   <div class="panel"><div class="panel-head"><h3>New customer purchase order</h3></div>
   <div class="panel-body">
   <form onsubmit="return addCustomerPO(event)">
@@ -3948,6 +4006,7 @@ function renderPO(){
   </form>
   <p style="margin:10px 0 0 0; font-size:11.5px; color:var(--muted);">All items are saved under the same P.O number and customer in one go. Total value per item is calculated automatically from Qty &times; Unit Price.</p>
   </div></div>
+  ${secHead('&#128203;', 'Records')}
   <div class="panel"><div class="panel-head"><h3>Customer purchase orders</h3><div class="panel-head-actions">${importBtn('customerPO')}${exportBtn('exportCustomerPO')}</div></div>
   <div class="panel-body table-scroll">
   ${tableToolbar('customerPO', d.customerPO)}
@@ -3970,6 +4029,7 @@ function renderPO(){
 
   const contactSection = `
   <div class="subsection-title">P.O Contract Information</div>
+  ${secHead('&#10133;', 'New Entry')}
   <div class="panel"><div class="panel-head"><h3>New P.O Contract Document</h3></div>
   <div class="panel-body">
   <form onsubmit="return addPoContractDoc(event)">
@@ -3991,6 +4051,7 @@ function renderPO(){
     <div style="margin-top:16px;"><button type="submit" class="btn">Save &amp; Preview P.O Contract Document</button></div>
   </form>
   </div></div>
+  ${secHead('&#128203;', 'Records')}
   <div class="panel"><div class="panel-head"><h3>P.O Contract Documents</h3><div class="panel-head-actions">${exportBtn('exportPoContractDocs')}</div></div>
   <div class="panel-body">
   ${tableToolbar('poContractDocs', d.poContractDocs||[])}
@@ -4339,6 +4400,7 @@ function renderInward(){
   return `
   ${tabHeader(currentLocation, 'Inward')}
   ${switcher}
+  ${secHead('&#10133;', 'New Entry')}
   <div class="panel"><div class="panel-head"><h3>Record inward receipt</h3></div>
   <div class="panel-body">
   <form onsubmit="return addInward(event)">
@@ -4366,6 +4428,7 @@ function renderInward(){
   </form>
   <p style="margin:10px 0 0 0; font-size:11.5px; color:var(--muted);">All items above are saved under the same vendor / PO in one go &mdash; you can repeat the same Item Type / Category on any number of lines. Stock is automatically added to the Inventory tab (matched by item name).</p>
   </div></div>
+  ${secHead('&#128203;', 'Records')}
   <div class="panel"><div class="panel-head"><h3>Inward log</h3><div class="panel-head-actions">${importBtn('inward')}${exportBtn('exportInward')}</div></div>
   <div class="panel-body">
   ${tableToolbar('inward', d.inward)}
@@ -4591,6 +4654,7 @@ function renderInventory(){
     <button type="button" class="acct-switch-btn ${invSection==='dead'?'active':''}" onclick="switchInvSection('dead')">&#9888;&#65039; Dead Stock${deadStock.length?` (${deadStock.length})`:''}</button>
   </div>`;
   const stockSection = `
+  ${secHead('&#10133;', 'New Entry')}
   <div class="panel"><div class="panel-head"><h3>Add stock item</h3></div>
   <div class="panel-body">
   <form onsubmit="return addInventory(event)">
@@ -4610,6 +4674,7 @@ function renderInventory(){
     </div>
   </form>
   </div></div>
+  ${secHead('&#128203;', 'Records')}
   <div class="panel"><div class="panel-head"><h3>Stock &mdash; ${locationLabel(currentLocation, 14)}</h3><div class="panel-head-actions">${importBtn('inventory')}${exportBtn('exportInventory')}</div></div>
   <div class="panel-body">
   ${tableToolbar('inventory', d.inventory)}
@@ -4629,6 +4694,7 @@ function renderInventory(){
   ${showMoreBar('inventory', invAll.length)}
   </div></div>`;
   const deadSection = `
+  ${secHead('&#9888;&#65039;', 'Dead Stock')}
   <div class="panel"><div class="panel-head"><h3>&#9888;&#65039; Dead Stock &mdash; ${locationLabel(currentLocation, 14)} <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(marked as dead stock, or zero quantity on hand)</span></h3><div class="panel-head-actions">${exportBtn('exportDeadStock')}</div></div>
   <div class="panel-body">
   <table><thead><tr><th>Item</th><th>Qty</th><th>Specifications</th><th>Cost</th><th>Category</th><th>Added By</th><th></th></tr></thead><tbody>
@@ -4734,6 +4800,7 @@ function renderOutward(){
   return `
   ${tabHeader(currentLocation, 'Outward')}
   ${readOnly ? '' : `
+  ${secHead('&#10133;', 'New Entry')}
   <div class="panel"><div class="panel-head"><h3>Record outward dispatch</h3></div>
   <div class="panel-body">
   <form onsubmit="return addOutward(event)">
@@ -4750,6 +4817,7 @@ function renderOutward(){
   </form>
   <p style="margin:10px 0 0 0; font-size:11.5px; color:var(--muted);">All items above are saved under the same customer / P.O in one go &mdash; add as many items as needed, including multiple items of the same category (even the same item on two lines). Each quantity is automatically deducted from the Inventory tab; you cannot dispatch more than the available stock.</p>
   </div></div>`}
+  ${secHead('&#128203;', 'Records')}
   <div class="panel"><div class="panel-head"><h3>Outward log</h3><div class="panel-head-actions">${importBtn('outward')}${exportBtn('exportOutward')}</div></div>
   <div class="panel-body">
   ${tableToolbar('outward', d.outward)}
@@ -4897,6 +4965,7 @@ function renderLogistics(){
   return `
   ${tabHeader(currentLocation, 'Logistics')}
   <div class="subsection-title">Shipment Tracker</div>
+  ${secHead('&#10133;', 'New Entry')}
   <div class="panel"><div class="panel-head"><h3>New shipment record</h3></div>
   <div class="panel-body">
   <form onsubmit="return addLogistics(event)">
@@ -4921,6 +4990,7 @@ function renderLogistics(){
     </div>
   </form>
   </div></div>
+  ${secHead('&#128203;', 'Records')}
   <div class="panel"><div class="panel-head"><h3>Shipment tracker</h3><div class="panel-head-actions">${importBtn('logistics')}${exportBtn('exportLogistics')}</div></div>
   <div class="panel-body">
   ${tableToolbar('logistics', d.logistics)}
@@ -4943,6 +5013,7 @@ function renderLogistics(){
   </div></div>
 
   <div class="subsection-title alt">Future Shipments</div>
+  ${secHead('&#128197;', 'Future Shipments')}
   <div class="panel"><div class="panel-head"><h3>Plan a future shipment</h3></div>
   <div class="panel-body">
   <form onsubmit="return addFutureShipment(event)">
@@ -5162,6 +5233,7 @@ function renderSales(){
   const slRows = limitRows('sales', slAll);
   return `
   ${tabHeader(currentLocation, 'Sales')}
+  ${secHead('&#10133;', 'New Entry')}
   <div class="panel"><div class="panel-head"><h3>New sales entry</h3></div>
   <div class="panel-body">
   <form onsubmit="return addSales(event)">
@@ -5178,6 +5250,7 @@ function renderSales(){
     </div>
   </form>
   </div></div>
+  ${secHead('&#128203;', 'Records')}
   <div class="panel"><div class="panel-head"><h3>Sales register</h3><div class="panel-head-actions">${importBtn('sales')}${exportBtn('exportSales')}</div></div>
   <div class="panel-body">
   ${tableToolbar('sales', d.sales)}
@@ -5360,6 +5433,7 @@ function hrEmployeesSection(d){
   const all = applyTableTools('employees', d.employees.slice().reverse());
   const rows = limitRows('employees', all);
   return `
+  ${secHead('&#10133;', 'New Entry')}
   <div class="panel"><div class="panel-head"><h3>New employee</h3></div>
   <div class="panel-body">
   <form onsubmit="return addEmployee(event)">
@@ -5377,6 +5451,7 @@ function hrEmployeesSection(d){
     </div>
   </form>
   </div></div>
+  ${secHead('&#128203;', 'Records')}
   <div class="panel"><div class="panel-head"><h3>Employee register</h3><div class="panel-head-actions">${importBtn('employees')}${exportBtn('exportEmployees')}</div></div>
   <div class="panel-body">
   ${tableToolbar('employees', d.employees)}
@@ -5443,6 +5518,7 @@ function hrAttendanceSection(d){
   const all = applyTableTools('attendance', d.attendance.slice().reverse());
   const rows = limitRows('attendance', all);
   return `
+  ${secHead('&#10133;', 'New Entry')}
   <div class="panel"><div class="panel-head"><h3>Mark attendance</h3></div>
   <div class="panel-body">
   <form onsubmit="return addAttendance(event)">
@@ -5462,6 +5538,7 @@ function hrAttendanceSection(d){
     </div>
   </form>
   </div></div>
+  ${secHead('&#128203;', 'Records')}
   <div class="panel"><div class="panel-head"><h3>Attendance log</h3><div class="panel-head-actions">${importBtn('attendance')}${exportBtn('exportAttendance')}</div></div>
   <div class="panel-body">
   ${tableToolbar('attendance', d.attendance)}
@@ -5515,6 +5592,7 @@ function hrLeaveSection(d){
   const all = applyTableTools('leaves', d.leaves.slice().reverse());
   const rows = limitRows('leaves', all);
   return `
+  ${secHead('&#10133;', 'New Entry')}
   <div class="panel"><div class="panel-head"><h3>New leave entry</h3></div>
   <div class="panel-body">
   <form onsubmit="return addLeave(event)">
@@ -5536,6 +5614,7 @@ function hrLeaveSection(d){
     </div>
   </form>
   </div></div>
+  ${secHead('&#128203;', 'Records')}
   <div class="panel"><div class="panel-head"><h3>Leave register</h3><div class="panel-head-actions">${importBtn('leaves')}${exportBtn('exportLeaves')}</div></div>
   <div class="panel-body">
   ${tableToolbar('leaves', d.leaves)}
@@ -5615,6 +5694,7 @@ function hrSalarySection(d){
   const all = applyTableTools('salaries', d.salaries.slice().reverse());
   const rows = limitRows('salaries', all);
   return `
+  ${secHead('&#10133;', 'New Entry')}
   <div class="panel"><div class="panel-head"><h3>New salary entry</h3></div>
   <div class="panel-body">
   <form onsubmit="return addSalary(event)">
@@ -5639,6 +5719,7 @@ function hrSalarySection(d){
     </div>
   </form>
   </div></div>
+  ${secHead('&#128203;', 'Records')}
   <div class="panel"><div class="panel-head"><h3>Salary register</h3><div class="panel-head-actions">${importBtn('salaries')}${exportBtn('exportSalaries')}</div></div>
   <div class="panel-body">
   ${tableToolbar('salaries', d.salaries)}
@@ -5721,6 +5802,7 @@ function renderAutomation(){
   const paRows = limitRows('pendingAssembly', paAll);
   return `
   ${tabHeader(currentLocation, 'Automation')}
+  ${secHead('&#10133;', 'New Entry')}
   <div class="panel"><div class="panel-head"><h3>New automation job</h3></div>
   <div class="panel-body">
   <form onsubmit="return addAutomation(event)">
@@ -5747,6 +5829,7 @@ function renderAutomation(){
     </div>
   </form>
   </div></div>
+  ${secHead('&#128203;', 'Records')}
   <div class="panel"><div class="panel-head"><h3>Automation jobs</h3><div class="panel-head-actions">${importBtn('automation')}${exportBtn('exportAutomation')}</div></div>
   <div class="panel-body">
   ${tableToolbar('automation', d.automation)}
@@ -5766,6 +5849,7 @@ function renderAutomation(){
   </div></div>
 
   <div class="subsection-title alt">Pending Assembly</div>
+  ${secHead('&#10133;', 'Pending Assembly &mdash; New Entry')}
   <div class="panel"><div class="panel-head"><h3>New pending assembly entry</h3></div>
   <div class="panel-body">
   <form onsubmit="return addPendingAssembly(event)">
@@ -5780,6 +5864,7 @@ function renderAutomation(){
     </div>
   </form>
   </div></div>
+  ${secHead('&#128203;', 'Pending Assembly &mdash; Records')}
   <div class="panel"><div class="panel-head"><h3>Pending assembly</h3><div class="panel-head-actions">${importBtn('pendingAssembly')}${exportBtn('exportPendingAssembly')}</div></div>
   <div class="panel-body">
   ${tableToolbar('pendingAssembly', d.pendingAssembly)}
@@ -5919,6 +6004,7 @@ function renderEnquiry(){
   const enqRows = limitRows('enquiry', enqAll);
   return `
   ${tabHeader(currentLocation, 'Enquiry Data Sheet')}
+  ${secHead('&#10133;', 'New Entry')}
   <div class="panel"><div class="panel-head"><h3>New enquiry</h3></div>
   <div class="panel-body">
   <form onsubmit="return addEnquiry(event)">
@@ -5943,6 +6029,7 @@ function renderEnquiry(){
     </div>
   </form>
   </div></div>
+  ${secHead('&#128203;', 'Records')}
   <div class="panel"><div class="panel-head"><h3>Enquiry log &mdash; ${locationLabel(currentLocation, 14)}</h3><div class="panel-head-actions">${importBtn('enquiry')}${exportBtn('exportEnquiry')}</div></div>
   <div class="panel-body table-scroll">
   ${tableToolbar('enquiry', d.enquiry)}
@@ -6048,6 +6135,7 @@ function renderAccounts(){
 
   const purchaseSection = `
   <div class="subsection-title">Purchase</div>
+  ${secHead('&#10133;', 'New Entry')}
   <div class="panel"><div class="panel-head"><h3>New purchase entry</h3></div>
   <div class="panel-body">
   <form onsubmit="return addPurchaseAccount(event)">
@@ -6097,6 +6185,7 @@ function renderAccounts(){
   </form>
   <p style="margin:10px 0 0 0; font-size:11.5px; color:var(--muted);">GST is calculated on Basic Value + Freight. An entry turns <span style="color:#e6577a; font-weight:700;">OVERDUE</span> automatically once its credit period passes while payment is still Pending.</p>
   </div></div>
+  ${secHead('&#128203;', 'Records')}
   <div class="panel"><div class="panel-head"><h3>Purchase register &mdash; ${locationLabel(currentLocation, 14)} <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(sorted by date)</span></h3><div class="panel-head-actions">${importBtn('purchaseAccounts')}${exportBtn('exportPurchaseAccounts')}</div></div>
   <div class="panel-body table-scroll">
   ${tableToolbar('purchaseAccounts', d.purchaseAccounts)}
@@ -6148,6 +6237,7 @@ function renderAccounts(){
 
   const salesSection = `
   <div class="subsection-title">Sales</div>
+  ${secHead('&#10133;', 'New Entry')}
   <div class="panel"><div class="panel-head"><h3>New sales entry / invoice</h3></div>
   <div class="panel-body">
   <form onsubmit="return addSalesAccount(event)">
@@ -6198,6 +6288,7 @@ function renderAccounts(){
   </form>
   <p style="margin:10px 0 0 0; font-size:11.5px; color:var(--muted);">Amount is auto-calculated per item (Qty &times; Rate). Pick a CGST / SGST / IGST percentage (up to 100%) and the tax amounts and Total Invoice Value are calculated automatically. Bank details are auto-filled for ${esc(invoiceCompanyName(currentLocation))}. Use the <b>Documents</b> column in the register below to generate the Tax Invoice, Delivery Challan and Packing List. An entry turns <span style="color:#e6577a; font-weight:700;">OVERDUE</span> automatically once its credit period passes while payment is still Pending. Tip: picking a previously used customer in the Name field auto-fills their address, GSTIN and contact details &mdash; you can still edit them before saving.</p>
   </div></div>
+  ${secHead('&#128203;', 'Records')}
   <div class="panel"><div class="panel-head"><h3>Sales register &mdash; ${locationLabel(currentLocation, 14)} <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(sorted by date)</span></h3><div class="panel-head-actions">${importBtn('salesAccounts')}${exportBtn('exportSalesAccounts')}</div></div>
   <div class="panel-body table-scroll">
   ${tableToolbar('salesAccounts', d.salesAccounts)}
@@ -7983,6 +8074,7 @@ function renderQuotation(){
   const fmt2 = n => (parseFloat(n)||0).toLocaleString('en-IN',{minimumFractionDigits:2, maximumFractionDigits:2});
   return `
   ${tabHeader(currentLocation, 'Quotation')}
+  ${secHead('&#10133;', 'New Entry')}
   <div class="panel"><div class="panel-head"><h3>${editing ? 'Edit quotation '+esc(editing.quoteNumber) : 'Create quotation'}</h3>${editing?`<div class="panel-head-actions"><button type="button" class="export-btn" style="background:var(--muted);" onclick="cancelQuoteEdit()">Cancel Edit</button></div>`:''}</div>
   <div class="panel-body">
   <form onsubmit="return saveQuotation(event)">
@@ -8026,6 +8118,7 @@ function renderQuotation(){
     <div style="margin-top:16px;"><button type="submit" class="btn">${editing ? 'Update &amp; Preview Quotation' : 'Generate Quotation'}</button></div>
   </form>
   </div></div>
+  ${secHead('&#128203;', 'Records')}
   <div class="panel"><div class="panel-head"><h3>Quotation log</h3><div class="panel-head-actions">${exportBtn('exportQuotationLog')}</div></div>
   <div class="panel-body">
   ${tableToolbar('quotations', d.quotations)}
@@ -8430,6 +8523,7 @@ function customFieldsPanel(){
   const tblLabel = (CF_TABLES.find(x=>x[0]===cfManagerTable)||['',''])[1];
   return `
   <div class="subsection-title alt">Custom Fields</div>
+  ${secHead('&#129513;', 'Custom Fields')}
   <div class="panel"><div class="panel-head"><h3>Add your own fields to any tab <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(no code needed - shows up in the form, table, edit popup, search and Excel export on all devices)</span></h3></div>
   <div class="panel-body">
     <div class="form-grid">
@@ -8598,6 +8692,7 @@ function roleManagerPanel(){
   }).join('');
   return `
   <div class="subsection-title alt">Roles</div>
+  ${secHead('&#127991;&#65039;', 'Roles')}
   <div class="panel"><div class="panel-head"><h3>Create a new role</h3></div>
   <div class="panel-body">
   <form onsubmit="return addCustomRole(event)">
@@ -8624,6 +8719,7 @@ function importantNoticePanelHtml(){
     ? `<span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(last updated by ${esc(NOTICE.updatedBy)}${NOTICE.updatedAt ? ' on ' + fd(NOTICE.updatedAt.slice(0,10)) : ''})</span>`
     : '';
   return `
+  ${secHead('&#128227;', 'Important Notice')}
   <div class="panel"><div class="panel-head"><h3>Important Notice ${meta}</h3></div>
   <div class="panel-body">
   <form onsubmit="return saveImportantNotice(event)">
@@ -8676,6 +8772,7 @@ function renderUsers(){
   ${sendNotificationPanelHtml()}
   ${reportSchedulesPanelHtml()}
   ${printJobsPanelHtml()}
+  ${secHead('&#10133;', 'New Entry')}
   <div class="panel"><div class="panel-head"><h3>Add user login</h3></div>
   <div class="panel-body">
   <form onsubmit="return addUser(event)">
@@ -8692,6 +8789,7 @@ function renderUsers(){
     </div>
   </form>
   </div></div>
+  ${secHead('&#128203;', 'Records')}
   <div class="panel"><div class="panel-head"><h3>All logins <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(click a user to view &amp; manage their access)</span></h3><div class="panel-head-actions">${importBtn('users')}<button class="icon-btn" onclick="restoreUsersFromBackup()" title="Restore the user list from the automatic backup">&#8634; Restore from backup${USERS_BACKUP_META ? ' ('+USERS_BACKUP_META.count+' users, '+new Date(USERS_BACKUP_META.savedAt).toLocaleDateString()+')' : ''}</button>${exportBtn('exportUsers')}</div></div>
   <div class="panel-body">
   <table><thead><tr><th>Photo</th><th>Name</th><th>Username</th><th>Role</th><th>Mobile</th><th>DOB</th><th>Address</th><th>Access</th><th>Security</th><th></th></tr></thead><tbody>
@@ -8753,6 +8851,7 @@ function auditLogPanel(){
   const userOptions = [...new Set(((AUDIT && AUDIT.list) || []).map(e => e.user).filter(Boolean))];
   const actionOptions = ['LOGIN','LOGOUT','DATA CHANGE','USER ADMIN','NOTICE','AUDIT'];
   return `
+  ${secHead('&#128220;', 'Audit Log')}
   <div class="panel"><div class="panel-head"><h3>Audit Log <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(logins, logouts &amp; data changes &mdash; last ${AUDIT_MAX} events kept)</span></h3>
     <div class="panel-head-actions">
       <button type="button" class="export-btn" onclick="refreshAuditLog()">&#8635; Refresh</button>
