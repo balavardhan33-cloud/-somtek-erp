@@ -1157,6 +1157,7 @@ function isPrintStation(){
   try{ return localStorage.getItem('somtek_print_station') === 'on'; }catch(e){ return false; }
 }
 function togglePrintStation(){
+  if(!isAdmin()){ alert('Only an admin can turn the Print Station on or off.'); return; }
   const on = !isPrintStation();
   try{ localStorage.setItem('somtek_print_station', on ? 'on' : 'off'); }catch(e){}
   closeSettingsMenu();
@@ -2203,7 +2204,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.27';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.28';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -2313,7 +2314,7 @@ function toggleSettingsMenu(ev){
     <div class="settings-item" onclick="toggleTheme()"><span class="si-ico">${dark ? '&#9728;' : '&#127769;'}</span> Switch to ${dark ? 'Light' : 'Dark'} Theme</div>
     <div class="settings-row"><div class="sr-lbl">Theme Color</div>${ACCENT_PRESETS.map(p=>`<span class="accent-swatch ${accent===p.c?'active':''}" style="background:${p.c};" title="${p.name}" onclick="setAccentColor('${p.c}')"></span>`).join('')}</div>
     <div class="settings-row"><div class="sr-lbl">Font Size</div><span class="fontsize-btn ${fs==='small'?'active':''}" onclick="setFontSize('small')">Small</span><span class="fontsize-btn ${fs==='normal'?'active':''}" onclick="setFontSize('normal')">Normal</span><span class="fontsize-btn ${fs==='large'?'active':''}" onclick="setFontSize('large')">Large</span></div>
-    <div class="settings-item" onclick="togglePrintStation()"><span class="si-ico">&#128424;</span> Print Station: ${isPrintStation() ? 'ON (this device prints)' : 'OFF'}</div>
+    ${isAdmin() ? `<div class="settings-item" onclick="togglePrintStation()"><span class="si-ico">&#128424;</span> Print Station: ${isPrintStation() ? 'ON (this device prints)' : 'OFF'}</div>` : ''}
     <div class="settings-item" onclick="closeSettingsMenu(); manualRefresh();"><span class="si-ico">&#8634;</span> Refresh Data</div>
     <div class="settings-foot">${APP_VERSION_LABEL} &middot; ${esc(session ? session.username : '')}</div>`;
   host.appendChild(menu);
