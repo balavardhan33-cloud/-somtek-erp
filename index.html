@@ -1808,7 +1808,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.16';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.17';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -6013,8 +6013,8 @@ function salesDocTopHtml(r, title){
       <td style="${cellBody}">${esc(ci.godown)}</td>
       <td style="${cellBody}">
         <div style="font-weight:700;">${esc(dash(shipTo))}</div>
-        <div style="margin-top:8px;">Place of Supply: ${esc(dash(r.placeOfSupply))}</div>
-        <div>STATE CODE: ${esc(dash(r.stateCode))}</div>
+        <div style="margin-top:8px;"><b>STATE: ${esc(dash(gstStateName(r)))}</b></div>
+        <div><b>STATE CODE: ${esc(dash(r.stateCode))}</b></div>
         <div style="margin-top:8px;">Contact Person : ${esc(dash(saContactDisplay(r) || ''))}</div>
         <div>GSTIN No. ${esc(dash(r.gstin))}</div>
       </td>
