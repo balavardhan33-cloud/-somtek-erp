@@ -1140,6 +1140,117 @@ async function restoreUsersFromBackup(){
   render();
 }
 
+/* ---------------- PRINT JOBS + PRINT STATION ---------------- */
+let PRINT_JOBS = { list: [], done: [] };   /* Firestore doc 'print_jobs' */
+let printStationTimer = null;
+let printStationBusy = false;
+
+async function loadPrintJobs(){
+  const doc = await fsGet('print_jobs');
+  PRINT_JOBS = (doc && Array.isArray(doc.list)) ? doc : { list: [], done: [] };
+  if(!Array.isArray(PRINT_JOBS.done)) PRINT_JOBS.done = [];
+}
+async function savePrintJobs(){
+  await fsSet('print_jobs', PRINT_JOBS);
+}
+function isPrintStation(){
+  try{ return localStorage.getItem('somtek_print_station') === 'on'; }catch(e){ return false; }
+}
+function togglePrintStation(){
+  const on = !isPrintStation();
+  try{ localStorage.setItem('somtek_print_station', on ? 'on' : 'off'); }catch(e){}
+  closeSettingsMenu();
+  if(on){
+    alert('Print Station is ON for this device.\n\nQueued documents will now print here automatically (checked every 20 seconds).\n\nFor fully silent printing open the ERP with the Chrome kiosk-printing shortcut and set the office printer as the Windows default. Enable Print Station on ONE PC only, or documents will print twice.');
+    startPrintStation();
+  }else{
+    stopPrintStation();
+    alert('Print Station is OFF for this device.');
+  }
+  render();
+}
+function startPrintStation(){
+  stopPrintStation();
+  printStationTimer = setInterval(()=>{ processPrintJobs().catch(e=>console.error('print station', e)); }, 20000);
+  processPrintJobs().catch(e=>console.error('print station', e));
+}
+function stopPrintStation(){
+  if(printStationTimer){ clearInterval(printStationTimer); printStationTimer = null; }
+}
+function printJobHtmlDoc(job){
+  return '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
+    '<style>@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;600;700&family=Oswald:wght@500;600;700&display=swap");' +
+    '@page{size:A4; margin:10mm;} body{margin:0; background:#fff;} .quote-sheet{background:#fff; margin:0 auto;} .quote-actions{display:none !important;}</style>' +
+    '</head><body>' + job.html + '</body></html>';
+}
+function printJobInIframe(job){
+  return new Promise(resolve=>{
+    const frame = document.createElement('iframe');
+    frame.style.cssText = 'position:fixed; right:0; bottom:0; width:1px; height:1px; border:0; visibility:hidden;';
+    document.body.appendChild(frame);
+    const doc = frame.contentWindow.document;
+    doc.open(); doc.write(printJobHtmlDoc(job)); doc.close();
+    /* small wait for fonts/images to settle before printing */
+    setTimeout(()=>{
+      try{ frame.contentWindow.focus(); frame.contentWindow.print(); }catch(e){ console.error('iframe print failed', e); }
+      setTimeout(()=>{ frame.remove(); resolve(); }, 4000);
+    }, 1200);
+  });
+}
+async function processPrintJobs(){
+  if(!isPrintStation() || printStationBusy || !session) return;
+  printStationBusy = true;
+  try{
+    await loadPrintJobs();
+    const pending = (PRINT_JOBS.list||[]).slice();
+    for(const job of pending){
+      await printJobInIframe(job);
+      /* mark done: drop the heavy html, keep a light log entry */
+      PRINT_JOBS.list = (PRINT_JOBS.list||[]).filter(j=>j.id!==job.id);
+      PRINT_JOBS.done = [{ title: job.title, by: job.by, at: job.at, printedAt: new Date().toISOString() }, ...(PRINT_JOBS.done||[])].slice(0, 20);
+      await savePrintJobs();
+      logAudit('DATA CHANGE', 'Printed at station: "'+(job.title||'document')+'"');
+    }
+  }finally{
+    printStationBusy = false;
+  }
+}
+async function sendToPrintStation(){
+  const preview = document.getElementById('quote-preview');
+  if(!preview){ alert('Open the document preview first.'); return; }
+  const clone = preview.cloneNode(true);
+  const actions = clone.querySelector('.quote-actions');
+  if(actions) actions.remove();
+  const jobHtml = clone.innerHTML;
+  if(jobHtml.length > 700000){ alert('This document is too large to queue. Print it directly from this device.'); return; }
+  await loadPrintJobs();
+  PRINT_JOBS.list = PRINT_JOBS.list || [];
+  if(PRINT_JOBS.list.length >= 15){ alert('The print queue is full (15 jobs waiting). Ask the Print Station PC to catch up, or print directly.'); return; }
+  PRINT_JOBS.list.push({ id: uid(), title: document.title || 'TEKFLOW document', html: jobHtml, by: actorName(), at: new Date().toISOString() });
+  const ok = await fsSet('print_jobs', PRINT_JOBS);
+  if(ok) alert('Sent to the Print Station. It will print automatically within about 20 seconds' + (isPrintStation() ? ' (this device IS the print station).' : '.'));
+  else alert('Could not queue the job - check the connection and try again.');
+}
+async function deletePrintJob(id){
+  await loadPrintJobs();
+  PRINT_JOBS.list = (PRINT_JOBS.list||[]).filter(j=>j.id!==id);
+  await savePrintJobs();
+  render();
+}
+function printJobsPanelHtml(){
+  const list = PRINT_JOBS.list || [];
+  const done = PRINT_JOBS.done || [];
+  return `
+  <div class="panel"><div class="panel-head"><h3>&#128424; Print Jobs <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(Print Station on this device: <b>${isPrintStation()?'ON':'OFF'}</b> &mdash; toggle it in the &#9881; settings menu on the printer PC)</span></h3></div>
+  <div class="panel-body">
+    ${list.length===0 ? '<p style="font-size:12.5px; color:var(--muted); margin:0;">No documents waiting to print.</p>' : `
+    <table><thead><tr><th>Document</th><th>Sent By</th><th>Sent At</th><th></th></tr></thead><tbody>
+    ${list.map(j=>`<tr><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(j.title)}</td><td>${esc(j.by)}</td><td>${esc(j.at?new Date(j.at).toLocaleString():'')}</td><td>${deleteBtn(`deletePrintJob('${j.id}')`)}</td></tr>`).join('')}
+    </tbody></table>`}
+    ${done.length ? `<div style="margin-top:14px; font-size:11px; color:var(--muted);">Recently printed: ${esc(done.slice(0,6).map(x=>x.title).join(' | '))}</div>` : ''}
+  </div></div>`;
+}
+
 /* ---------------- SCHEDULED REPORTS (admin) ---------------- */
 let REPORT_SCHEDULES = { list: [] };   /* Firestore doc 'report_schedules' */
 
@@ -1624,6 +1735,7 @@ async function loadAll(){
   await loadNotice();
   await loadNotifications();
   await loadReportSchedules();
+  await loadPrintJobs();
   await loadAudit();
   for(const loc of LOCATIONS){ await loadLocation(loc); }
 }
@@ -2091,7 +2203,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.26';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.27';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -2201,6 +2313,7 @@ function toggleSettingsMenu(ev){
     <div class="settings-item" onclick="toggleTheme()"><span class="si-ico">${dark ? '&#9728;' : '&#127769;'}</span> Switch to ${dark ? 'Light' : 'Dark'} Theme</div>
     <div class="settings-row"><div class="sr-lbl">Theme Color</div>${ACCENT_PRESETS.map(p=>`<span class="accent-swatch ${accent===p.c?'active':''}" style="background:${p.c};" title="${p.name}" onclick="setAccentColor('${p.c}')"></span>`).join('')}</div>
     <div class="settings-row"><div class="sr-lbl">Font Size</div><span class="fontsize-btn ${fs==='small'?'active':''}" onclick="setFontSize('small')">Small</span><span class="fontsize-btn ${fs==='normal'?'active':''}" onclick="setFontSize('normal')">Normal</span><span class="fontsize-btn ${fs==='large'?'active':''}" onclick="setFontSize('large')">Large</span></div>
+    <div class="settings-item" onclick="togglePrintStation()"><span class="si-ico">&#128424;</span> Print Station: ${isPrintStation() ? 'ON (this device prints)' : 'OFF'}</div>
     <div class="settings-item" onclick="closeSettingsMenu(); manualRefresh();"><span class="si-ico">&#8634;</span> Refresh Data</div>
     <div class="settings-foot">${APP_VERSION_LABEL} &middot; ${esc(session ? session.username : '')}</div>`;
   host.appendChild(menu);
@@ -2566,6 +2679,7 @@ async function chooseLocation(loc){
   render();
   /* generate any scheduled reports that fell due (admins only) */
   setTimeout(()=>{ checkDueReports().catch(e=>console.error('report check failed', e)); }, 1500);
+  if(isPrintStation()) startPrintStation();
 }
 
 async function handleLogout(){
@@ -4067,6 +4181,7 @@ function openPocDocPreview(id){
   overlay.innerHTML = `
     <div class="quote-actions">
       <button type="button" class="btn" onclick="printPocDoc()">&#128424; Print / Save as PDF</button>
+      <button type="button" class="btn" onclick="sendToPrintStation()" title="Queue this document to print automatically on the office printer PC">&#128444; Send to Printer</button>
       <button type="button" class="btn quote-close-btn" onclick="closeQuotePreview()">&#10005; Close</button>
     </div>
     ${pocDocumentHtml(r)}`;
@@ -6805,6 +6920,7 @@ function printAllInvoiceCopies(id){
   overlay.innerHTML = `
     <div class="quote-actions">
       <button type="button" class="btn" onclick="printInvoice()">&#128424; Print / Save as PDF</button>
+      <button type="button" class="btn" onclick="sendToPrintStation()" title="Queue this document to print automatically on the office printer PC">&#128444; Send to Printer</button>
       <button type="button" class="btn quote-close-btn" onclick="closeQuotePreview()">&#10005; Close</button>
     </div>
     ${sheets}`;
@@ -7015,6 +7131,7 @@ function openSalesDocPreview(id, type, heading){
   overlay.innerHTML = `
     <div class="quote-actions">
       <button type="button" class="btn" onclick="printInvoice()">&#128424; Print / Save as PDF</button>
+      <button type="button" class="btn" onclick="sendToPrintStation()" title="Queue this document to print automatically on the office printer PC">&#128444; Send to Printer</button>
       <button type="button" class="btn quote-close-btn" onclick="closeQuotePreview()">&#10005; Close</button>
     </div>
     ${salesDocHtml(r, previewDocType, previewInvoiceHeading)}`;
@@ -7952,6 +8069,7 @@ function openQuotePreview(id){
   overlay.innerHTML = `
     <div class="quote-actions">
       <button type="button" class="btn" onclick="printQuote()">&#128424; Print / Save as PDF</button>
+      <button type="button" class="btn" onclick="sendToPrintStation()" title="Queue this document to print automatically on the office printer PC">&#128444; Send to Printer</button>
       <button type="button" class="btn" onclick="exportQuotationExcel('${esc(q.id)}')">&#8595; Download Excel</button>
       <button type="button" class="btn quote-close-btn" onclick="closeQuotePreview()">&#10005; Close</button>
     </div>
@@ -8441,6 +8559,7 @@ function renderUsers(){
   ${importantNoticePanelHtml()}
   ${sendNotificationPanelHtml()}
   ${reportSchedulesPanelHtml()}
+  ${printJobsPanelHtml()}
   <div class="panel"><div class="panel-head"><h3>Add user login</h3></div>
   <div class="panel-body">
   <form onsubmit="return addUser(event)">
