@@ -1042,18 +1042,41 @@ async function saveUsers(){
     return;
   }
   const msg = usersDiffMsg();
-  /* Merge-safety: if the cloud has users this session does not know about
-     (added by an admin after this browser loaded), keep them - unless this
-     session explicitly deleted them. Prevents stale sessions from silently
-     dropping newly added users on any save (even a failed-login save). */
+  /* Merge-safety, two parts:
+     (a) Stamp updatedAt on every user THIS session changed (detected by
+         comparing to the snapshot taken at load / last save).
+     (b) Merge with the cloud copy per user, newest updatedAt wins.
+     Result: a stale browser can never overwrite an admin's fresh change
+     (tab access, role, password...) on a user, and users added by other
+     sessions are always preserved (unless explicitly deleted here). */
   try{
+    let snapMap = {};
+    try{
+      JSON.parse(USERS_SNAP || '[]').forEach(u=>{ if(u && u.username) snapMap[u.username] = JSON.stringify(u); });
+    }catch(e){}
+    const nowIso = new Date().toISOString();
+    USERS.forEach(u=>{
+      if(!u || !u.username) return;
+      if(!snapMap[u.username] || snapMap[u.username] !== JSON.stringify(u)) u.updatedAt = nowIso;
+    });
     const cloud = await fsGet('users');
     if(cloud && Array.isArray(cloud.list)){
+      const ts = u => (u && u.updatedAt) ? (Date.parse(u.updatedAt) || 0) : 0;
+      const cloudMap = {};
+      cloud.list.forEach(cu=>{ if(cu && cu.username) cloudMap[cu.username] = cu; });
+      /* users in both lists: keep whichever record is newer */
+      USERS = USERS.map(u=>{
+        const cu = u && u.username ? cloudMap[u.username] : null;
+        if(cu && ts(cu) > ts(u)){
+          console.warn('saveUsers merge: kept newer cloud copy of "'+u.username+'".');
+          return cu;
+        }
+        return u;
+      });
+      /* users only in the cloud: preserve them unless deleted this session */
       cloud.list.forEach(cu=>{
         if(!cu || !cu.username) return;
-        const knownLocally = USERS.some(u=>u.username===cu.username);
-        const deletedHere = sessionDeletedUsers.indexOf(cu.username) !== -1;
-        if(!knownLocally && !deletedHere){
+        if(!USERS.some(u=>u.username===cu.username) && sessionDeletedUsers.indexOf(cu.username)===-1){
           USERS.push(cu);
           console.warn('saveUsers merge: preserved user "'+cu.username+'" added by another session.');
         }
@@ -1854,7 +1877,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.20';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.21';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
