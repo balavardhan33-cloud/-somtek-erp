@@ -1,6 +1,6 @@
 /* TEKFLOW ERP service worker - network-first so users always get the latest
    uploaded version when online; cached copy is only a fallback for offline. */
-const CACHE_NAME = 'tekflow-erp-v3';
+const CACHE_NAME = 'tekflow-erp-v4';
 const APP_SHELL = [
   './index.html',
   './manifest.json',

@@ -1854,7 +1854,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.19';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.20';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -1907,6 +1907,34 @@ function setFontSize(name){
   closeSettingsMenu();
 }
 applyFontSize(currentFontSize());
+
+/* ---------------- SERVICE WORKER HYGIENE ----------------
+   Old service workers on some devices still serve YEARS-old cached copies
+   of this app (which contain the user-wipe bug). On every start:
+   1. unregister every service worker that is not the current ./sw.js
+   2. one-time purge of ALL caches on this device
+   3. register the current network-first ./sw.js                     */
+(function(){
+  if(!('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.getRegistrations().then(function(regs){
+    regs.forEach(function(reg){
+      var w = reg.active || reg.waiting || reg.installing;
+      var url = (w && w.scriptURL) || '';
+      if(url.indexOf('/sw.js') === -1){
+        reg.unregister();
+        console.warn('Unregistered outdated service worker:', url);
+      }
+    });
+    try{
+      if(window.caches && localStorage.getItem('somtek_sw_purge') !== 'v1'){
+        caches.keys().then(function(keys){
+          return Promise.all(keys.map(function(k){ return caches.delete(k); }));
+        }).then(function(){ try{ localStorage.setItem('somtek_sw_purge','v1'); }catch(e){} });
+      }
+    }catch(e){}
+    navigator.serviceWorker.register('./sw.js').catch(function(){});
+  }).catch(function(){});
+})();
 
 /* ---------------- SETTINGS MENU (gear in topbar) ---------------- */
 function closeSettingsMenu(){
