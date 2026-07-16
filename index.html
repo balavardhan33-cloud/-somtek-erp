@@ -2316,7 +2316,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.35';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.36';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -2426,13 +2426,59 @@ function toggleSettingsMenu(ev){
     <div class="settings-item" onclick="toggleTheme()"><span class="si-ico">${dark ? '&#9728;' : '&#127769;'}</span> Switch to ${dark ? 'Light' : 'Dark'} Theme</div>
     <div class="settings-row"><div class="sr-lbl">Theme Color</div>${ACCENT_PRESETS.map(p=>`<span class="accent-swatch ${accent===p.c?'active':''}" style="background:${p.c};" title="${p.name}" onclick="setAccentColor('${p.c}')"></span>`).join('')}</div>
     <div class="settings-row"><div class="sr-lbl">Font Size</div><span class="fontsize-btn ${fs==='small'?'active':''}" onclick="setFontSize('small')">Small</span><span class="fontsize-btn ${fs==='normal'?'active':''}" onclick="setFontSize('normal')">Normal</span><span class="fontsize-btn ${fs==='large'?'active':''}" onclick="setFontSize('large')">Large</span></div>
-    ${isAdmin() ? `<div class="settings-item" onclick="togglePrintStation()"><span class="si-ico">&#128424;</span> Print Station: ${isPrintStation() ? 'ON (this device prints)' : 'OFF'}</div>` : ''}
+    ${isAdmin() ? `<div class="settings-item" onclick="togglePrintStation()"><span class="si-ico">&#128424;</span> Print Station: ${isPrintStation() ? 'ON (this device prints)' : 'OFF'}</div>
+    <div class="settings-item" onclick="closeSettingsMenu(); exportFullBackup();"><span class="si-ico">&#128190;</span> Full Backup (JSON)</div>
+    <div class="settings-item" onclick="closeSettingsMenu(); importFullBackup();"><span class="si-ico">&#8635;</span> Restore Backup</div>` : ''}
     <div class="settings-item" onclick="closeSettingsMenu(); manualRefresh();"><span class="si-ico">&#8634;</span> Refresh Data</div>
     <div class="settings-foot">${APP_VERSION_LABEL} &middot; ${esc(session ? session.username : '')}</div>`;
   host.appendChild(menu);
   setTimeout(()=>{ document.addEventListener('click', closeSettingsMenuOutside, {once:true}); }, 0);
 }
 
+/* ---------------- FULL BACKUP / RESTORE (admin) ---------------- */
+function exportFullBackup(){
+  try{
+    const payload = {
+      app: 'TEKFLOW ERP',
+      version: APP_VERSION_LABEL,
+      location: currentLocation,
+      exportedAt: new Date().toISOString(),
+      exportedBy: session ? session.username : '',
+      data: DATA[currentLocation]
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'tekflow_backup_' + currentLocation.replace(/[^a-z0-9]+/gi,'_') + '_' + today() + '.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
+  }catch(e){ alert('Backup failed: ' + e.message); }
+}
+function importFullBackup(){
+  if(!isAdmin()) return;
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = '.json,application/json';
+  inp.onchange = async () => {
+    const file = inp.files && inp.files[0];
+    if(!file) return;
+    try{
+      const text = await file.text();
+      const payload = JSON.parse(text);
+      const data = payload && payload.data;
+      if(!data || typeof data !== 'object' || !Array.isArray(data.inventory)){
+        alert('This does not look like a TEKFLOW backup file.'); return;
+      }
+      const counts = Object.keys(data).filter(k=>Array.isArray(data[k])).map(k=>k+': '+data[k].length).join(', ');
+      const from = payload.location ? ' (backup of ' + payload.location + (payload.exportedAt ? ', taken ' + payload.exportedAt.slice(0,10) : '') + ')' : '';
+      if(!confirm('Restore this backup into ' + currentLocation + '?' + from + '\n\nThis REPLACES all current ' + currentLocation + ' data with:\n' + counts + '\n\nTip: take a Full Backup of the current data first. Continue?')) return;
+      DATA[currentLocation] = data;
+      await saveLocation(currentLocation);
+      render();
+      alert('Backup restored successfully.');
+    }catch(e){ alert('Restore failed: ' + e.message); }
+  };
+  inp.click();
+}
 /* ---------------- EDIT PROFILE + PROFILE PICTURE ---------------- */
 function myUserRecord(){
   return session ? USERS.find(x=>x.username===session.username) : null;
@@ -2828,6 +2874,7 @@ function renderShell(){
       </div>
     </div>
     <div class="main">
+      ${globalDatalistsHtml()}
       ${renderTabContent()}
     </div>
   </div>`;
@@ -2954,6 +3001,7 @@ function tabHeader(eyebrow, title, showDate){
       <div class="topbar-loc">
         ${LOCATIONS.map(loc => `<button type="button" class="loc-btn ${loc===currentLocation?'active':''}" onclick="switchLocation('${loc}')">${locationLabel(loc, 15)}</button>`).join('')}
       </div>
+      <button type="button" class="icon-btn" onclick="openGlobalSearch()" title="Search everything (vendors, customers, PO / invoice numbers, items...)">&#128269; Search</button>
       <button type="button" class="icon-btn" onclick="manualRefresh()" title="Pull latest data">&#8635; Refresh</button>
       ${showDate ? topbarDateBadge() : ''}
       ${topbarUserBadge()}
@@ -3611,6 +3659,101 @@ function secHead(icon, label){
   return `<div class="sec-head"><span class="sec-bar"></span><span class="sec-label">${icon ? icon + ' ' : ''}${label}</span><span class="sec-line"></span></div>`;
 }
 let tabSectionActive = {};
+let pendingSectionLabel = null;
+const GLOBAL_SEARCH_TABLES = [
+  {table:'inward', tab:'inward', label:'Inward'},
+  {table:'inventory', tab:'inventory', label:'Inventory', section:()=>{ invSection='stock'; }},
+  {table:'outward', tab:'outward', label:'Outward'},
+  {table:'logistics', tab:'logistics', label:'Logistics'},
+  {table:'futureShipments', tab:'logistics', label:'Future Shipments'},
+  {table:'sales', tab:'sales', label:'Sales'},
+  {table:'vendorPO', tab:'po', label:'Vendor PO'},
+  {table:'customerPO', tab:'po', label:'Customer PO'},
+  {table:'purchaseAccounts', tab:'accounts', label:'Accounts &middot; Purchase', section:()=>{ accountsSection='purchase'; }},
+  {table:'salesAccounts', tab:'accounts', label:'Accounts &middot; Sales', section:()=>{ accountsSection='sales'; }},
+  {table:'enquiry', tab:'enquiry', label:'Enquiry'},
+  {table:'quotations', tab:'quotation', label:'Quotation'},
+  {table:'automation', tab:'automation', label:'Automation'},
+  {table:'pendingAssembly', tab:'automation', label:'Pending Assembly'},
+  {table:'employees', tab:'hr', label:'HR &middot; Employees', section:()=>{ hrSection='employees'; }},
+  {table:'attendance', tab:'hr', label:'HR &middot; Attendance', section:()=>{ hrSection='attendance'; }},
+  {table:'leaves', tab:'hr', label:'HR &middot; Leave', section:()=>{ hrSection='leave'; }},
+  {table:'salaries', tab:'hr', label:'HR &middot; Salary', section:()=>{ hrSection='salary'; }}
+];
+function recordSummary(r){
+  const skip = new Set(['id','addedBy','items','valueInWords','bankDetails']);
+  const parts = [];
+  for(const k in r){
+    if(skip.has(k)) continue;
+    const v = r[k];
+    if(v == null || typeof v === 'object') continue;
+    const s = String(v).trim();
+    if(s){ parts.push(s); if(parts.length >= 5) break; }
+  }
+  return parts.join(' &middot; ').slice(0, 120);
+}
+function closeGlobalSearch(){
+  const el = document.getElementById('gs-overlay');
+  if(el) el.remove();
+}
+function openGlobalSearch(){
+  closeGlobalSearch();
+  const ov = document.createElement('div');
+  ov.id = 'gs-overlay';
+  ov.style.cssText = 'position:fixed; inset:0; background:rgba(20,24,34,0.55); z-index:9000; display:flex; align-items:flex-start; justify-content:center; padding:70px 16px 16px 16px;';
+  ov.innerHTML = `<div style="background:var(--panel); border:1px solid var(--border); width:min(640px, 100%); max-height:75vh; display:flex; flex-direction:column; box-shadow:0 18px 50px rgba(0,0,0,0.3);" onclick="event.stopPropagation()">
+    <div style="padding:14px;"><input type="text" id="gs-input" placeholder="&#128269; Search vendors, customers, PO / invoice numbers, items... (Esc to close)" autocomplete="off"
+      style="width:100%; box-sizing:border-box; padding:12px 14px; font-size:14px; border:1px solid var(--border); background:var(--panel-2); color:var(--text);"
+      oninput="runGlobalSearch(this.value)" onkeydown="if(event.key==='Escape') closeGlobalSearch()"></div>
+    <div id="gs-results" style="overflow-y:auto; padding:0 14px 14px 14px;"><div style="color:var(--muted); font-size:12px; padding:6px 2px;">Type at least 2 characters to search every tab of ${esc(currentLocation)}.</div></div>
+  </div>`;
+  ov.onclick = closeGlobalSearch;
+  document.body.appendChild(ov);
+  setTimeout(()=>{ const i = document.getElementById('gs-input'); if(i) i.focus(); }, 0);
+}
+function runGlobalSearch(qRaw){
+  const box = document.getElementById('gs-results');
+  if(!box) return;
+  const q = String(qRaw||'').trim().toLowerCase();
+  if(q.length < 2){ box.innerHTML = '<div style="color:var(--muted); font-size:12px; padding:6px 2px;">Type at least 2 characters to search every tab of ' + esc(currentLocation) + '.</div>'; return; }
+  const d = DATA[currentLocation] || {};
+  const results = [];
+  for(const cfg of GLOBAL_SEARCH_TABLES){
+    if(!canSeeTab(cfg.tab)) continue;
+    const rows = d[cfg.table] || [];
+    for(const r of rows){
+      let hit = false;
+      for(const k in r){
+        const v = r[k];
+        if(v == null || typeof v === 'object') continue;
+        if(String(v).toLowerCase().includes(q)){ hit = true; break; }
+      }
+      if(hit){ results.push({cfg, r}); if(results.length >= 30) break; }
+    }
+    if(results.length >= 30) break;
+  }
+  if(!results.length){ box.innerHTML = '<div style="color:var(--muted); font-size:12px; padding:6px 2px;">No matches for "' + esc(qRaw) + '" in ' + esc(currentLocation) + '.</div>'; return; }
+  box.innerHTML = results.map((x,i)=>`
+    <div onclick="gsGo(${i})" style="padding:10px 12px; border:1px solid var(--border); margin-bottom:6px; cursor:pointer; background:var(--panel-2);"
+      onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
+      <div style="font-family:'Oswald',sans-serif; font-size:11px; letter-spacing:0.08em; text-transform:uppercase; color:var(--accent); margin-bottom:3px;">${x.cfg.label}</div>
+      <div style="font-size:12.5px; color:var(--text);">${recordSummary(x.r) || '(record)'}</div>
+    </div>`).join('');
+  window._gsResults = results;
+  window._gsQuery = qRaw.trim();
+}
+function gsGo(i){
+  const results = window._gsResults || [];
+  const x = results[i];
+  if(!x) return;
+  closeGlobalSearch();
+  if(x.cfg.section) x.cfg.section();
+  getTableUI(x.cfg.table).search = window._gsQuery || '';
+  getTableUI(x.cfg.table).limit = TABLE_PAGE_SIZE;
+  pendingSectionLabel = 'Records';
+  currentTab = x.cfg.tab;
+  render();
+}
 function applyTabSections(){
   try{
     const main = document.querySelector('#app .main');
@@ -3631,6 +3774,11 @@ function applyTabSections(){
     let active = tabSectionActive[key];
     if(active == null || active < 0 || active >= heads.length) active = 0;
     if(currentTab === 'quotation' && typeof editingQuoteId !== 'undefined' && editingQuoteId) active = 0;
+    if(pendingSectionLabel){
+      const want = heads.findIndex(h => { const l = h.querySelector('.sec-label'); return l && l.textContent.includes(pendingSectionLabel); });
+      if(want >= 0) active = want;
+      pendingSectionLabel = null;
+    }
     tabSectionActive[key] = active;
     const sw = document.createElement('div');
     sw.className = 'acct-switch tabsec-switch';
@@ -3648,6 +3796,32 @@ function showTabSection(key, idx){
   });
   main.querySelectorAll('.tabsec-btn').forEach(b => b.classList.toggle('active', Number(b.dataset.idx) === idx));
 }
+function paymentsDueSectionHtml(d, allowedTabs){
+  if(!allowedTabs.includes('accounts')) return '';
+  const t = today();
+  const daysPast = ds => Math.max(0, Math.floor((new Date(t+'T00:00:00') - new Date(ds+'T00:00:00'))/86400000));
+  const recv = (d.salesAccounts||[]).map(r=>({r, due:salesDueInfo(r)})).filter(x=>x.due.overdue)
+    .map(x=>({name:x.r.customer||'', ref:x.r.invNo||'', due:x.due.dueDate, days:daysPast(x.due.dueDate), amt:parseFloat(salesBalance(x.r))||0}))
+    .sort((a,b)=>b.days-a.days).slice(0,10);
+  const pay = (d.purchaseAccounts||[]).map(r=>({r, due:purchaseDueInfo(r)})).filter(x=>x.due.overdue)
+    .map(x=>({name:x.r.supplier||x.r.vendor||'', ref:x.r.supplierInvoiceNo||'', due:x.due.dueDate, days:daysPast(x.due.dueDate), amt:parseFloat(x.r.balanceOutstanding)||0}))
+    .sort((a,b)=>b.days-a.days).slice(0,10);
+  if(!recv.length && !pay.length) return '';
+  const fmtN = n => n.toLocaleString(undefined,{maximumFractionDigits:0});
+  const rows = (list, kind) => list.map(x=>`<tr>
+    <td><span class="badge ${kind==='IN'?'badge-overdue':''}" style="${kind==='OUT'?'background:rgba(31,68,145,0.12); color:var(--accent-2);':''}">${kind==='IN'?'TO RECEIVE':'TO PAY'}</span></td>
+    <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(x.name)}</td><td>${esc(x.ref)}</td><td>${fd(x.due)}</td>
+    <td><b>${x.days}</b> day${x.days===1?'':'s'} overdue</td><td><b>&#8377; ${fmtN(x.amt)}</b></td>
+  </tr>`).join('');
+  const totRecv = recv.reduce((a,x)=>a+x.amt,0), totPay = pay.reduce((a,x)=>a+x.amt,0);
+  return `${secHead('&#128181;', 'Payments Due')}
+  <div class="panel"><div class="panel-head"><h3>Overdue payments <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(to receive: &#8377; ${fmtN(totRecv)} &middot; to pay: &#8377; ${fmtN(totPay)} &mdash; manage in the Accounts tab)</span></h3></div>
+  <div class="panel-body">
+  <table><thead><tr><th></th><th>Party</th><th>Invoice</th><th>Due Date</th><th>Overdue</th><th>Balance</th></tr></thead><tbody>
+  ${rows(recv,'IN')}${rows(pay,'OUT')}
+  </tbody></table>
+  </div></div>`;
+}
 function renderDashboard(){
   const d = DATA[currentLocation];
   const allowedTabs = sessionAllowedTabs();
@@ -3663,6 +3837,8 @@ function renderDashboard(){
     cards.push({val:totalValue.toLocaleString(undefined,{maximumFractionDigits:0}), lbl:'Inventory Value', ico:'&#128176;'});
     cards.push({val:skuCount, lbl:"SKU's", ico:'&#127991;'});
     cards.push({val:deadStock, lbl:'Dead Stock', ico:'&#128683;'});
+    const lowStock = allInv.filter(i=>isLowStock(i)).length;
+    if(lowStock) cards.push({val:lowStock, lbl:'Low Stock', ico:'&#9888;&#65039;'});
   }
   if(allowedTabs.includes('po')){
     const pendingPO = d.vendorPO.length + d.customerPO.length;
@@ -3724,7 +3900,7 @@ function renderDashboard(){
   let extraPanels = '';
   if(allowedTabs.includes('inventory')){
     extraPanels += `
-    ${secHead('&#128230;', 'Inventory Overview')}
+    ${paymentsDueSectionHtml(d, allowedTabs)}${secHead('&#128230;', 'Inventory Overview')}
   <div class="panel"><div class="panel-head"><h3>Item register &mdash; ${locationLabel(currentLocation, 14)}</h3><div class="panel-head-actions">${exportBtn('exportDashboardInventory')}</div></div>
     <div class="panel-body">
     <table><thead><tr><th>Item</th><th>Qty</th><th>Specifications</th><th>Cost</th></tr></thead><tbody>
@@ -3884,6 +4060,32 @@ function poStatusBadge(s){
   const cls = s==='Executed' ? 'badge-delivered' : 'badge-transit';
   return `<span class="badge ${cls}">${esc(s || 'Non-Executed')}</span>`;
 }
+function allVendorNames(d){
+  const seen = new Set(); const names = [];
+  const add = v => { const c = String(v||'').trim(); if(c && !seen.has(c.toLowerCase())){ seen.add(c.toLowerCase()); names.push(c); } };
+  (d.inward||[]).forEach(r=>{ add(r.vendor); add(r.paidVendor); });
+  (d.vendorPO||[]).forEach(r=>add(r.vendor));
+  (d.purchaseAccounts||[]).forEach(r=>{ add(r.supplier); add(r.vendor); });
+  (d.enquiry||[]).forEach(r=>add(r.vendor));
+  return names.sort((a,b)=>a.localeCompare(b));
+}
+function allCustomerNames(d){
+  const seen = new Set(); const names = [];
+  const add = v => { const c = String(v||'').trim(); if(c && !seen.has(c.toLowerCase())){ seen.add(c.toLowerCase()); names.push(c); } };
+  (d.customerPO||[]).forEach(r=>add(r.customer));
+  (d.salesAccounts||[]).forEach(r=>add(r.customer));
+  (d.outward||[]).forEach(r=>add(r.customer));
+  (d.sales||[]).forEach(r=>add(r.customer));
+  (d.enquiry||[]).forEach(r=>add(r.customer));
+  (d.quotations||[]).forEach(r=>add(r.customer));
+  return names.sort((a,b)=>a.localeCompare(b));
+}
+function globalDatalistsHtml(){
+  const d = DATA[currentLocation];
+  if(!d) return '';
+  return `<datalist id="dl-vendors">${allVendorNames(d).map(n=>`<option value="${esc(n)}">`).join('')}</datalist>
+  <datalist id="dl-customers">${allCustomerNames(d).map(n=>`<option value="${esc(n)}">`).join('')}</datalist>`;
+}
 function uniqueCustomerNames(d){
   const names = [];
   const seen = new Set();
@@ -3934,7 +4136,7 @@ function renderPO(){
     <div class="form-grid">
       <div class="field"><label>P.O Number</label><input type="text" id="vpo-number" placeholder="Auto if blank"></div>
       <div class="field"><label>P.O Date</label><input type="date" id="vpo-date" value="${today()}" required></div>
-      <div class="field"><label>Vendor Name</label><input type="text" id="vpo-vendor" placeholder="Optional"></div>
+      <div class="field"><label>Vendor Name</label><input type="text" id="vpo-vendor" list="dl-vendors" autocomplete="off" placeholder="Optional"></div>
       <div class="field"><label>Customer Name</label><input type="text" id="vpo-customer" placeholder="Optional"></div>
       <div class="field"><label>Customer P.O</label><input type="text" id="vpo-customer-po" placeholder="Optional"></div>
       <div class="field"><label>Sub</label><input type="text" id="vpo-sub" placeholder="Optional"></div>
@@ -4406,7 +4608,7 @@ function renderInward(){
   <form onsubmit="return addInward(event)">
     <div class="form-grid">
       <div class="field"><label>Date</label><input type="date" id="in-date" value="${today()}" required></div>
-      <div class="field"><label>Vendor name</label><input type="text" id="in-vendor" oninput="syncInPaidVendor(this.value)" required></div>
+      <div class="field"><label>Vendor name</label><input type="text" id="in-vendor" list="dl-vendors" autocomplete="off" oninput="syncInPaidVendor(this.value)" required></div>
       <div class="field"><label>PO Number (starts with ${poPrefix})</label><input type="text" id="in-po-number" placeholder="${poPrefix}-001"></div>
       <div class="field"><label>PO Date</label><input type="date" id="in-po-date"></div>
       <div class="field"><label>Transporter Name</label><input type="text" id="in-transporter" placeholder="Optional"></div>
@@ -4518,6 +4720,9 @@ async function addInward(e){
   let poNumber = document.getElementById('in-po-number').value.trim();
   if(poNumber && !poNumber.toUpperCase().startsWith(prefix)){
     poNumber = prefix + '-' + poNumber;
+  }
+  if(poNumber && d.inward.some(r=>(r.poNumber||'').toLowerCase() === poNumber.toLowerCase())){
+    if(!confirm('PO Number "' + poNumber + '" already exists in the Inward log. Add it again anyway?')) return false;
   }
   const paidBy = document.getElementById('in-paid-by').value || 'Paid by us';
   const header = {
@@ -4640,6 +4845,13 @@ function invStampDates(d){
   const t = today();
   (d.inventory||[]).forEach(i=>{ if(!i.addedOn && !i.lastInwardOn) i.addedOn = t; });
 }
+function isLowStock(i){
+  const min = parseFloat(i.minQty);
+  const q = parseFloat(i.qty);
+  if(isNaN(min) || min <= 0 || isNaN(q)) return false;
+  if(i.deadStock === 'Yes') return false;
+  return q <= min;
+}
 let invSection = 'stock';
 function switchInvSection(s){ invSection = s; render(); }
 function renderInventory(){
@@ -4661,6 +4873,7 @@ function renderInventory(){
     <div class="form-grid">
       <div class="field"><label>Item name</label><input type="text" id="inv-name" required></div>
       <div class="field"><label>Quantity</label><input type="number" id="inv-qty" required></div>
+      <div class="field"><label>Min Qty <span style="color:var(--muted); font-weight:400;">(low stock alert)</span></label><input type="number" id="inv-minqty" placeholder="Optional"></div>
       <div class="field"><label>Specifications</label><input type="text" id="inv-specs" placeholder="Optional"></div>
       <div class="field"><label>Cost</label><input type="number" step="0.01" id="inv-cost" placeholder="Cost per item"></div>
       <div class="field"><label>Category</label><input type="text" id="inv-cat" placeholder="Optional"></div>
@@ -4681,7 +4894,7 @@ function renderInventory(){
   <table><thead><tr><th>Item</th><th>Qty</th><th>Specifications</th><th>Cost</th><th>Total Value</th><th>Category</th><th>Aging</th><th>Dead Stock</th>${cfHeaders('inventory')}<th>Added By</th><th></th></tr></thead><tbody>
   ${invRows.length===0 ? noMatchRow(10, d.inventory.length) :
     invRows.map(i=>`<tr>
-      <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(i.name)}</td><td>${esc(i.qty)}</td><td>${esc(i.specs)}</td><td>${esc(i.cost)}</td><td>${rowTotal(i.qty, i.cost)}</td><td>${esc(i.category)}</td>
+      <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(i.name)}</td><td>${esc(i.qty)}${isLowStock(i) ? ' <span class="badge badge-overdue" title="At or below minimum quantity of ' + esc(i.minQty) + '">LOW</span>' : ''}</td><td>${esc(i.specs)}</td><td>${esc(i.cost)}</td><td>${rowTotal(i.qty, i.cost)}</td><td>${esc(i.category)}</td>
       <td>${ageChip(invAgeDays(i)) || '<span style="color:var(--muted); font-size:11px;">&mdash;</span>'}</td>
       <td><select class="status-select" onchange="updateInventoryDeadStock('${i.id}', this.value)">
         <option value="No" ${(i.deadStock||'No')==='No'?'selected':''}>No</option>
@@ -4752,6 +4965,7 @@ async function addInventory(e){
     id: uid(),
     name: document.getElementById('inv-name').value.trim(),
     qty: document.getElementById('inv-qty').value.trim(),
+    minQty: document.getElementById('inv-minqty').value.trim(),
     specs: document.getElementById('inv-specs').value.trim(),
     cost: document.getElementById('inv-cost').value.trim(),
     category: document.getElementById('inv-cat').value.trim(),
@@ -4806,7 +5020,7 @@ function renderOutward(){
   <form onsubmit="return addOutward(event)">
     <div class="form-grid">
       <div class="field"><label>Date</label><input type="date" id="out-date" value="${today()}" required></div>
-      <div class="field"><label>Customer name</label><input type="text" id="out-customer" required></div>
+      <div class="field"><label>Customer name</label><input type="text" id="out-customer" list="dl-customers" autocomplete="off" required></div>
       <div class="field"><label>Customer P.O</label><input type="text" id="out-po" placeholder="Optional"></div>
       <div class="field"><label>P.O Date</label><input type="date" id="out-po-date"></div>
     </div>
@@ -5856,7 +6070,7 @@ function renderAutomation(){
     <div class="form-grid">
       <div class="field"><label>P.O Num</label><input type="text" id="pa-po-num" placeholder="Optional"></div>
       <div class="field"><label>Date</label><input type="date" id="pa-date" value="${today()}" required></div>
-      <div class="field"><label>Customer Name</label><input type="text" id="pa-customer" required></div>
+      <div class="field"><label>Customer Name</label><input type="text" id="pa-customer" list="dl-customers" autocomplete="off" required></div>
       <div class="field"><label>P.O Value</label><input type="number" step="0.01" id="pa-po-value" placeholder="Optional"></div>
       <div class="field"><label>Submission Date</label><input type="date" id="pa-submission-date"></div>
       <div class="field"><label>Assigned To</label><input type="text" id="pa-assigned" placeholder="Optional"></div>
@@ -6011,7 +6225,7 @@ function renderEnquiry(){
     <div class="form-grid">
       <div class="field"><label>Date</label><input type="date" id="eq-date" value="${today()}" required></div>
       <div class="field"><label>E.Num</label><input type="text" id="eq-enum" value="${esc(nextEnquiryNum(currentLocation, d))}" readonly></div>
-      <div class="field"><label>Customer</label><input type="text" id="eq-customer" required></div>
+      <div class="field"><label>Customer</label><input type="text" id="eq-customer" list="dl-customers" autocomplete="off" required></div>
       <div class="field"><label>Region</label><input type="text" id="eq-region" placeholder="Optional"></div>
       <div class="field"><label>Sales Person</label><input type="text" id="eq-salesperson" placeholder="Optional"></div>
       <div class="field"><label>Product Description</label><input type="text" id="eq-product" placeholder="Optional"></div>
@@ -6019,7 +6233,7 @@ function renderEnquiry(){
       <div class="field"><label>Quoting</label>${formSelect('eq-quoting', ['Yes','No'], '', true)}</div>
       <div class="field"><label>Due Date</label><input type="date" id="eq-duedate"></div>
       <div class="field"><label>Brand Name</label><input type="text" id="eq-brand" placeholder="Optional"></div>
-      <div class="field"><label>Vendor Name</label><input type="text" id="eq-vendor" placeholder="Optional"></div>
+      <div class="field"><label>Vendor Name</label><input type="text" id="eq-vendor" list="dl-vendors" autocomplete="off" placeholder="Optional"></div>
       <div class="field"><label>Submitted</label>${formSelect('eq-submitted', ['Yes','No'], '', true)}</div>
       <div class="field"><label>Customer Quotation No.</label><input type="text" id="eq-custquote" placeholder="Optional"></div>
       <div class="field"><label>Customer Response</label>${formSelect('eq-custresponse', ['Yes','NIL'], '', true)}</div>
@@ -6054,7 +6268,7 @@ function renderEnquiry(){
       <td>${enquiryBadge(r.priority)}</td>
       <td>${esc(r.assignedTo)}</td>
       ${cfCells('enquiry', r)}${addedByCell(r)}
-      <td>${actionCell((r.assignedTo? '' : pickBtn(r.id, 'pickEnquiry')) + editBtn('enquiry', r.id), deleteBtn(`deleteEnquiry('${r.id}')`))}</td>
+      <td>${actionCell(`<button type="button" class="icon-btn" onclick="quoteFromEnquiry('${r.id}')" title="Create a quotation pre-filled from this enquiry">&#128221;</button>` + (r.assignedTo? '' : pickBtn(r.id, 'pickEnquiry')) + editBtn('enquiry', r.id), deleteBtn(`deleteEnquiry('${r.id}')`))}</td>
     </tr>`).join('')}
   </tbody></table>
   </div></div>`;
@@ -6112,6 +6326,38 @@ function exportEnquiry(){
 }
 
 /* ---------------- ACCOUNTS (admin only) ---------------- */
+let acctSumMonth = '';
+function setAcctSumMonth(v){ acctSumMonth = v; render(); }
+function monthlySummarySection(d){
+  const m = acctSumMonth || today().slice(0,7);
+  const inMonth = ds => (ds||'').slice(0,7) === m;
+  const num = v => parseFloat(v) || 0;
+  const pa = (d.purchaseAccounts||[]).filter(r=>inMonth(r.date));
+  const sa = (d.salesAccounts||[]).filter(r=>inMonth(r.date));
+  const paTotal = pa.reduce((a,r)=>a+num(r.grossTotal),0);
+  const paGst = pa.reduce((a,r)=>a+num(r.cgst)+num(r.sgst)+num(r.igst),0);
+  const saTotal = sa.reduce((a,r)=>a+num(r.invoiceValue),0);
+  const saGst = sa.reduce((a,r)=>a+num(r.cgst)+num(r.sgst)+num(r.igst),0);
+  const saRecv = sa.reduce((a,r)=>a+num(r.amountReceived),0);
+  const paPaid = pa.reduce((a,r)=>a+num(r.amountPaid),0);
+  const f = n => n.toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2});
+  const monthName = (()=>{ try{ return new Date(m + '-01T00:00:00').toLocaleDateString(undefined,{month:'long', year:'numeric'}); }catch(e){ return m; } })();
+  const card = (lbl, val, sub) => `<div class="stat-card"><div class="stat-card-top"><div class="val" style="font-size:20px;">&#8377; ${f(val)}</div><div class="lbl">${lbl}</div>${sub?`<div style="font-size:11px; color:var(--muted); margin-top:3px;">${sub}</div>`:''}</div></div>`;
+  return `
+  ${secHead('&#128197;', 'Monthly Summary')}
+  <div class="panel"><div class="panel-head"><h3>Month summary <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(for GST filing &amp; review &mdash; based on entry dates in the Accounts registers)</span></h3>
+  <div class="panel-head-actions"><input type="month" value="${m}" onchange="setAcctSumMonth(this.value)" style="padding:8px 10px; border:1px solid var(--border); background:var(--panel-2); color:var(--text); font-size:13px;"></div></div>
+  <div class="panel-body">
+  <div style="font-family:'Oswald',sans-serif; font-size:13px; letter-spacing:0.06em; text-transform:uppercase; color:var(--muted); margin-bottom:12px;">${monthName} &middot; ${pa.length} purchase ${pa.length===1?'entry':'entries'} &middot; ${sa.length} sales ${sa.length===1?'entry':'entries'}</div>
+  <div class="stat-grid" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:12px;">
+    ${card('Sales (Invoice Value)', saTotal, 'GST collected: &#8377; ' + f(saGst))}
+    ${card('Purchases (Gross)', paTotal, 'GST paid: &#8377; ' + f(paGst))}
+    ${card('Amount Received', saRecv, 'against sales invoices')}
+    ${card('Amount Paid', paPaid, 'against purchase invoices')}
+    ${card('Net GST (collected &minus; paid)', saGst - paGst, 'indicative only &mdash; verify with your GST returns')}
+  </div>
+  </div></div>`;
+}
 let accountsSection = 'purchase';
 function switchAccountsSection(sec){ accountsSection = sec; render(); }
 function renderAccounts(){
@@ -6141,7 +6387,7 @@ function renderAccounts(){
   <form onsubmit="return addPurchaseAccount(event)">
     <div class="form-grid">
       <div class="field"><label>Date</label><input type="date" id="pa-date" value="${today()}" required></div>
-      <div class="field"><label>Supplier</label><input type="text" id="pa-supplier" required></div>
+      <div class="field"><label>Supplier</label><input type="text" id="pa-supplier" list="dl-vendors" autocomplete="off" required></div>
       <div class="field"><label>Supplier Invoice No.</label><input type="text" id="pa-supinv" placeholder="Optional"></div>
       <div class="field"><label>GSTIN/UIN</label><input type="text" id="pa-gstin" placeholder="Optional"></div>
       <div class="field"><label>P.O Number</label><input type="text" id="pa-po" placeholder="Optional"></div>
@@ -6367,9 +6613,10 @@ function renderAccounts(){
   <div class="acct-switch">
     <button type="button" class="acct-switch-btn ${accountsSection==='purchase'?'active':''}" onclick="switchAccountsSection('purchase')">&#128176; Purchase</button>
     <button type="button" class="acct-switch-btn ${accountsSection==='sales'?'active':''}" onclick="switchAccountsSection('sales')">&#128179; Sales</button>
+    <button type="button" class="acct-switch-btn ${accountsSection==='summary'?'active':''}" onclick="switchAccountsSection('summary')">&#128197; Monthly Summary</button>
   </div>
 
-  ${accountsSection==='purchase' ? purchaseSection : salesSection}`;
+  ${accountsSection==='purchase' ? purchaseSection : accountsSection==='summary' ? monthlySummarySection(d) : salesSection}`;
 }
 /* Live GST math for the purchase entry form. GST is applied on Basic Value + Freight. */
 function paCompute(vals){
@@ -6405,6 +6652,10 @@ async function addPurchaseAccount(e){
   const d = DATA[currentLocation];
   const gv = id => { const el = document.getElementById(id); return el ? (el.value||'').trim() : ''; };
   const gn = id => parseFloat(gv(id)) || 0;
+  const dupSup = gv('pa-supinv');
+  if(dupSup && d.purchaseAccounts.some(r=>(r.supplierInvoiceNo||'').toLowerCase() === dupSup.toLowerCase())){
+    if(!confirm('Supplier Invoice No "' + dupSup + '" already exists in the Purchase register. Save it again anyway?')) return false;
+  }
   const c = paCompute({
     qty: gn('pa-qty'), unitPrice: gn('pa-unitprice'), freight: gn('pa-freight'),
     cgstPct: gn('pa-cgstpct'), sgstPct: gn('pa-sgstpct'), igstPct: gn('pa-igstpct'),
@@ -6614,6 +6865,10 @@ async function addSalesAccount(e){
   const d = DATA[currentLocation];
   const gv = id => { const el = document.getElementById(id); return el ? (el.value||'').trim() : ''; };
   saRecalc();
+  const dupInv = gv('sa-invno');
+  if(dupInv && d.salesAccounts.some(r=>(r.invNo||'').toLowerCase() === dupInv.toLowerCase())){
+    if(!confirm('Invoice No "' + dupInv + '" already exists in the Sales register. Save it again anyway?')) return false;
+  }
   const items = readSaItemLines();
   const taxable = gv('sa-taxable');
   const invoiceValue = gv('sa-invval');
@@ -7416,6 +7671,7 @@ const EDIT_SCHEMAS = {
   inventory: [
     {key:'name', label:'Item name', type:'text'},
     {key:'qty', label:'Quantity', type:'number'},
+    {key:'minQty', label:'Min Qty (low stock alert)', type:'number'},
     {key:'specs', label:'Specifications', type:'text'},
     {key:'cost', label:'Cost', type:'number'},
     {key:'category', label:'Category', type:'text'},
@@ -7933,6 +8189,23 @@ function quoteFooterHtml(loc){
 }
 
 let editingQuoteId = null;
+function quoteFromEnquiry(id){
+  const d = DATA[currentLocation];
+  const r = (d.enquiry||[]).find(x=>x.id===id);
+  if(!r) return;
+  if(!canSeeTab('quotation')){ alert('You do not have access to the Quotation tab.'); return; }
+  editingQuoteId = null;
+  pendingSectionLabel = 'New Entry';
+  currentTab = 'quotation';
+  render();
+  setTimeout(()=>{
+    const set = (elId, v) => { const el = document.getElementById(elId); if(el && v) el.value = v; };
+    set('q-customer', r.customer);
+    set('q-rfqref', r.enum);
+    set('q-rfqdate', r.date);
+    try{ updateQuoteTotals(); }catch(e){}
+  }, 0);
+}
 function quotePrefix(loc){ return loc==='SOMTEK' ? 'ST-QTN-' : 'ET-QTN-'; }
 function nextQuoteNumber(d){
   return quotePrefix(currentLocation) + String((d.quotations||[]).length + 1).padStart(3,'0');
@@ -8080,7 +8353,7 @@ function renderQuotation(){
   <form onsubmit="return saveQuotation(event)">
     <div class="access-title">Quote &amp; RFQ details (as per template header)</div>
     <div class="form-grid">
-      <div class="field"><label>Customer</label><input type="text" id="q-customer" value="${esc(q.customer||'')}" required></div>
+      <div class="field"><label>Customer</label><input type="text" id="q-customer" list="dl-customers" autocomplete="off" value="${esc(q.customer||'')}" required></div>
       <div class="field"><label>Quote #</label><input type="text" id="q-number" value="${esc(editing?q.quoteNumber:nextQuoteNumber(d))}" required></div>
       <div class="field"><label>RFQ Type</label><input type="text" id="q-rfqtype" value="${esc(q.rfqType||'')}" placeholder="-"></div>
       <div class="field"><label>Quote Date</label><input type="date" id="q-date" value="${esc(q.quoteDate||today())}" required></div>
@@ -8122,8 +8395,8 @@ function renderQuotation(){
   <div class="panel"><div class="panel-head"><h3>Quotation log</h3><div class="panel-head-actions">${exportBtn('exportQuotationLog')}</div></div>
   <div class="panel-body">
   ${tableToolbar('quotations', d.quotations)}
-  <table><thead><tr><th>Quote #</th><th>Date</th><th>Rev</th><th>Customer</th><th>Items</th><th>Total Price INR</th><th>P.O Received</th><th>Added By</th><th></th></tr></thead><tbody>
-  ${qRows.length===0 ? noMatchRow(9, d.quotations.length) :
+  <table><thead><tr><th>Quote #</th><th>Date</th><th>Rev</th><th>Customer</th><th>Items</th><th>Total Price INR</th><th>P.O Received</th><th>Status</th><th>Added By</th><th></th></tr></thead><tbody>
+  ${qRows.length===0 ? noMatchRow(10, d.quotations.length) :
     qRows.map(r=>`<tr>
       <td>${esc(r.quoteNumber)}</td><td>${fd(r.quoteDate||r.date)}</td><td>${esc(r.revNo||'R0')}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.customer)}</td>
       <td>${(r.items||[]).length}</td><td>&#8377; ${fmt2(r.totalPrice!=null?r.totalPrice:r.grandTotal)}</td>
@@ -8131,6 +8404,13 @@ function renderQuotation(){
         <select class="status-select ${r.poReceived==='Yes'?'st-delivered':'st-transit'}" onchange="updateQuotePOReceived('${r.id}', this.value)">
           <option value="No" ${r.poReceived!=='Yes'?'selected':''}>No</option>
           <option value="Yes" ${r.poReceived==='Yes'?'selected':''}>Yes</option>
+        </select>
+      </td>
+      <td>
+        <select class="status-select ${(r.quoteStatus||'Pending')==='Won'?'st-delivered':(r.quoteStatus==='Lost'?'st-rejected':'st-transit')}" onchange="updateQuoteStatus('${r.id}', this.value)">
+          <option value="Pending" ${(r.quoteStatus||'Pending')==='Pending'?'selected':''}>Pending</option>
+          <option value="Won" ${r.quoteStatus==='Won'?'selected':''}>Won</option>
+          <option value="Lost" ${r.quoteStatus==='Lost'?'selected':''}>Lost</option>
         </select>
       </td>${addedByCell(r)}
       <td><div class="action-cell">
@@ -8171,6 +8451,14 @@ function loadQuoteForEdit(id){
   if(el && el.scrollIntoView) el.scrollIntoView({behavior:'smooth'});
 }
 function cancelQuoteEdit(){ editingQuoteId = null; render(); }
+async function updateQuoteStatus(id, value){
+  const d = DATA[currentLocation];
+  const r = d.quotations.find(x=>x.id===id);
+  if(!r) return;
+  r.quoteStatus = value;
+  await saveLocation(currentLocation);
+  render();
+}
 async function updateQuotePOReceived(id, value){
   const d = DATA[currentLocation];
   const q = (d.quotations||[]).find(x=>x.id===id);
