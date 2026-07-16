@@ -393,6 +393,14 @@ form input[readonly]{background:var(--panel-2); color:var(--muted); cursor:defau
 .notif-item .n-title{font-weight:700; margin-bottom:2px;}
 .notif-item .n-meta{font-size:10.5px; color:var(--muted); margin-top:4px; font-family:'IBM Plex Mono',monospace;}
 .notif-empty{padding:18px 14px; font-size:12px; color:var(--muted); text-align:center;}
+.notif-item{cursor:pointer;}
+.notif-item:hover{background:var(--panel-2);}
+.notif-item.unread{background:color-mix(in srgb, var(--accent) 7%, var(--panel));}
+.notif-item.unread .n-title::before{content:'\25CF'; color:var(--accent); font-size:9px; margin-right:6px; vertical-align:middle;}
+.notif-modal-card{background:var(--panel); border:1px solid var(--border); width:520px; max-width:calc(100vw - 40px); max-height:70vh; display:flex; flex-direction:column; border-radius:8px; overflow:hidden; box-shadow:0 18px 50px rgba(0,0,0,0.35);}
+.notif-modal-head{background:var(--accent); color:#fff; padding:13px 16px; font-family:'Oswald',sans-serif; letter-spacing:0.04em; font-size:15px; display:flex; justify-content:space-between; align-items:center;}
+.notif-modal-body{padding:18px; font-size:14px; line-height:1.7; overflow-y:auto; white-space:pre-wrap; word-break:break-word;}
+.notif-modal-meta{padding:10px 18px; border-top:1px solid var(--border); font-size:11px; color:var(--muted); font-family:'IBM Plex Mono',monospace;}
 .kpi-star{cursor:pointer; font-size:15px; line-height:1; opacity:0.3; margin-left:8px; user-select:none;}
 .kpi-star:hover{opacity:0.7;}
 .kpi-star.faved{opacity:1; color:#f0a500;}
@@ -1103,9 +1111,23 @@ function getReadNotifIds(){
 function markAllNotifsRead(){
   try{ localStorage.setItem(notifReadKey(), JSON.stringify((NOTIFS.list||[]).map(n=>n.id))); }catch(e){}
 }
+/* Notifications live for 24 hours, then disappear everywhere. */
+function activeNotifs(){
+  const cutoff = Date.now() - 24*60*60*1000;
+  return (NOTIFS.list||[]).filter(n=>{
+    const t = n.at ? Date.parse(n.at) : 0;
+    return t && t >= cutoff;
+  });
+}
+function markNotifRead(id){
+  try{
+    const read = getReadNotifIds();
+    if(read.indexOf(id)===-1){ read.push(id); localStorage.setItem(notifReadKey(), JSON.stringify(read)); }
+  }catch(e){}
+}
 function unreadNotifCount(){
   const read = getReadNotifIds();
-  return (NOTIFS.list||[]).filter(n=>read.indexOf(n.id)===-1).length;
+  return activeNotifs().filter(n=>read.indexOf(n.id)===-1).length;
 }
 function closeNotifMenu(){
   const el = document.getElementById('notif-menu');
@@ -1123,18 +1145,41 @@ async function toggleNotifMenu(ev){
   const host = ev.currentTarget.closest('.topbar-user');
   if(!host) return;
   await loadNotifications();
-  const items = (NOTIFS.list||[]).slice(0, 20);
+  const read = getReadNotifIds();
+  const items = activeNotifs().slice(0, 20);
   const menu = document.createElement('div');
   menu.id = 'notif-menu';
   menu.className = 'notif-menu';
   menu.innerHTML = items.length === 0
-    ? '<div class="notif-empty">No notifications yet.</div>'
-    : items.map(n=>`<div class="notif-item"><div class="n-title">${esc(n.title||'')}</div><div>${esc(n.msg||'').replace(/\n/g,'<br>')}</div><div class="n-meta">${esc(n.by||'')} &middot; ${esc(n.at ? new Date(n.at).toLocaleString() : '')}</div></div>`).join('');
+    ? '<div class="notif-empty">No notifications right now.<br><span style="font-size:10.5px;">Notifications disappear after 24 hours.</span></div>'
+    : items.map(n=>`<div class="notif-item ${read.indexOf(n.id)===-1?'unread':''}" data-nid="${esc(n.id)}" onclick="openNotifModal(this.dataset.nid)"><div class="n-title">${esc(n.title||'(no title)')}</div><div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc((n.msg||'').split('\n')[0])}</div><div class="n-meta">${esc(n.by||'')} &middot; ${esc(n.at ? new Date(n.at).toLocaleString() : '')}</div></div>`).join('');
   host.appendChild(menu);
-  markAllNotifsRead();
-  const badge = document.getElementById('notif-badge');
-  if(badge) badge.remove();
   setTimeout(()=>{ document.addEventListener('click', closeNotifMenuOutside, {once:true}); }, 0);
+}
+function openNotifModal(id){
+  const n = activeNotifs().find(x=>x.id===id);
+  closeNotifMenu();
+  if(!n) return;
+  markNotifRead(id);
+  const badge = document.getElementById('notif-badge');
+  if(badge){
+    const c = unreadNotifCount();
+    if(c) badge.textContent = c; else badge.remove();
+  }
+  closeNotifModal();
+  const modalHtml = `
+  <div id="notif-modal-root" class="modal-overlay" onclick="if(event.target===this)closeNotifModal()">
+    <div class="notif-modal-card">
+      <div class="notif-modal-head"><span>&#128276; ${esc(n.title||'Notification')}</span><button class="sh-close" style="background:none;border:none;color:#fff;cursor:pointer;font-size:16px;" onclick="closeNotifModal()">&#10005;</button></div>
+      <div class="notif-modal-body">${esc(n.msg||'')}</div>
+      <div class="notif-modal-meta">Sent by ${esc(n.by||'admin')} &middot; ${esc(n.at ? new Date(n.at).toLocaleString() : '')} &middot; disappears 24 hours after sending</div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
+function closeNotifModal(){
+  const el = document.getElementById('notif-modal-root');
+  if(el) el.remove();
 }
 async function sendNotification(){
   if(!isAdmin()) return;
@@ -1145,7 +1190,8 @@ async function sendNotification(){
   await loadNotifications();
   NOTIFS.list = NOTIFS.list || [];
   NOTIFS.list.unshift({ id: uid(), title: title, msg: msg, by: actorName(), at: new Date().toISOString() });
-  NOTIFS.list = NOTIFS.list.slice(0, 50);
+  const cutoff = Date.now() - 24*60*60*1000;
+  NOTIFS.list = NOTIFS.list.filter(n=>{ const t = n.at ? Date.parse(n.at) : 0; return t && t >= cutoff; }).slice(0, 50);
   const ok = await fsSet('notifications', NOTIFS);
   if(ok){
     logAudit('NOTICE', 'Notification sent: "' + (title || msg).slice(0, 60) + '"');
@@ -1808,7 +1854,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.18';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.19';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
