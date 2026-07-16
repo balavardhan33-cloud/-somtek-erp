@@ -1893,7 +1893,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.23';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.24';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -3891,13 +3891,35 @@ function printPocDoc(){
 
 /* ---------------- INWARD ---------------- */
 function inwardPoPrefix(loc){ return loc==='SOMTEK' ? 'SOM' : 'ET'; }
+/* Age of an inward RECEIPT, from its receipt date. */
+function inwardAgeDays(r){
+  const t = Date.parse(r.date);
+  if(!t) return null;
+  return Math.max(0, Math.floor((Date.now() - t) / 86400000));
+}
+let inwardSection = 'inward';
+function switchInwardSection(s){ inwardSection = s; render(); }
 function renderInward(){
   const d = DATA[currentLocation];
+  invStampDates(d);
+  const agingCount = d.inventory.filter(i => !(i.deadStock==='Yes' || (Number(i.qty)||0)===0) && (invAgeDays(i)||0) > 90).length;
+  const switcher = `
+  <div class="acct-switch" style="margin-bottom:14px;">
+    <button type="button" class="acct-switch-btn ${inwardSection==='inward'?'active':''}" onclick="switchInwardSection('inward')">&#128229; Inward</button>
+    <button type="button" class="acct-switch-btn ${inwardSection==='aging'?'active':''}" onclick="switchInwardSection('aging')">&#9203; Aging Stock${agingCount?` (${agingCount})`:''}</button>
+  </div>`;
+  if(inwardSection === 'aging'){
+    return `
+  ${tabHeader(currentLocation, 'Inward')}
+  ${switcher}
+  ${agingStockPanelHtml()}`;
+  }
   const poPrefix = inwardPoPrefix(currentLocation);
   const inwardAll = applyTableTools('inward', d.inward.slice().reverse());
   const inwardRows = limitRows('inward', inwardAll);
   return `
   ${tabHeader(currentLocation, 'Inward')}
+  ${switcher}
   <div class="panel"><div class="panel-head"><h3>Record inward receipt</h3></div>
   <div class="panel-body">
   <form onsubmit="return addInward(event)">
@@ -3928,16 +3950,15 @@ function renderInward(){
   <div class="panel"><div class="panel-head"><h3>Inward log</h3><div class="panel-head-actions">${importBtn('inward')}${exportBtn('exportInward')}</div></div>
   <div class="panel-body">
   ${tableToolbar('inward', d.inward)}
-  <table><thead><tr><th>Date</th><th>Vendor Name</th><th>PO Number</th><th>PO Date</th><th>ITEM</th><th>Item Type</th><th>Qty</th><th>Price</th><th>Total Value</th><th>Transporter</th><th>L.R No</th><th>Amount Paid</th><th>Paid By</th><th>Dead Stock</th>${cfHeaders('inward')}<th>Added By</th><th></th></tr></thead><tbody>
-  ${inwardRows.length===0 ? noMatchRow(16, d.inward.length) :
+  <table><thead><tr><th>Date</th><th>Vendor Name</th><th>PO Number</th><th>PO Date</th><th>ITEM</th><th>Item Type</th><th>Qty</th><th>Price</th><th>Total Value</th><th>Transporter</th><th>L.R No</th><th>Amount Paid</th><th>Paid By</th><th>Aging</th><th>Dead Stock</th>${cfHeaders('inward')}<th>Added By</th><th></th></tr></thead><tbody>
+  ${inwardRows.length===0 ? noMatchRow(17, d.inward.length) :
     inwardRows.map(r=>`<tr>
-      <td>${fd(r.date)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.vendor)}</td><td>${esc(r.poNumber)}</td><td>${fd(r.poDate)}</td><td>${esc(r.item)}</td><td>${esc(r.itemType)}</td><td>${esc(r.qty)}</td><td>${esc(r.price)}</td><td>${rowTotal(r.qty, r.price)}</td><td>${esc(r.transporter)}</td><td>${esc(r.lrNumber)}</td><td>${esc(r.amountPaid)}</td><td>${esc(inPaidByDisplay(r))}</td><td>${esc(r.deadStock||'No')}</td>${cfCells('inward', r)}${addedByCell(r)}
+      <td>${fd(r.date)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.vendor)}</td><td>${esc(r.poNumber)}</td><td>${fd(r.poDate)}</td><td>${esc(r.item)}</td><td>${esc(r.itemType)}</td><td>${esc(r.qty)}</td><td>${esc(r.price)}</td><td>${rowTotal(r.qty, r.price)}</td><td>${esc(r.transporter)}</td><td>${esc(r.lrNumber)}</td><td>${esc(r.amountPaid)}</td><td>${esc(inPaidByDisplay(r))}</td><td>${ageChip(inwardAgeDays(r)) || '<span style="color:var(--muted); font-size:11px;">&mdash;</span>'}</td><td>${esc(r.deadStock||'No')}</td>${cfCells('inward', r)}${addedByCell(r)}
       <td>${actionCell(editBtn('inward', r.id), deleteBtn(`deleteInward('${r.id}')`))}</td>
     </tr>`).join('')}
-  </tbody>${totalFootRow(16 + cfDefs('inward').length, 'Total Value (all matching entries)', sumTotal(inwardAll,'qty','price'))}</table>
+  </tbody>${totalFootRow(17 + cfDefs('inward').length, 'Total Value (all matching entries)', sumTotal(inwardAll,'qty','price'))}</table>
   ${showMoreBar('inward', inwardAll.length)}
-  </div></div>
-  ${agingStockPanelHtml()}`;
+  </div></div>`;
 }
 function toggleInPaidVendor(){
   const sel = document.getElementById('in-paid-by');
