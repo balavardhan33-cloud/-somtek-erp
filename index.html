@@ -1771,6 +1771,60 @@ async function saveLocation(loc){
   const ok = await fsSet('loc_'+loc, DATA[loc]);
   snapshotLocation(loc);
   if(ok && session && changes.length) logAudit('DATA CHANGE', changes.join(' | '), loc);
+  /* push HR changes to the shared HR document (both companies) */
+  try{ await syncHrSharedIfChanged(loc); }catch(e){ console.error('shared HR sync failed', e); }
+}
+
+/* ---------------- SHARED HR (same for SOMTEK and EVISSAT) ----------------
+   Employees, Attendance, Leave, Salary and Company Info live in ONE shared
+   document ('hr_shared') so both companies always see identical HR data. */
+const HR_KEYS = ['employees','attendance','leaves','salaries','hrInfo'];
+let SHARED_HR = null;
+let HR_SNAP = '';
+
+function pickHr(d){
+  const o = {};
+  HR_KEYS.forEach(k=>{ o[k] = d && d[k] !== undefined ? d[k] : (k==='hrInfo' ? {} : []); });
+  return o;
+}
+function applySharedHr(loc){
+  if(!SHARED_HR || !DATA[loc]) return;
+  HR_KEYS.forEach(k=>{ DATA[loc][k] = SHARED_HR[k] !== undefined ? SHARED_HR[k] : DATA[loc][k]; });
+}
+function applySharedHrEverywhere(){
+  Object.keys(DATA||{}).forEach(loc=>{ if(DATA[loc]) applySharedHr(loc); });
+}
+async function loadHrShared(){
+  const doc = await fsGet('hr_shared');
+  if(doc && typeof doc === 'object'){
+    SHARED_HR = pickHr(doc);
+  }else if(fsGetLastStatus === 'missing'){
+    /* First run: build the shared copy by merging both companies' HR data. */
+    const merged = { employees:[], attendance:[], leaves:[], salaries:[], hrInfo:{shifts:'',holidays:'',leavePolicies:''} };
+    for(const loc of Object.keys(LOCATIONS)){
+      const d = DATA[loc] && Object.keys(DATA[loc]).length ? DATA[loc] : (await fsGet('loc_'+loc)) || {};
+      ['employees','attendance','leaves','salaries'].forEach(k=>{
+        (Array.isArray(d[k]) ? d[k] : []).forEach(r=>{ if(r && !merged[k].some(x=>x && r.id && x.id===r.id)) merged[k].push(r); });
+      });
+      const hi = (d.hrInfo && typeof d.hrInfo==='object' && !Array.isArray(d.hrInfo)) ? d.hrInfo : {};
+      ['shifts','holidays','leavePolicies'].forEach(k=>{ if(!merged.hrInfo[k] && typeof hi[k]==='string' && hi[k]) merged.hrInfo[k] = hi[k]; });
+    }
+    SHARED_HR = merged;
+    await fsSet('hr_shared', SHARED_HR);
+    console.warn('HR shared: created merged HR document for both companies.');
+  }
+  /* on read error keep the previous in-memory copy */
+  if(SHARED_HR){ HR_SNAP = JSON.stringify(SHARED_HR); applySharedHrEverywhere(); }
+}
+async function syncHrSharedIfChanged(loc){
+  if(!DATA[loc]) return;
+  const cur = pickHr(DATA[loc]);
+  const j = JSON.stringify(cur);
+  if(j === HR_SNAP) return;
+  SHARED_HR = cur;
+  HR_SNAP = j;
+  applySharedHrEverywhere();
+  await fsSet('hr_shared', SHARED_HR);
 }
 
 async function loadAll(){
@@ -1781,12 +1835,14 @@ async function loadAll(){
   await loadPrintJobs();
   await loadAudit();
   for(const loc of LOCATIONS){ await loadLocation(loc); }
+  await loadHrShared();
 }
 
 /* ---- sync: periodically pull updates from other users into the screen ----
    (plain REST has no live "push" listener, so this polls on an interval
    instead - every teammate's edits show up within a few seconds) */
 let syncTimer = null;
+let syncTickCount = 0;
 const SYNC_INTERVAL_MS = 6000;
 
 async function syncTick(){
@@ -1794,7 +1850,10 @@ async function syncTick(){
   const loc = currentLocation;
   const [locDoc, usersDoc, noticeDoc] = await Promise.all([ fsGet('loc_'+loc), fsGet(USERS_DOC), fsGet('notice') ]);
   let changed = false;
-  if(locDoc){ DATA[loc] = ensureShape(locDoc); snapshotLocation(loc); changed = true; }
+  if(locDoc){ DATA[loc] = ensureShape(locDoc); applySharedHr(loc); snapshotLocation(loc); changed = true; }
+  /* refresh the shared HR copy from the cloud every ~30s */
+  syncTickCount = (syncTickCount||0) + 1;
+  if(syncTickCount % 5 === 0){ loadHrShared().catch(()=>{}); }
   if(usersDoc && Array.isArray(usersDoc.list)){
     USERS = usersDoc.list;
     CUSTOM_ROLES = (usersDoc.roles && typeof usersDoc.roles==='object' && !Array.isArray(usersDoc.roles)) ? usersDoc.roles : CUSTOM_ROLES;
@@ -2246,7 +2305,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.30';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.31';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -2718,6 +2777,7 @@ async function chooseLocation(loc){
   saveSessionLocal();
   render(loadingScreen('Loading '+loc+'...'));
   await loadLocation(loc);
+  await loadHrShared();
   subscribeLocation(loc);
   render();
   /* generate any scheduled reports that fell due (admins only) */
