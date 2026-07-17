@@ -2316,7 +2316,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.39';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.42';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -3665,6 +3665,7 @@ const GLOBAL_SEARCH_TABLES = [
   {table:'outward', tab:'outward', label:'Outward'},
   {table:'logistics', tab:'logistics', label:'Logistics'},
   {table:'futureShipments', tab:'logistics', label:'Future Shipments'},
+  {table:'leads', tab:'sales', label:'Leads'},
   {table:'sales', tab:'sales', label:'Sales'},
   {table:'vendorPO', tab:'po', label:'Vendor PO'},
   {table:'customerPO', tab:'po', label:'Customer PO'},
@@ -5483,7 +5484,8 @@ function renderSales(){
   const slRows = limitRows('sales', slAll);
   return `
   ${tabHeader(currentLocation, 'Sales')}
-  ${secHead('&#10133;', 'New Entry')}
+  ${leadsSectionHtml(d)}
+  ${secHead('&#128188;', 'Sales Activity')}
   <div class="panel"><div class="panel-head"><h3>New sales entry</h3></div>
   <div class="panel-body">
   <form onsubmit="return addSales(event)">
@@ -5500,20 +5502,221 @@ function renderSales(){
     </div>
   </form>
   </div></div>
-  ${secHead('&#128203;', 'Records')}
   <div class="panel"><div class="panel-head"><h3>Sales register</h3><div class="panel-head-actions">${importBtn('sales')}${exportBtn('exportSales')}</div></div>
   <div class="panel-body">
+  ${leadStatusCountsHtml(d.sales)}
   ${tableToolbar('sales', d.sales)}
-  <table><thead><tr><th>Date</th><th>Customer</th><th>Customer P.O</th><th>Item</th><th>Qty</th><th>Unit Price</th><th>Total Value</th><th>Remarks</th>${cfHeaders('sales')}<th>Added By</th><th></th></tr></thead><tbody>
-  ${slRows.length===0 ? noMatchRow(10, d.sales.length) :
+  <table><thead><tr><th>Date</th><th>Lead Status</th><th>Order Status</th><th>Customer</th><th>Customer P.O</th><th>Item</th><th>Qty</th><th>Unit Price</th><th>Total Value</th><th>Remarks</th>${cfHeaders('sales')}<th>Added By</th><th></th></tr></thead><tbody>
+  ${slRows.length===0 ? noMatchRow(13, d.sales.length) :
     slRows.map(r=>`<tr>
-      <td>${fd(r.date)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.customer)}</td><td>${esc(r.customerPO||'')}</td><td>${esc(r.item||'')}</td>
+      <td>${fd(r.date)}</td><td>${leadStatusSelect(r)}</td><td>${orderStatusSelect(r)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.customer)}</td><td>${esc(r.customerPO||'')}</td><td>${esc(r.item||'')}</td>
       <td>${esc(r.qty||'')}</td><td>${r.unitPrice!=='' && r.unitPrice!=null ? '&#8377; '+fmt2(r.unitPrice) : ''}</td><td>${r.totalValue!=='' && r.totalValue!=null ? '&#8377; '+fmt2(r.totalValue) : ''}</td><td>${esc(r.remarks||'')}</td>${cfCells('sales', r)}${addedByCell(r)}
-      <td>${actionCell(editBtn('sales', r.id), deleteBtn(`deleteSales('${r.id}')`))}</td>
+      <td>${actionCell(`<button type="button" class="icon-btn" onclick="showOrderTimeline('${r.id}')" title="Order timeline / history">&#128337;</button><button type="button" class="icon-btn" onclick="duplicateSalesOrder('${r.id}')" title="Duplicate this order">&#10697;</button>` + editBtn('sales', r.id), deleteBtn(`deleteSales('${r.id}')`))}</td>
     </tr>`).join('')}
   </tbody></table>
   ${showMoreBar('sales', slAll.length)}
   </div></div>`;
+}
+function leadsSectionHtml(d){
+  d.leads = d.leads || [];
+  const ldAll = applyTableTools('leads', d.leads.slice().reverse());
+  const ldRows = limitRows('leads', ldAll);
+  return `
+  ${secHead('&#127919;', 'Leads')}
+  <div class="panel"><div class="panel-head"><h3>New lead</h3></div>
+  <div class="panel-body">
+  <form onsubmit="return addLead(event)">
+    <div class="form-grid">
+      <div class="field"><label>Date</label><input type="date" id="ld-date" value="${today()}" required></div>
+      <div class="field"><label>Customer</label><input type="text" id="ld-customer" list="dl-customers" autocomplete="off" required></div>
+      <div class="field"><label>Region</label><input type="text" id="ld-region" placeholder="Optional"></div>
+      <div class="field"><label>Follow-up Date</label><input type="date" id="ld-followup"></div>
+      <div class="field"><label>Lead to Customer</label><select id="ld-converted" onchange="ldToggleReason()"><option value="">Pending</option><option value="Yes">Yes</option><option value="No">No</option><option value="Hold">Hold</option></select></div>
+      <div class="field" id="ld-reason-wrap" style="display:none;"><label>Reason <span style="color:var(--accent);">*</span></label><input type="text" id="ld-reason" placeholder="Why not converted"></div>
+    </div>
+    <div style="margin-top:14px;">
+      <div style="font-family:'Oswald',sans-serif; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; color:var(--muted); margin-bottom:8px;">Requirement (items)</div>
+      <div id="ld-items"></div>
+      <button type="button" class="icon-btn" onclick="ldAddItemRow()">+ Add Item</button>
+    </div>
+    <button type="submit" class="btn" style="margin-top:14px;">Add Lead</button>
+  </form>
+  </div></div>
+  <div class="panel"><div class="panel-head"><h3>Leads register</h3></div>
+  <div class="panel-body table-scroll">
+  ${tableToolbar('leads', d.leads)}
+  <table><thead><tr><th>Date</th><th>Customer</th><th>Region</th><th>Follow-up</th><th>Requirement</th><th>Lead to Customer</th><th>Reason</th><th>Added By</th><th></th></tr></thead><tbody>
+  ${ldRows.length===0 ? noMatchRow(9, d.leads.length) :
+    ldRows.map(r=>`<tr>
+      <td>${fd(r.date)}</td>
+      <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.customer)}</td>
+      <td>${esc(r.region||'')}</td>
+      <td>${fd(r.followUp)||'<span style="color:var(--muted); font-size:11px;">&mdash;</span>'}</td>
+      <td>${leadReqSummary(r)}</td>
+      <td>${leadConvertedSelect(r)}</td>
+      <td style="white-space:normal; max-width:220px;">${esc(r.reason||'')}</td>
+      ${addedByCell(r)}
+      <td>${actionCell(editBtn('leads', r.id), deleteBtn(`deleteLead('${r.id}')`))}</td>
+    </tr>`).join('')}
+  </tbody></table>
+  ${showMoreBar('leads', ldAll.length)}
+  </div></div>`;
+}
+function ldToggleReason(){
+  const sel = document.getElementById('ld-converted');
+  const wrap = document.getElementById('ld-reason-wrap');
+  if(sel && wrap) wrap.style.display = sel.value === 'No' ? '' : 'none';
+}
+function ldAddItemRow(desc, units, qty, price){
+  const box = document.getElementById('ld-items');
+  if(!box) return;
+  const row = document.createElement('div');
+  row.className = 'ld-item-row';
+  row.style.cssText = 'display:grid; grid-template-columns:2fr 1fr 1fr 1fr auto; gap:8px; margin-bottom:8px;';
+  row.innerHTML = `
+    <input type="text" class="ldi-desc" placeholder="Item description" value="${esc(desc||'')}">
+    <input type="text" class="ldi-units" placeholder="Units (Nos/Kg/Set)" value="${esc(units||'')}">
+    <input type="number" class="ldi-qty" step="any" placeholder="Qty" value="${esc(qty||'')}">
+    <input type="number" class="ldi-price" step="any" placeholder="Price" value="${esc(price||'')}">
+    <button type="button" class="icon-btn" onclick="this.parentElement.remove()" title="Remove item">&#10005;</button>`;
+  box.appendChild(row);
+}
+function readLeadItems(){
+  return [...document.querySelectorAll('#ld-items .ld-item-row')].map(row=>({
+    desc: row.querySelector('.ldi-desc').value.trim(),
+    units: row.querySelector('.ldi-units').value.trim(),
+    qty: row.querySelector('.ldi-qty').value.trim(),
+    price: row.querySelector('.ldi-price').value.trim()
+  })).filter(i=>i.desc || i.qty || i.price);
+}
+function leadReqSummary(r){
+  const items = r.items || [];
+  if(!items.length) return '<span style="color:var(--muted); font-size:11px;">&mdash;</span>';
+  const first = items[0];
+  const more = items.length > 1 ? ' <span style="color:var(--muted); font-size:11px;">+' + (items.length-1) + ' more</span>' : '';
+  const tip = items.map(i=>`${i.desc}${i.qty?' - '+i.qty:''}${i.units?' '+i.units:''}${i.price?' @ '+i.price:''}`).join('\n');
+  return `<span title="${esc(tip)}" style="cursor:help;">${esc(first.desc)}${first.qty?' ('+esc(first.qty)+(first.units?' '+esc(first.units):'')+')':''}</span>${more}`;
+}
+function leadConvertedSelect(r){
+  const cur = ['Yes','No','Hold'].includes(r.converted) ? r.converted : '';
+  const cls = cur==='Yes' ? 'st-delivered' : cur==='No' ? 'st-rejected' : 'st-transit';
+  return `<select class="status-select ${cls}" onchange="updateLeadConverted('${r.id}', this.value)">
+    <option value="" ${cur===''?'selected':''}>Pending</option>
+    <option value="Yes" ${cur==='Yes'?'selected':''}>Yes</option>
+    <option value="No" ${cur==='No'?'selected':''}>No</option>
+    <option value="Hold" ${cur==='Hold'?'selected':''}>Hold</option>
+  </select>`;
+}
+async function updateLeadConverted(id, value){
+  const d = DATA[currentLocation];
+  const r = (d.leads||[]).find(x=>x.id===id);
+  if(!r) return;
+  if(value === 'No'){
+    const reason = prompt('Reason why this lead was not converted:', r.reason || '');
+    if(reason === null || !reason.trim()){ alert('A reason is required when marking a lead as No.'); render(); return; }
+    r.reason = reason.trim();
+  }
+  r.converted = value;
+  await saveLocation(currentLocation);
+  render();
+}
+async function addLead(e){
+  e.preventDefault();
+  const d = DATA[currentLocation];
+  d.leads = d.leads || [];
+  const converted = document.getElementById('ld-converted').value;
+  const reason = document.getElementById('ld-reason').value.trim();
+  if(converted === 'No' && !reason){
+    alert('Please provide a reason when Lead to Customer is No.');
+    return false;
+  }
+  d.leads.push({
+    id: uid(),
+    date: document.getElementById('ld-date').value,
+    customer: document.getElementById('ld-customer').value.trim(),
+    region: document.getElementById('ld-region').value.trim(),
+    followUp: document.getElementById('ld-followup').value,
+    converted: converted,
+    reason: converted === 'No' ? reason : '',
+    items: readLeadItems(),
+    addedBy: actorName()
+  });
+  await saveLocation(currentLocation);
+  render();
+  return false;
+}
+async function deleteLead(id){
+  if(!isAdmin()) return;
+  const d = DATA[currentLocation];
+  d.leads = (d.leads||[]).filter(x=>x.id!==id);
+  await saveLocation(currentLocation);
+  render();
+}
+const ORDER_STATUSES = ['New','Confirmed','On Hold','Completed','Cancelled'];
+function orderStatusClass(s){
+  if(s === 'Completed') return 'st-delivered';
+  if(s === 'Cancelled') return 'st-rejected';
+  return 'st-transit';
+}
+function orderStatusSelect(r){
+  const cur = ORDER_STATUSES.includes(r.orderStatus) ? r.orderStatus : 'New';
+  return `<select class="status-select ${orderStatusClass(cur)}" onchange="updateOrderStatus('${r.id}', this.value)">
+    ${ORDER_STATUSES.map(s=>`<option value="${s}" ${s===cur?'selected':''}>${s}</option>`).join('')}
+  </select>`;
+}
+function orderHistoryPush(r, action, detail){
+  r.statusHistory = r.statusHistory || [];
+  r.statusHistory.push({ts: new Date().toISOString(), user: actorName(), action, detail: detail || ''});
+  if(r.statusHistory.length > 50) r.statusHistory = r.statusHistory.slice(-50);
+}
+async function updateOrderStatus(id, value){
+  const d = DATA[currentLocation];
+  const r = (d.sales||[]).find(x=>x.id===id);
+  if(!r || !ORDER_STATUSES.includes(value)) return;
+  if(value === 'Cancelled' && !confirm('Cancel this order for ' + (r.customer||'') + '? The record stays in the register with status Cancelled.')) { render(); return; }
+  const from = r.orderStatus || 'New';
+  if(from === value) return;
+  r.orderStatus = value;
+  orderHistoryPush(r, 'Status changed', from + ' \u2192 ' + value);
+  await saveLocation(currentLocation);
+  render();
+}
+async function duplicateSalesOrder(id){
+  const d = DATA[currentLocation];
+  const r = (d.sales||[]).find(x=>x.id===id);
+  if(!r) return;
+  if(!confirm('Duplicate this order for ' + (r.customer||'') + ' with today\'s date?')) return;
+  const copy = JSON.parse(JSON.stringify(r));
+  copy.id = uid();
+  copy.date = today();
+  copy.orderStatus = 'New';
+  copy.addedBy = actorName();
+  copy.statusHistory = [];
+  orderHistoryPush(copy, 'Order created', 'Duplicated from order of ' + fd(r.date));
+  d.sales.push(copy);
+  await saveLocation(currentLocation);
+  render();
+}
+function showOrderTimeline(id){
+  const d = DATA[currentLocation];
+  const r = (d.sales||[]).find(x=>x.id===id);
+  if(!r) return;
+  const hist = (r.statusHistory||[]).slice().reverse();
+  const ov = document.createElement('div');
+  ov.id = 'order-timeline-overlay';
+  ov.style.cssText = 'position:fixed; inset:0; background:rgba(20,24,34,0.55); z-index:9000; display:flex; align-items:center; justify-content:center; padding:16px;';
+  ov.onclick = () => ov.remove();
+  ov.innerHTML = `<div style="background:var(--panel); border:1px solid var(--border); width:min(520px,100%); max-height:75vh; overflow-y:auto; padding:18px;" onclick="event.stopPropagation()">
+    <div style="font-family:'Oswald',sans-serif; font-size:14px; letter-spacing:0.06em; text-transform:uppercase; margin-bottom:4px;">&#128337; Order Timeline</div>
+    <div style="font-size:12px; color:var(--muted); margin-bottom:14px;">${esc(r.customer||'')} &middot; ${fd(r.date)} &middot; current status: <b>${esc(r.orderStatus||'New')}</b></div>
+    ${hist.length === 0 ? '<div style="font-size:12.5px; color:var(--muted);">No history yet. Status changes and duplications will appear here.</div>' :
+      hist.map(h=>`<div style="border-left:3px solid var(--accent); padding:6px 0 6px 12px; margin-bottom:10px;">
+        <div style="font-size:12.5px;"><b>${esc(h.action)}</b>${h.detail ? ' &mdash; ' + esc(h.detail) : ''}</div>
+        <div style="font-size:11px; color:var(--muted); margin-top:2px;">${esc(h.user)} &middot; ${new Date(h.ts).toLocaleString()}</div>
+      </div>`).join('')}
+    <button type="button" class="btn" style="margin-top:6px;" onclick="document.getElementById('order-timeline-overlay').remove()">Close</button>
+  </div>`;
+  document.body.appendChild(ov);
 }
 function slCalcTotal(){
   const q = parseFloat((document.getElementById('sl-qty')||{}).value)||0;
@@ -5544,6 +5747,9 @@ async function addSales(e){
     unitPrice: document.getElementById('sl-price').value.trim(),
     totalValue: (qty && unitPrice) ? (qty*unitPrice) : '',
     remarks: document.getElementById('sl-remarks').value.trim(),
+    leadStatus: 'New',
+    orderStatus: 'New',
+    statusHistory: [{ts: new Date().toISOString(), user: actorName(), action: 'Order created', detail: ''}],
     addedBy: actorName()
   });
   await saveLocation(currentLocation);
@@ -7827,7 +8033,17 @@ const EDIT_SCHEMAS = {
     {key:'mode', label:'Mode', type:'select', options:['Bank Transfer','Cash','UPI','Cheque']},
     {key:'remarks', label:'Remarks', type:'text'}
   ],
+  leads: [
+    {key:'date', label:'Date', type:'date'},
+    {key:'customer', label:'Customer', type:'text'},
+    {key:'region', label:'Region', type:'text'},
+    {key:'followUp', label:'Follow-up Date', type:'date'},
+    {key:'converted', label:'Lead to Customer', type:'select', options:['','Yes','No','Hold']},
+    {key:'reason', label:'Reason (if No)', type:'text'}
+  ],
   sales: [
+    {key:'leadStatus', label:'Lead Status', type:'select', options:['New','Contacted','Follow-up','Qualified','Proposal Sent','Negotiation','Won','Lost']},
+    {key:'orderStatus', label:'Order Status', type:'select', options:['New','Confirmed','On Hold','Completed','Cancelled']},
     {key:'date', label:'Date', type:'date'},
     {key:'customer', label:'Customer name', type:'text'},
     {key:'customerPO', label:'Customer P.O', type:'text'},
@@ -8227,6 +8443,35 @@ function quoteFooterHtml(loc){
 }
 
 let editingQuoteId = null;
+const LEAD_STATUSES = ['New','Contacted','Follow-up','Qualified','Proposal Sent','Negotiation','Won','Lost'];
+function leadStatusClass(s){
+  if(s === 'Won') return 'st-delivered';
+  if(s === 'Lost') return 'st-rejected';
+  return 'st-transit';
+}
+function leadStatusSelect(r){
+  const cur = LEAD_STATUSES.includes(r.leadStatus) ? r.leadStatus : 'New';
+  return `<select class="status-select ${leadStatusClass(cur)}" onchange="updateLeadStatus('${r.id}', this.value)">
+    ${LEAD_STATUSES.map(s=>`<option value="${s}" ${s===cur?'selected':''}>${s}</option>`).join('')}
+  </select>`;
+}
+async function updateLeadStatus(id, value){
+  const d = DATA[currentLocation];
+  const r = (d.sales||[]).find(x=>x.id===id);
+  if(!r || !LEAD_STATUSES.includes(value)) return;
+  r.leadStatus = value;
+  await saveLocation(currentLocation);
+  render();
+}
+function leadStatusCountsHtml(rows){
+  const counts = {};
+  LEAD_STATUSES.forEach(s=>counts[s]=0);
+  (rows||[]).forEach(r=>{ const s = LEAD_STATUSES.includes(r.leadStatus) ? r.leadStatus : 'New'; counts[s]++; });
+  const color = s => s==='Won' ? 'var(--success)' : s==='Lost' ? '#e6577a' : 'var(--accent-2)';
+  return `<div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
+    ${LEAD_STATUSES.filter(s=>counts[s]>0).map(s=>`<span style="font-size:11px; font-family:'Oswald',sans-serif; letter-spacing:0.06em; text-transform:uppercase; padding:4px 10px; border:1px solid ${color(s)}; color:${color(s)};">${s}: <b>${counts[s]}</b></span>`).join('')}
+  </div>`;
+}
 function quoteFromEnquiry(id){
   const d = DATA[currentLocation];
   const r = (d.enquiry||[]).find(x=>x.id===id);
