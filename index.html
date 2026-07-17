@@ -2316,7 +2316,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.36';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.39';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -2427,8 +2427,7 @@ function toggleSettingsMenu(ev){
     <div class="settings-row"><div class="sr-lbl">Theme Color</div>${ACCENT_PRESETS.map(p=>`<span class="accent-swatch ${accent===p.c?'active':''}" style="background:${p.c};" title="${p.name}" onclick="setAccentColor('${p.c}')"></span>`).join('')}</div>
     <div class="settings-row"><div class="sr-lbl">Font Size</div><span class="fontsize-btn ${fs==='small'?'active':''}" onclick="setFontSize('small')">Small</span><span class="fontsize-btn ${fs==='normal'?'active':''}" onclick="setFontSize('normal')">Normal</span><span class="fontsize-btn ${fs==='large'?'active':''}" onclick="setFontSize('large')">Large</span></div>
     ${isAdmin() ? `<div class="settings-item" onclick="togglePrintStation()"><span class="si-ico">&#128424;</span> Print Station: ${isPrintStation() ? 'ON (this device prints)' : 'OFF'}</div>
-    <div class="settings-item" onclick="closeSettingsMenu(); exportFullBackup();"><span class="si-ico">&#128190;</span> Full Backup (JSON)</div>
-    <div class="settings-item" onclick="closeSettingsMenu(); importFullBackup();"><span class="si-ico">&#8635;</span> Restore Backup</div>` : ''}
+` : ''}
     <div class="settings-item" onclick="closeSettingsMenu(); manualRefresh();"><span class="si-ico">&#8634;</span> Refresh Data</div>
     <div class="settings-foot">${APP_VERSION_LABEL} &middot; ${esc(session ? session.username : '')}</div>`;
   host.appendChild(menu);
@@ -3796,15 +3795,42 @@ function showTabSection(key, idx){
   });
   main.querySelectorAll('.tabsec-btn').forEach(b => b.classList.toggle('active', Number(b.dataset.idx) === idx));
 }
+function activityFeedSectionHtml(){
+  const list = (AUDIT && Array.isArray(AUDIT.list)) ? AUDIT.list : [];
+  const recent = list.filter(e => e.location === currentLocation || e.location === '-').slice(-10).reverse();
+  if(!recent.length) return '';
+  const timeAgo = ts => {
+    try{
+      const mins = Math.floor((Date.now() - new Date(ts).getTime())/60000);
+      if(mins < 1) return 'just now';
+      if(mins < 60) return mins + 'm ago';
+      const hrs = Math.floor(mins/60);
+      if(hrs < 24) return hrs + 'h ago';
+      return Math.floor(hrs/24) + 'd ago';
+    }catch(e){ return ''; }
+  };
+  return `${secHead('&#9889;', 'Recent Changes')}
+  <div class="panel"><div class="panel-head"><h3>Last 10 activities <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(full history in Users &rarr; Audit Log)</span></h3></div>
+  <div class="panel-body">
+  <table><thead><tr><th>When</th><th>Who</th><th>Action</th><th>Details</th></tr></thead><tbody>
+  ${recent.map(e=>`<tr>
+    <td title="${esc(e.ts)}">${timeAgo(e.ts)}</td>
+    <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(e.name || e.user)}</td>
+    <td>${esc(e.action)}</td>
+    <td style="white-space:normal; max-width:420px;">${esc(String(e.details||'').slice(0,120))}</td>
+  </tr>`).join('')}
+  </tbody></table>
+  </div></div>`;
+}
 function paymentsDueSectionHtml(d, allowedTabs){
   if(!allowedTabs.includes('accounts')) return '';
   const t = today();
   const daysPast = ds => Math.max(0, Math.floor((new Date(t+'T00:00:00') - new Date(ds+'T00:00:00'))/86400000));
   const recv = (d.salesAccounts||[]).map(r=>({r, due:salesDueInfo(r)})).filter(x=>x.due.overdue)
-    .map(x=>({name:x.r.customer||'', ref:x.r.invNo||'', due:x.due.dueDate, days:daysPast(x.due.dueDate), amt:parseFloat(salesBalance(x.r))||0}))
+    .map(x=>({name:x.r.customer||'', ref:x.r.invNo||'', due:x.due.dueDate, days:daysPast(x.due.dueDate), amt:parseFloat(salesBalance(x.r))||0, fu:x.r.followedUpOn||''}))
     .sort((a,b)=>b.days-a.days).slice(0,10);
   const pay = (d.purchaseAccounts||[]).map(r=>({r, due:purchaseDueInfo(r)})).filter(x=>x.due.overdue)
-    .map(x=>({name:x.r.supplier||x.r.vendor||'', ref:x.r.supplierInvoiceNo||'', due:x.due.dueDate, days:daysPast(x.due.dueDate), amt:parseFloat(x.r.balanceOutstanding)||0}))
+    .map(x=>({name:x.r.supplier||x.r.vendor||'', ref:x.r.supplierInvoiceNo||'', due:x.due.dueDate, days:daysPast(x.due.dueDate), amt:parseFloat(x.r.balanceOutstanding)||0, fu:''}))
     .sort((a,b)=>b.days-a.days).slice(0,10);
   if(!recv.length && !pay.length) return '';
   const fmtN = n => n.toLocaleString(undefined,{maximumFractionDigits:0});
@@ -3812,12 +3838,13 @@ function paymentsDueSectionHtml(d, allowedTabs){
     <td><span class="badge ${kind==='IN'?'badge-overdue':''}" style="${kind==='OUT'?'background:rgba(31,68,145,0.12); color:var(--accent-2);':''}">${kind==='IN'?'TO RECEIVE':'TO PAY'}</span></td>
     <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(x.name)}</td><td>${esc(x.ref)}</td><td>${fd(x.due)}</td>
     <td><b>${x.days}</b> day${x.days===1?'':'s'} overdue</td><td><b>&#8377; ${fmtN(x.amt)}</b></td>
+    <td>${x.fu ? '&#128222; ' + fd(x.fu) : '<span style="color:var(--muted); font-size:11px;">&mdash;</span>'}</td>
   </tr>`).join('');
   const totRecv = recv.reduce((a,x)=>a+x.amt,0), totPay = pay.reduce((a,x)=>a+x.amt,0);
   return `${secHead('&#128181;', 'Payments Due')}
   <div class="panel"><div class="panel-head"><h3>Overdue payments <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(to receive: &#8377; ${fmtN(totRecv)} &middot; to pay: &#8377; ${fmtN(totPay)} &mdash; manage in the Accounts tab)</span></h3></div>
   <div class="panel-body">
-  <table><thead><tr><th></th><th>Party</th><th>Invoice</th><th>Due Date</th><th>Overdue</th><th>Balance</th></tr></thead><tbody>
+  <table><thead><tr><th></th><th>Party</th><th>Invoice</th><th>Due Date</th><th>Overdue</th><th>Balance</th><th>Followed Up</th></tr></thead><tbody>
   ${rows(recv,'IN')}${rows(pay,'OUT')}
   </tbody></table>
   </div></div>`;
@@ -3900,7 +3927,7 @@ function renderDashboard(){
   let extraPanels = '';
   if(allowedTabs.includes('inventory')){
     extraPanels += `
-    ${paymentsDueSectionHtml(d, allowedTabs)}${secHead('&#128230;', 'Inventory Overview')}
+    ${paymentsDueSectionHtml(d, allowedTabs)}${activityFeedSectionHtml()}${secHead('&#128230;', 'Inventory Overview')}
   <div class="panel"><div class="panel-head"><h3>Item register &mdash; ${locationLabel(currentLocation, 14)}</h3><div class="panel-head-actions">${exportBtn('exportDashboardInventory')}</div></div>
     <div class="panel-body">
     <table><thead><tr><th>Item</th><th>Qty</th><th>Specifications</th><th>Cost</th></tr></thead><tbody>
@@ -4609,7 +4636,7 @@ function renderInward(){
     <div class="form-grid">
       <div class="field"><label>Date</label><input type="date" id="in-date" value="${today()}" required></div>
       <div class="field"><label>Vendor name</label><input type="text" id="in-vendor" list="dl-vendors" autocomplete="off" oninput="syncInPaidVendor(this.value)" required></div>
-      <div class="field"><label>PO Number (starts with ${poPrefix})</label><input type="text" id="in-po-number" placeholder="${poPrefix}-001"></div>
+      <div class="field"><label>PO Number <span style="color:var(--muted); font-weight:400;">(auto-suggested, editable)</span></label><input type="text" id="in-po-number" value="${nextInwardPoNumber(d)}" placeholder="${poPrefix}-001"></div>
       <div class="field"><label>PO Date</label><input type="date" id="in-po-date"></div>
       <div class="field"><label>Transporter Name</label><input type="text" id="in-transporter" placeholder="Optional"></div>
       <div class="field"><label>L.R Number</label><input type="text" id="in-lr" placeholder="Optional"></div>
@@ -4712,6 +4739,15 @@ function updateInLinesTotal(){
     totalValue += q * p;
   });
   totEl.innerHTML = 'Total Qty: <b>' + totalQty.toLocaleString('en-IN') + '</b> &nbsp;|&nbsp; Total Value: <b style="color:var(--success);">&#8377; ' + totalValue.toLocaleString('en-IN',{minimumFractionDigits:2, maximumFractionDigits:2}) + '</b>';
+}
+function nextInwardPoNumber(d){
+  const prefix = inwardPoPrefix(currentLocation);
+  let maxN = 0;
+  (d.inward||[]).forEach(r=>{
+    const m = String(r.poNumber||'').toUpperCase().match(new RegExp('^' + prefix.toUpperCase() + '[-\\s]?(\\d+)$'));
+    if(m){ const n = parseInt(m[1], 10); if(n > maxN) maxN = n; }
+  });
+  return prefix + '-' + String(maxN + 1).padStart(3, '0');
 }
 async function addInward(e){
   e.preventDefault();
@@ -7878,6 +7914,8 @@ const EDIT_SCHEMAS = {
     {key:'remarks', label:'Remarks', type:'text'}
   ],
   salesAccounts: [
+    {key:'followedUpOn', label:'Followed Up On (date)', type:'date'},
+    {key:'followUpNote', label:'Follow-up Note', type:'text'},
     {key:'date', label:'Invoice Date', type:'date'},
     {key:'invNo', label:'Invoice No', type:'text'},
     {key:'customer', label:'Name of the Customer', type:'text'},
@@ -8415,6 +8453,7 @@ function renderQuotation(){
       </td>${addedByCell(r)}
       <td><div class="action-cell">
         <button class="icon-btn" onclick="openQuotePreview('${r.id}')">View / Print</button>
+        <button class="icon-btn" onclick="whatsappQuote('${r.id}')" title="Share via WhatsApp" style="color:#25D366; border-color:#25D366;">&#128172; WhatsApp</button>
         <button class="icon-btn" onclick="exportQuotationExcel('${r.id}')">Excel</button>
         <button class="icon-btn" onclick="loadQuoteForEdit('${r.id}')">Edit</button>
         ${deleteBtn(`deleteQuotation('${r.id}')`)}
@@ -8451,6 +8490,65 @@ function loadQuoteForEdit(id){
   if(el && el.scrollIntoView) el.scrollIntoView({behavior:'smooth'});
 }
 function cancelQuoteEdit(){ editingQuoteId = null; render(); }
+async function markFollowedUp(id){
+  const d = DATA[currentLocation];
+  const r = d.salesAccounts.find(x=>x.id===id);
+  if(!r) return;
+  const note = prompt('Follow-up note (optional) - e.g. "Spoke to accounts, payment promised by Friday":', r.followUpNote || '');
+  if(note === null) return;
+  r.followedUpOn = today();
+  r.followUpNote = note.trim();
+  await saveLocation(currentLocation);
+  render();
+}
+function openWhatsApp(text){
+  window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank');
+}
+function whatsappQuote(id){
+  const d = DATA[currentLocation];
+  const r = d.quotations.find(x=>x.id===id);
+  if(!r) return;
+  const total = r.totalPrice!=null ? r.totalPrice : r.grandTotal;
+  const lines = [
+    'Dear Sir/Madam,',
+    '',
+    'Please find our quotation details below:',
+    'Quotation No: ' + (r.quoteNumber||''),
+    'Date: ' + fd(r.quoteDate||r.date),
+    (r.revNo && r.revNo!=='R0' ? 'Revision: ' + r.revNo : ''),
+    'Items: ' + ((r.items||[]).length),
+    'Total Value: Rs. ' + fmt2(total) + ' (excl. taxes as applicable)',
+    '',
+    'The detailed quotation PDF will follow. Kindly confirm receipt.',
+    '',
+    'Regards,',
+    (session && session.name ? session.name + ', ' : '') + invoiceCompanyName(currentLocation)
+  ].filter(l=>l!=='' || true);
+  openWhatsApp(lines.join('\n'));
+}
+function whatsappPaymentReminder(id){
+  const d = DATA[currentLocation];
+  const r = d.salesAccounts.find(x=>x.id===id);
+  if(!r) return;
+  const due = salesDueInfo(r);
+  const bal = salesBalance(r);
+  const lines = [
+    'Dear Sir/Madam,',
+    '',
+    'This is a gentle payment reminder from ' + invoiceCompanyName(currentLocation) + ':',
+    'Invoice No: ' + (r.invNo||''),
+    'Invoice Date: ' + fd(r.date),
+    'Invoice Value: Rs. ' + fmt2(r.invoiceValue||0),
+    'Balance Outstanding: Rs. ' + fmt2(bal||0),
+    (due.dueDate ? 'Due Date: ' + fd(due.dueDate) + (due.overdue ? ' (OVERDUE)' : '') : ''),
+    '',
+    'Kindly arrange the payment at the earliest. Please ignore if already paid.',
+    '',
+    'Regards,',
+    (session && session.name ? session.name + ', ' : '') + invoiceCompanyName(currentLocation)
+  ];
+  openWhatsApp(lines.join('\n'));
+}
 async function updateQuoteStatus(id, value){
   const d = DATA[currentLocation];
   const r = d.quotations.find(x=>x.id===id);
@@ -9139,6 +9237,19 @@ function auditLogPanel(){
   const userOptions = [...new Set(((AUDIT && AUDIT.list) || []).map(e => e.user).filter(Boolean))];
   const actionOptions = ['LOGIN','LOGOUT','DATA CHANGE','USER ADMIN','NOTICE','AUDIT'];
   return `
+  ${secHead('&#128190;', 'Backup')}
+  <div class="panel"><div class="panel-head"><h3>Data backup &amp; restore <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(for ${esc(currentLocation)} &mdash; admin only)</span></h3></div>
+  <div class="panel-body">
+  <p style="margin:0 0 12px 0; font-size:12.5px; color:var(--muted);">
+    <b>Full Backup</b> downloads one JSON file with ALL data of ${esc(currentLocation)} (inventory, inward, outward, accounts, quotations, HR, everything). Keep it safely on your PC or Google Drive.
+    <b>Restore Backup</b> replaces the current ${esc(currentLocation)} data with a backup file &mdash; use only if data was accidentally deleted or corrupted.
+    Recommended: take a backup every week for each location, and always before a big import or restore.
+  </p>
+  <div style="display:flex; gap:10px; flex-wrap:wrap;">
+    <button type="button" class="btn" onclick="exportFullBackup()">&#128190; Full Backup (JSON)</button>
+    <button type="button" class="btn" onclick="importFullBackup()" style="background:transparent; color:var(--accent-2); border:1px solid var(--accent-2);">&#8635; Restore Backup</button>
+  </div>
+  </div></div>
   ${secHead('&#128220;', 'Audit Log')}
   <div class="panel"><div class="panel-head"><h3>Audit Log <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(logins, logouts &amp; data changes &mdash; last ${AUDIT_MAX} events kept)</span></h3>
     <div class="panel-head-actions">
