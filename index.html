@@ -1824,7 +1824,48 @@ async function loadHrShared(){
     console.warn('HR shared: created merged HR document for both companies.');
   }
   /* on read error keep the previous in-memory copy */
-  if(SHARED_HR){ HR_SNAP = JSON.stringify(SHARED_HR); applySharedHrEverywhere(); }
+  if(SHARED_HR){ HR_SNAP = JSON.stringify(SHARED_HR); applySharedHrEverywhere(); await mergeEsslPunches(); }
+}
+
+/* ---- eSSL biometric attendance merge ----
+   The office PC runs essl_sync.py, which groups fingerprint punches per
+   employee per day and writes them to the 'essl_punches' document. This
+   merges those days into shared HR attendance: first punch = In, last
+   punch = Out, status Present. Employees are matched by their eSSL Code
+   (HR tab) or, failing that, their Employee code. Unknown codes still get
+   a row ("Unmapped - CODE") so no punch is ever lost - fill in the eSSL
+   Code on the employee record and the row relabels on the next merge. */
+async function mergeEsslPunches(){
+  if(!SHARED_HR || !firebaseReady) return;
+  let doc = null;
+  try{ doc = await fsGet('essl_punches'); }catch(e){ return; }
+  if(!doc || !Array.isArray(doc.days)) return;
+  SHARED_HR.attendance = Array.isArray(SHARED_HR.attendance) ? SHARED_HR.attendance : [];
+  const emps = Array.isArray(SHARED_HR.employees) ? SHARED_HR.employees : [];
+  let changed = false;
+  doc.days.forEach(p=>{
+    if(!p || !p.code || !p.date) return;
+    const codeU = String(p.code).trim().toUpperCase();
+    const emp = emps.find(e=> e && (String(e.esslCode||'').trim().toUpperCase()===codeU || String(e.code||'').trim().toUpperCase()===codeU));
+    const name = emp ? emp.name : ('Unmapped - '+codeU);
+    const eid = 'essl_'+codeU+'_'+p.date;
+    const inT = p.in || '';
+    const outT = (p.out && p.out !== p.in) ? p.out : '';
+    const r = SHARED_HR.attendance.find(x=>x && x.id===eid);
+    if(!r){
+      SHARED_HR.attendance.push({ id:eid, date:p.date, employee:name, status:'Present', remarks:'eSSL', inTime:inT, outTime:outT, addedBy:'eSSL Sync' });
+      changed = true;
+    }else if(r.addedBy==='eSSL Sync' && (r.inTime!==inT || r.outTime!==outT || r.employee!==name)){
+      r.inTime = inT; r.outTime = outT; r.employee = name;
+      changed = true;
+    }
+  });
+  if(changed){
+    HR_SNAP = JSON.stringify(SHARED_HR);
+    applySharedHrEverywhere();
+    await fsSet('hr_shared', SHARED_HR);
+    try{ if(session && !isUserTyping() && !hasUnsavedFormInput()) render(); }catch(e){}
+  }
 }
 async function syncHrSharedIfChanged(loc){
   if(!DATA[loc]) return;
@@ -2316,7 +2357,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.42';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.46';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -3118,6 +3159,7 @@ const IMPORT_SCHEMAS = {
   ],
   employees: [
     {key:'code', header:'Code'},
+    {key:'esslCode', header:'eSSL Code'},
     {key:'name', header:'Name'},
     {key:'designation', header:'Designation'},
     {key:'mobile', header:'Mobile'},
@@ -3132,6 +3174,8 @@ const IMPORT_SCHEMAS = {
     {key:'date', header:'Date', type:'date'},
     {key:'employee', header:'Employee'},
     {key:'status', header:'Status'},
+    {key:'inTime', header:'In'},
+    {key:'outTime', header:'Out'},
     {key:'remarks', header:'Remarks'}
   ],
   leaves: [
@@ -4153,6 +4197,7 @@ function renderPO(){
   const cpoRows = limitRows('customerPO', cpoAll);
   const pocAll = applyTableTools('poContractDocs', (d.poContractDocs||[]).slice().reverse());
   const pocRows = limitRows('poContractDocs', pocAll);
+  const pocEdit = pocEditId ? (d.poContractDocs||[]).find(x=>x && x.id===pocEditId) : null;
   const customerNames = uniqueCustomerNames(d);
 
   const vendorSection = `
@@ -4260,25 +4305,28 @@ function renderPO(){
   const contactSection = `
   <div class="subsection-title">P.O Contract Information</div>
   ${secHead('&#10133;', 'New Entry')}
-  <div class="panel"><div class="panel-head"><h3>New P.O Contract Document</h3></div>
+  <div class="panel"><div class="panel-head"><h3>${pocEdit ? 'Edit P.O Contract Document' : 'New P.O Contract Document'}</h3></div>
   <div class="panel-body">
   <form onsubmit="return addPoContractDoc(event)">
     <div class="access-title">Customer PO Details</div>
     <table class="poc-doc-table"><thead><tr><th style="width:50px;">Sl.No</th><th style="width:220px;">Terms</th><th>Description of terms &amp; Conditions</th></tr></thead><tbody>
-    ${POC_CUSTOMER_FIELDS.map((label,i)=>`<tr><td style="text-align:center;">${i+1}</td><td>${esc(label)}</td><td><input type="text" class="poc-cell-input" id="poc-cust-${i}" placeholder="-"></td></tr>`).join('')}
+    ${POC_CUSTOMER_FIELDS.map((label,i)=>`<tr><td style="text-align:center;">${i+1}</td><td>${esc(label)}</td><td><input type="text" class="poc-cell-input" id="poc-cust-${i}" placeholder="-" value="${esc(pocEdit && pocEdit.customer ? (pocEdit.customer[i]||'') : '')}"></td></tr>`).join('')}
     </tbody></table>
 
     <div class="access-title" style="margin-top:18px;">Principal Quotation Details</div>
     <table class="poc-doc-table"><thead><tr><th style="width:50px;">Sl.No</th><th style="width:220px;">Terms</th><th>Description of Terms &amp; Conditions</th></tr></thead><tbody>
-    ${POC_PRINCIPAL_FIELDS.map((label,i)=>`<tr><td style="text-align:center;">${i+1}</td><td>${esc(label)}</td><td><input type="text" class="poc-cell-input" id="poc-prin-${i}" placeholder="-"></td></tr>`).join('')}
+    ${POC_PRINCIPAL_FIELDS.map((label,i)=>`<tr><td style="text-align:center;">${i+1}</td><td>${esc(label)}</td><td><input type="text" class="poc-cell-input" id="poc-prin-${i}" placeholder="-" value="${esc(pocEdit && pocEdit.principal ? (pocEdit.principal[i]||'') : '')}"></td></tr>`).join('')}
     </tbody></table>
 
     <div class="form-grid" style="margin-top:16px;">
-      <div class="field"><label>Prepared By</label><input type="text" id="poc-prepared-by" placeholder="Name"></div>
-      <div class="field"><label>Prepared On Date</label><input type="date" id="poc-prepared-date" value="${today()}"></div>
-      <div class="field"><label>Verified By</label><input type="text" id="poc-verified-by" placeholder="Name"></div>
+      <div class="field"><label>Prepared By</label><input type="text" id="poc-prepared-by" placeholder="Name" value="${esc(pocEdit ? (pocEdit.preparedBy||'') : '')}"></div>
+      <div class="field"><label>Prepared On Date</label><input type="date" id="poc-prepared-date" value="${pocEdit ? esc(pocEdit.preparedDate||today()) : today()}"></div>
+      <div class="field"><label>Verified By</label><input type="text" id="poc-verified-by" placeholder="Name" value="${esc(pocEdit ? (pocEdit.verifiedBy||'') : '')}"></div>
     </div>
-    <div style="margin-top:16px;"><button type="submit" class="btn">Save &amp; Preview P.O Contract Document</button></div>
+    <div style="margin-top:16px; display:flex; gap:10px;">
+      <button type="submit" class="btn">${pocEdit ? 'Update &amp; Preview P.O Contract Document' : 'Save &amp; Preview P.O Contract Document'}</button>
+      ${pocEdit ? '<button type="button" class="btn" style="background:var(--panel-2); color:inherit;" onclick="cancelPocEdit()">Cancel Edit</button>' : ''}
+    </div>
   </form>
   </div></div>
   ${secHead('&#128203;', 'Records')}
@@ -4289,7 +4337,7 @@ function renderPO(){
   ${pocRows.length===0 ? noMatchRow(8, (d.poContractDocs||[]).length) :
     pocRows.map(r=>`<tr>
       <td style="font-family:'IBM Plex Sans',sans-serif;">${esc((r.customer&&r.customer[0])||'-')}</td><td>${esc((r.customer&&r.customer[1])||'-')}</td><td>${esc((r.principal&&r.principal[0])||'-')}</td><td>${esc(r.preparedBy)}</td><td>${fd(r.preparedDate)}</td><td>${esc(r.verifiedBy)}</td>${addedByCell(r)}
-      <td>${actionCell(`<button class="icon-btn" onclick="openPocDocPreview('${r.id}')">View / Print</button>`, deleteBtn(`deletePoContractDoc('${r.id}')`))}</td>
+      <td>${actionCell(`<button class="icon-btn" onclick="editPoContractDoc('${r.id}')">&#9998; Edit</button> <button class="icon-btn" onclick="openPocDocPreview('${r.id}')">View / Print</button>`, deleteBtn(`deletePoContractDoc('${r.id}')`))}</td>
     </tr>`).join('')}
   </tbody></table>
   ${showMoreBar('poContractDocs', pocAll.length)}
@@ -4485,22 +4533,40 @@ async function deleteCustomerPO(id){
   render();
 }
 
+let pocEditId = null;
+function editPoContractDoc(id){
+  pocEditId = id;
+  render();
+  const el = document.getElementById('poc-cust-0');
+  if(el) el.scrollIntoView({behavior:'smooth', block:'center'});
+}
+function cancelPocEdit(){ pocEditId = null; render(); }
 async function addPoContractDoc(e){
   e.preventDefault();
   const d = DATA[currentLocation];
   if(!Array.isArray(d.poContractDocs)) d.poContractDocs = [];
   const customer = POC_CUSTOMER_FIELDS.map((_,i)=>{ const el = document.getElementById('poc-cust-'+i); return el ? el.value.trim() : ''; });
   const principal = POC_PRINCIPAL_FIELDS.map((_,i)=>{ const el = document.getElementById('poc-prin-'+i); return el ? el.value.trim() : ''; });
-  const rec = {
-    id: uid(),
-    customer,
-    principal,
-    preparedBy: document.getElementById('poc-prepared-by').value.trim(),
-    preparedDate: document.getElementById('poc-prepared-date').value,
-    verifiedBy: document.getElementById('poc-verified-by').value.trim(),
-    addedBy: actorName()
-  };
-  d.poContractDocs.push(rec);
+  const preparedBy = document.getElementById('poc-prepared-by').value.trim();
+  const preparedDate = document.getElementById('poc-prepared-date').value;
+  const verifiedBy = document.getElementById('poc-verified-by').value.trim();
+  let rec;
+  if(pocEditId){
+    rec = (d.poContractDocs||[]).find(x=>x && x.id===pocEditId);
+    if(rec){
+      rec.customer = customer;
+      rec.principal = principal;
+      rec.preparedBy = preparedBy;
+      rec.preparedDate = preparedDate;
+      rec.verifiedBy = verifiedBy;
+      rec.editedBy = actorName();
+    }
+    pocEditId = null;
+  }
+  if(!rec){
+    rec = { id: uid(), customer, principal, preparedBy, preparedDate, verifiedBy, addedBy: actorName() };
+    d.poContractDocs.push(rec);
+  }
   await saveLocation(currentLocation);
   render();
   openPocDocPreview(rec.id);
@@ -5895,6 +5961,7 @@ function hrEmployeesSection(d){
   <form onsubmit="return addEmployee(event)">
     <div class="form-grid">
       <div class="field"><label>Employee code</label><input type="text" id="hr-emp-code" value="${nextEmpCode(d)}" readonly style="background:var(--panel-2);"></div>
+      <div class="field"><label>eSSL Code</label><input type="text" id="hr-emp-essl" placeholder="Biometric code e.g. S006"></div>
       <div class="field"><label>Name</label><input type="text" id="hr-emp-name" required></div>
       <div class="field"><label>Designation</label><input type="text" id="hr-emp-desig" placeholder="Optional"></div>
       <div class="field"><label>Mobile</label><input type="text" id="hr-emp-mobile" placeholder="Optional"></div>
@@ -5911,10 +5978,10 @@ function hrEmployeesSection(d){
   <div class="panel"><div class="panel-head"><h3>Employee register</h3><div class="panel-head-actions">${importBtn('employees')}${exportBtn('exportEmployees')}</div></div>
   <div class="panel-body">
   ${tableToolbar('employees', d.employees)}
-  <table><thead><tr><th>Code</th><th>Name</th><th>Designation</th><th>Mobile</th><th>Email</th><th>DOB</th><th>Join Date</th><th>Status</th>${cfHeaders('employees')}<th>Added By</th><th></th></tr></thead><tbody>
-  ${rows.length===0 ? noMatchRow(10, d.employees.length) :
+  <table><thead><tr><th>Code</th><th>eSSL</th><th>Name</th><th>Designation</th><th>Mobile</th><th>Email</th><th>DOB</th><th>Join Date</th><th>Status</th>${cfHeaders('employees')}<th>Added By</th><th></th></tr></thead><tbody>
+  ${rows.length===0 ? noMatchRow(11, d.employees.length) :
     rows.map(r=>`<tr>
-      <td>${esc(r.code)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.name)}</td><td>${esc(r.designation||'')}</td><td>${esc(r.mobile||'')}</td><td>${esc(r.email||'')}</td><td>${fd(r.dob)}</td><td>${fd(r.joinDate)}</td>
+      <td>${esc(r.code)}</td><td>${esc(r.esslCode||'')}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.name)}</td><td>${esc(r.designation||'')}</td><td>${esc(r.mobile||'')}</td><td>${esc(r.email||'')}</td><td>${fd(r.dob)}</td><td>${fd(r.joinDate)}</td>
       <td>
         <select class="status-select ${(r.status||'Active')==='Active'?'st-delivered':'st-rejected'}" onchange="updateEmployeeStatus('${r.id}', this.value)">
           <option value="Active" ${(r.status||'Active')==='Active'?'selected':''}>Active</option>
@@ -5934,6 +6001,7 @@ async function addEmployee(e){
   d.employees.push({
     id: uid(),
     code: document.getElementById('hr-emp-code').value,
+    esslCode: document.getElementById('hr-emp-essl').value.trim().toUpperCase(),
     name: document.getElementById('hr-emp-name').value.trim(),
     designation: document.getElementById('hr-emp-desig').value.trim(),
     mobile: document.getElementById('hr-emp-mobile').value.trim(),
@@ -5963,17 +6031,142 @@ async function deleteEmployee(id){
 }
 function exportEmployees(){
   const d = DATA[currentLocation];
-  const headers = ['Code','Name','Designation','Mobile','Email','DOB','Join Date','Monthly Salary','Address','Status','Added By'];
-  const rows = (d.employees||[]).map(r=>[r.code, r.name, r.designation||'', r.mobile||'', r.email||'', r.dob||'', r.joinDate||'', r.salary||'', r.address||'', r.status||'Active', r.addedBy]);
+  const headers = ['Code','eSSL Code','Name','Designation','Mobile','Email','DOB','Join Date','Monthly Salary','Address','Status','Added By'];
+  const rows = (d.employees||[]).map(r=>[r.code, r.esslCode||'', r.name, r.designation||'', r.mobile||'', r.email||'', r.dob||'', r.joinDate||'', r.salary||'', r.address||'', r.status||'Active', r.addedBy]);
   cfExportAppend('employees', d.employees||[], headers, rows);
   exportToExcel(currentLocation+'_Employees', headers, rows);
 }
 
 /* ----- Attendance ----- */
+let hrAttView = 'log';          /* 'log' | 'register' */
+let hrRegMonth = '';            /* 'YYYY-MM', empty = current month */
+function switchHrAttView(v){ hrAttView = v; render(); }
+function setHrRegMonth(v){ hrRegMonth = v; render(); }
+function hrRegMonthVal(){ return hrRegMonth || today().slice(0,7); }
+
+function hrAttendanceRegister(d){
+  const ym = hrRegMonthVal();
+  const [Y, M] = ym.split('-').map(Number);
+  const daysInMonth = new Date(Y, M, 0).getDate();
+  const todayStr = today();
+
+  /* records for this month, indexed by employee name + date */
+  const recs = {};
+  (d.attendance||[]).forEach(r=>{
+    if(!r || !r.date || r.date.slice(0,7)!==ym) return;
+    recs[r.employee + '|' + r.date] = r;
+  });
+
+  /* row list: all employees (Active first) + any names in this month's
+     attendance that are not employee records (e.g. Unmapped - CODE) */
+  const empNames = [];
+  (d.employees||[]).slice().sort((a,b)=> (a.status==='Left')-(b.status==='Left') || String(a.name).localeCompare(String(b.name)))
+    .forEach(e=>{ if(e && e.name && !empNames.includes(e.name)) empNames.push(e.name); });
+  Object.keys(recs).forEach(k=>{
+    const n = k.split('|')[0];
+    if(!empNames.includes(n)) empNames.push(n);
+  });
+
+  const ST = { 'Present':['P','var(--success)'], 'Absent':['A','#e6577a'], 'Half Day':['H','#e08a2e'], 'On Leave':['L','#7a6fe0'] };
+
+  let head = '<th style="text-align:left; position:sticky; left:0; background:var(--panel); z-index:1;">Employee</th>';
+  for(let day=1; day<=daysInMonth; day++){
+    const dt = new Date(Y, M-1, day);
+    const sun = dt.getDay()===0;
+    head += `<th style="min-width:26px; text-align:center; ${sun?'color:#e6577a;':''}">${day}<div style="font-size:9px; font-weight:400; opacity:.7;">${['Su','Mo','Tu','We','Th','Fr','Sa'][dt.getDay()]}</div></th>`;
+  }
+  head += '<th style="text-align:center;">P</th><th style="text-align:center;">A</th><th style="text-align:center;">H</th><th style="text-align:center;">L</th>';
+
+  let body = '';
+  empNames.forEach(name=>{
+    const counts = {P:0, A:0, H:0, L:0};
+    let cells = '';
+    for(let day=1; day<=daysInMonth; day++){
+      const ds = ym + '-' + String(day).padStart(2,'0');
+      const r = recs[name + '|' + ds];
+      const dt = new Date(Y, M-1, day);
+      const sun = dt.getDay()===0;
+      const future = ds > todayStr;
+      if(r && ST[r.status]){
+        const [letter, color] = ST[r.status];
+        counts[letter]++;
+        const tip = (r.inTime ? 'In '+r.inTime : '') + (r.outTime ? ' &middot; Out '+r.outTime : '') || r.status;
+        cells += `<td title="${tip}" style="text-align:center; font-weight:700; color:${color}; ${sun?'background:rgba(230,87,122,.06);':''} cursor:default;">${letter}</td>`;
+      }else{
+        cells += `<td style="text-align:center; opacity:.35; ${sun?'background:rgba(230,87,122,.06);':''}">${future?'':'&middot;'}</td>`;
+      }
+    }
+    body += `<tr><td style="font-family:'IBM Plex Sans',sans-serif; white-space:nowrap; position:sticky; left:0; background:var(--panel); z-index:1;">${esc(name)}</td>${cells}
+      <td style="text-align:center; font-weight:700; color:var(--success);">${counts.P}</td>
+      <td style="text-align:center; font-weight:700; color:#e6577a;">${counts.A}</td>
+      <td style="text-align:center; font-weight:700; color:#e08a2e;">${counts.H}</td>
+      <td style="text-align:center; font-weight:700; color:#7a6fe0;">${counts.L}</td></tr>`;
+  });
+  if(!body) body = `<tr><td colspan="${daysInMonth+5}" style="text-align:center; opacity:.6; padding:18px;">No employees or attendance records for this month.</td></tr>`;
+
+  return `
+  ${secHead('&#128198;', 'Monthly Register')}
+  <div class="panel"><div class="panel-head"><h3>Attendance register</h3><div class="panel-head-actions">
+    <input type="month" value="${ym}" onchange="setHrRegMonth(this.value)" style="padding:4px 8px; border-radius:6px; border:1px solid var(--border); background:var(--panel-2); color:inherit;">
+    ${exportBtn('exportAttendanceRegister')}
+  </div></div>
+  <div class="panel-body">
+  <div style="margin-bottom:8px; font-size:12px; opacity:.75;">
+    <span style="color:var(--success); font-weight:700;">P</span> Present &nbsp;
+    <span style="color:#e6577a; font-weight:700;">A</span> Absent &nbsp;
+    <span style="color:#e08a2e; font-weight:700;">H</span> Half Day &nbsp;
+    <span style="color:#7a6fe0; font-weight:700;">L</span> On Leave &nbsp;&middot;&nbsp;
+    Hover a P to see In/Out times &nbsp;&middot;&nbsp; <span style="color:#e6577a;">Red day numbers are Sundays</span>
+  </div>
+  <div style="overflow-x:auto;">
+  <table style="border-collapse:collapse; font-size:12px;"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>
+  </div>
+  </div></div>`;
+}
+function exportAttendanceRegister(){
+  const d = DATA[currentLocation];
+  const ym = hrRegMonthVal();
+  const [Y, M] = ym.split('-').map(Number);
+  const daysInMonth = new Date(Y, M, 0).getDate();
+  const recs = {};
+  (d.attendance||[]).forEach(r=>{ if(r && r.date && r.date.slice(0,7)===ym) recs[r.employee+'|'+r.date] = r; });
+  const names = [];
+  (d.employees||[]).forEach(e=>{ if(e && e.name && !names.includes(e.name)) names.push(e.name); });
+  Object.keys(recs).forEach(k=>{ const n=k.split('|')[0]; if(!names.includes(n)) names.push(n); });
+  const LET = {'Present':'P','Absent':'A','Half Day':'H','On Leave':'L'};
+  const headers = ['Employee'];
+  for(let i=1;i<=daysInMonth;i++) headers.push(String(i));
+  headers.push('Present','Absent','Half Day','On Leave');
+  const rows = names.map(name=>{
+    const row = [name]; const c = {P:0,A:0,H:0,L:0};
+    for(let i=1;i<=daysInMonth;i++){
+      const r = recs[name+'|'+ym+'-'+String(i).padStart(2,'0')];
+      const l = r ? (LET[r.status]||'') : '';
+      if(l) c[l]++;
+      row.push(l);
+    }
+    row.push(c.P, c.A, c.H, c.L);
+    return row;
+  });
+  exportToExcel(currentLocation+'_Register_'+ym, headers, rows);
+}
+
 function hrAttendanceSection(d){
+  if(hrAttView === 'register'){
+    return `
+    <div style="margin-bottom:12px; display:flex; gap:8px;">
+      <button type="button" class="acct-switch-btn" onclick="switchHrAttView('log')">&#128203; Log</button>
+      <button type="button" class="acct-switch-btn active" onclick="switchHrAttView('register')">&#128198; Monthly Register</button>
+    </div>
+    ${hrAttendanceRegister(d)}`;
+  }
   const all = applyTableTools('attendance', d.attendance.slice().reverse());
   const rows = limitRows('attendance', all);
   return `
+  <div style="margin-bottom:12px; display:flex; gap:8px;">
+    <button type="button" class="acct-switch-btn active" onclick="switchHrAttView('log')">&#128203; Log</button>
+    <button type="button" class="acct-switch-btn" onclick="switchHrAttView('register')">&#128198; Monthly Register</button>
+  </div>
   ${secHead('&#10133;', 'New Entry')}
   <div class="panel"><div class="panel-head"><h3>Mark attendance</h3></div>
   <div class="panel-body">
@@ -5998,11 +6191,12 @@ function hrAttendanceSection(d){
   <div class="panel"><div class="panel-head"><h3>Attendance log</h3><div class="panel-head-actions">${importBtn('attendance')}${exportBtn('exportAttendance')}</div></div>
   <div class="panel-body">
   ${tableToolbar('attendance', d.attendance)}
-  <table><thead><tr><th>Date</th><th>Employee</th><th>Status</th><th>Remarks</th>${cfHeaders('attendance')}<th>Added By</th><th></th></tr></thead><tbody>
-  ${rows.length===0 ? noMatchRow(7, d.attendance.length) :
+  <table><thead><tr><th>Date</th><th>Employee</th><th>Status</th><th>In</th><th>Out</th><th>Remarks</th>${cfHeaders('attendance')}<th>Added By</th><th></th></tr></thead><tbody>
+  ${rows.length===0 ? noMatchRow(9, d.attendance.length) :
     rows.map(r=>`<tr>
       <td>${fd(r.date)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.employee)}</td>
       <td><span style="font-weight:600; color:${r.status==='Present'?'var(--success)':r.status==='Absent'?'#e6577a':'#e08a2e'};">${esc(r.status)}</span></td>
+      <td>${esc(r.inTime||'')}</td><td>${esc(r.outTime||'')}</td>
       <td>${esc(r.remarks||'')}</td>${cfCells('attendance', r)}${addedByCell(r)}
       <td>${actionCell(editBtn('attendance', r.id), deleteBtn(`deleteAttendance('${r.id}')`))}</td>
     </tr>`).join('')}
@@ -6037,8 +6231,8 @@ async function deleteAttendance(id){
 }
 function exportAttendance(){
   const d = DATA[currentLocation];
-  const headers = ['Date','Employee','Status','Remarks','Added By'];
-  const rows = (d.attendance||[]).map(r=>[r.date, r.employee, r.status, r.remarks||'', r.addedBy]);
+  const headers = ['Date','Employee','Status','In','Out','Remarks','Added By'];
+  const rows = (d.attendance||[]).map(r=>[r.date, r.employee, r.status, r.inTime||'', r.outTime||'', r.remarks||'', r.addedBy]);
   cfExportAppend('attendance', d.attendance||[], headers, rows);
   exportToExcel(currentLocation+'_Attendance', headers, rows);
 }
@@ -6723,8 +6917,48 @@ function renderAccounts(){
   ${showMoreBar('purchaseAccounts', purchaseSorted.length)}
   </div></div>`;
 
+  /* ---- Sales Queue: every Customer P.O from the Purchase tab lands here
+     until someone picks it, gets assigned, and turns it into a sales entry ---- */
+  d.salesQueue = (d.salesQueue && typeof d.salesQueue==='object' && !Array.isArray(d.salesQueue)) ? d.salesQueue : {};
+  const sq = d.salesQueue;
+  const queueGroups = {};
+  (d.customerPO||[]).forEach(p=>{
+    if(!p) return;
+    const key = (p.poNumber && String(p.poNumber).trim()) ? 'po_'+String(p.poNumber).trim() : 'rec_'+p.id;
+    if(sq[key] && sq[key].done) return;
+    if(!queueGroups[key]) queueGroups[key] = { key, poNumber:p.poNumber||'', poDate:p.poDate||'', customer:p.customer||'', items:[], total:0 };
+    queueGroups[key].items.push(p);
+    queueGroups[key].total += parseFloat(rowTotal(p.qty,p.unitPrice)||p.totalValue||0) || 0;
+  });
+  const salesQueueList = Object.values(queueGroups).sort((a,b)=> String(b.poDate||'').localeCompare(String(a.poDate||'')));
+  const salesQueueCount = salesQueueList.length;
+  const salesQueuePanel = `
+  ${secHead('&#128257;', 'Queue')}
+  <div class="panel"><div class="panel-head"><h3>Sales Queue &mdash; Customer P.O awaiting invoice${salesQueueCount?` <span style="color:var(--success);">(${salesQueueCount})</span>`:''}</h3></div>
+  <div class="panel-body">
+  ${salesQueueCount===0 ? '<div style="opacity:.6; padding:6px 2px;">Queue is empty. New Customer P.O entries from the Purchase tab appear here automatically.</div>' : `
+  <table><thead><tr><th>P.O No</th><th>P.O Date</th><th>Customer</th><th>Items</th><th>Total Value</th><th>Assigned To</th><th></th></tr></thead><tbody>
+  ${salesQueueList.map(q=>{
+    const st = sq[q.key] || {};
+    const itemsTxt = q.items.map(p=>esc(p.item||'')).filter(Boolean).join(', ');
+    return `<tr>
+      <td style="font-family:'IBM Plex Mono',monospace;">${esc(q.poNumber||'-')}</td>
+      <td>${fd(q.poDate)}</td>
+      <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(q.customer)}</td>
+      <td style="max-width:260px;">${itemsTxt||'-'}</td>
+      <td style="font-family:'IBM Plex Mono',monospace;">${q.total ? q.total.toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}) : '-'}</td>
+      <td>${st.pickedBy ? `<span style="font-weight:600; color:var(--success);">${esc(st.pickedBy)}</span>` : '<span style="opacity:.5;">-</span>'}</td>
+      <td>${st.pickedBy
+        ? actionCell(`<button class="icon-btn" onclick="saFillFromQueue('${q.key}')">&#128221; Create Sales Entry</button> <button class="icon-btn" onclick="unpickSalesQueue('${q.key}')">Unpick</button>`, isAdmin()?`<button class="icon-btn" style="color:#e6577a;" onclick="dismissSalesQueue('${q.key}')">Dismiss</button>`:'')
+        : actionCell(`<button class="icon-btn" style="color:var(--success); font-weight:600;" onclick="pickSalesQueue('${q.key}')">&#9995; Pick</button>`, isAdmin()?`<button class="icon-btn" style="color:#e6577a;" onclick="dismissSalesQueue('${q.key}')">Dismiss</button>`:'')}</td>
+    </tr>`;
+  }).join('')}
+  </tbody></table>`}
+  </div></div>`;
+
   const salesSection = `
   <div class="subsection-title">Sales</div>
+  ${salesQueuePanel}
   ${secHead('&#10133;', 'New Entry')}
   <div class="panel"><div class="panel-head"><h3>New sales entry / invoice</h3></div>
   <div class="panel-body">
@@ -6854,7 +7088,7 @@ function renderAccounts(){
 
   <div class="acct-switch">
     <button type="button" class="acct-switch-btn ${accountsSection==='purchase'?'active':''}" onclick="switchAccountsSection('purchase')">&#128176; Purchase</button>
-    <button type="button" class="acct-switch-btn ${accountsSection==='sales'?'active':''}" onclick="switchAccountsSection('sales')">&#128179; Sales</button>
+    <button type="button" class="acct-switch-btn ${accountsSection==='sales'?'active':''}" onclick="switchAccountsSection('sales')">&#128179; Sales${salesQueueCount?` <span style="background:var(--success); color:#fff; border-radius:9px; padding:1px 7px; font-size:11px;">${salesQueueCount}</span>`:''}</button>
     <button type="button" class="acct-switch-btn ${accountsSection==='summary'?'active':''}" onclick="switchAccountsSection('summary')">&#128197; Monthly Summary</button>
   </div>
 
@@ -7101,6 +7335,65 @@ function invoicePrefix(loc){ return loc==='SOMTEK' ? 'ST-INV-' : 'ET-INV-'; }
 function nextInvoiceNumber(d){
   return invoicePrefix(currentLocation) + String((d.salesAccounts||[]).length + 1).padStart(3,'0');
 }
+let saQueueKey = null;
+function sqState(d){
+  if(!d.salesQueue || typeof d.salesQueue!=='object' || Array.isArray(d.salesQueue)) d.salesQueue = {};
+  return d.salesQueue;
+}
+async function pickSalesQueue(key){
+  const d = DATA[currentLocation];
+  const sq = sqState(d);
+  sq[key] = { ...(sq[key]||{}), pickedBy: actorName(), pickedAt: today() };
+  await saveLocation(currentLocation);
+  render();
+}
+async function unpickSalesQueue(key){
+  const d = DATA[currentLocation];
+  const sq = sqState(d);
+  const st = sq[key]||{};
+  if(st.pickedBy && st.pickedBy!==actorName() && !isAdmin()){ alert('Only '+st.pickedBy+' or an admin can unpick this.'); return; }
+  delete sq[key];
+  if(saQueueKey===key) saQueueKey = null;
+  await saveLocation(currentLocation);
+  render();
+}
+async function dismissSalesQueue(key){
+  if(!isAdmin()) return;
+  if(!confirm('Remove this P.O from the Sales Queue without creating a sales entry?')) return;
+  const d = DATA[currentLocation];
+  const sq = sqState(d);
+  sq[key] = { ...(sq[key]||{}), done:true, invNo:'Dismissed', doneBy: actorName(), doneAt: today() };
+  if(saQueueKey===key) saQueueKey = null;
+  await saveLocation(currentLocation);
+  render();
+}
+function saFillFromQueue(key){
+  const d = DATA[currentLocation];
+  const sq = sqState(d);
+  const st = sq[key]||{};
+  if(st.pickedBy && st.pickedBy!==actorName() && !isAdmin()){
+    if(!confirm('This P.O is assigned to '+st.pickedBy+'. Create the sales entry anyway?')) return;
+  }
+  const recs = (d.customerPO||[]).filter(p=>{
+    if(!p) return false;
+    const k = (p.poNumber && String(p.poNumber).trim()) ? 'po_'+String(p.poNumber).trim() : 'rec_'+p.id;
+    return k===key;
+  });
+  if(!recs.length){ alert('Customer P.O records not found for this queue entry.'); return; }
+  const h = recs[0];
+  const set = (id,v)=>{ const el = document.getElementById(id); if(el) el.value = v||''; };
+  set('sa-customer', h.customer);
+  if(typeof saCustomerAutofill==='function'){ try{ saCustomerAutofill(h.customer); }catch(e){} }
+  if(h.customerAddress) set('sa-billto', h.customerAddress);
+  set('sa-pono', h.poNumber);
+  set('sa-podate', h.poDate);
+  const wrap = document.getElementById('sa-item-lines');
+  if(wrap){ wrap.innerHTML = recs.map(p=>saItemLineHtml({description:p.item||'', qty:p.qty||'', rate:p.unitPrice||''})).join(''); }
+  saRecalc();
+  saQueueKey = key;
+  const anchor = document.getElementById('sa-invno');
+  if(anchor) anchor.scrollIntoView({behavior:'smooth', block:'center'});
+}
 async function addSalesAccount(e){
   e.preventDefault();
   if(!canSeeTab('accounts')) return false;
@@ -7159,6 +7452,11 @@ async function addSalesAccount(e){
     paymentStatus: gv('sa-paystatus') || 'Pending',
     addedBy: actorName()
   });
+  if(saQueueKey){
+    const sq2 = sqState(d);
+    sq2[saQueueKey] = { ...(sq2[saQueueKey]||{}), done:true, invNo: gv('sa-invno'), doneBy: actorName(), doneAt: today() };
+    saQueueKey = null;
+  }
   await saveLocation(currentLocation);
   render();
   return false;
@@ -7998,6 +8296,7 @@ const EDIT_SCHEMAS = {
   ],
   employees: [
     {key:'code', label:'Employee code', type:'text'},
+    {key:'esslCode', label:'eSSL Code', type:'text'},
     {key:'name', label:'Name', type:'text'},
     {key:'designation', label:'Designation', type:'text'},
     {key:'mobile', label:'Mobile', type:'text'},
@@ -8012,6 +8311,8 @@ const EDIT_SCHEMAS = {
     {key:'date', label:'Date', type:'date'},
     {key:'employee', label:'Employee', type:'text'},
     {key:'status', label:'Status', type:'select', options:['Present','Absent','Half Day','On Leave']},
+    {key:'inTime', label:'In Time (HH:MM)', type:'text'},
+    {key:'outTime', label:'Out Time (HH:MM)', type:'text'},
     {key:'remarks', label:'Remarks', type:'text'}
   ],
   leaves: [
