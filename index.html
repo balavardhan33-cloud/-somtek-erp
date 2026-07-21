@@ -209,15 +209,21 @@ h1,h2,h3,.stencil{font-family:'Oswald', sans-serif; text-transform:uppercase; le
 .sec-head .sec-bar{width:5px; height:20px; background:var(--accent); flex:0 0 auto;}
 .sec-head .sec-label{font-size:13px; letter-spacing:0.12em; color:var(--text); font-weight:600;}
 .sec-head .sec-line{flex:1; height:1px; background:var(--border);}
-.panel{background:var(--panel); border:1px solid var(--border); margin-bottom:20px;}
-.panel-head{padding:14px 18px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;}
+.panel{background:var(--panel); border:1px solid var(--border); margin-bottom:20px; max-width:100%;}
+.panel-head{padding:14px 18px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;}
 .panel-head h3{font-size:14px; letter-spacing:0.05em;}
-.panel-body{padding:18px; overflow-x:auto;}
+.panel-body{padding:18px; overflow-x:auto; max-width:100%; -webkit-overflow-scrolling:touch;}
 .panel-body table{min-width:max-content; width:100%;}
 .panel-body table td, .panel-body table th{white-space:nowrap;}
 .panel-body table td[style*="white-space:normal"], .panel-body .cell-clamp{white-space:normal;}
+/* thin, unobtrusive horizontal scrollbar so wide tables scroll inside the panel
+   instead of pushing the whole page sideways */
+.panel-body::-webkit-scrollbar{height:9px;}
+.panel-body::-webkit-scrollbar-track{background:transparent;}
+.panel-body::-webkit-scrollbar-thumb{background:var(--border); border-radius:5px;}
+.panel-body::-webkit-scrollbar-thumb:hover{background:var(--muted);}
 
-.form-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:14px; align-items:end;}
+.form-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:14px; align-items:end; max-width:100%;}
 
 table{width:100%; border-collapse:collapse; font-size:13px;}
 thead th{
@@ -2357,7 +2363,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.46';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.51';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -6828,14 +6834,12 @@ function renderAccounts(){
       <div class="field"><label>GSTIN/UIN</label><input type="text" id="pa-gstin" placeholder="Optional"></div>
       <div class="field"><label>P.O Number</label><input type="text" id="pa-po" placeholder="Optional"></div>
       <div class="field"><label>P.O Date</label><input type="date" id="pa-podate"></div>
-      <div class="field"><label>Commodity</label><input type="text" id="pa-commodity" placeholder="Optional"></div>
-      <div class="field"><label>HSN/SAC Code</label><input type="text" id="pa-hsnsac" placeholder="Optional"></div>
-      <div class="field"><label>Qty</label><input type="number" step="any" min="0" id="pa-qty" placeholder="Optional" oninput="paRecalc()"></div>
-      <div class="field"><label>UOM</label>
-        <select id="pa-uom"><option value="Nos">Nos</option><option value="Kg">Kg</option><option value="Grams">Grams</option><option value="Ltr">Ltr</option><option value="Mtr">Mtr</option><option value="Set">Set</option><option value="Box">Box</option><option value="Pair">Pair</option><option value="Roll">Roll</option><option value="Pkt">Pkt</option><option value="Bag">Bag</option><option value="Drum">Drum</option><option value="MT">MT</option></select>
-      </div>
-      <div class="field"><label>Unit Price</label><input type="number" step="0.01" min="0" id="pa-unitprice" placeholder="Optional" oninput="paRecalc()"></div>
-      <div class="field"><label>Basic Value <span style="color:var(--muted); font-weight:400;">(auto: Qty &times; Unit Price)</span></label><input type="number" step="0.01" id="pa-taxable" placeholder="Auto" readonly tabindex="-1"></div>
+    </div>
+    <div class="out-lines-head">Description of Items</div>
+    <div id="pa-item-lines">${paItemLineHtml()}</div>
+    <div style="margin:10px 0 14px 0;"><button type="button" class="btn btn-ghost" onclick="addPaItemLine()">+ Add another item</button></div>
+    <div class="form-grid">
+      <div class="field"><label>Basic Value <span style="color:var(--muted); font-weight:400;">(auto: sum of item amounts)</span></label><input type="number" step="0.01" id="pa-taxable" placeholder="Auto" readonly tabindex="-1"></div>
       <div class="field"><label>Freight Amount</label><input type="number" step="0.01" id="pa-freight" placeholder="Optional" oninput="paRecalc()"></div>
       <div class="field"><label>CGST %</label>
         <select id="pa-cgstpct" onchange="paRecalc()"><option value="0">0%</option><option value="0.05">0.05%</option><option value="0.125">0.125%</option><option value="0.25">0.25%</option><option value="0.5">0.5%</option><option value="0.75">0.75%</option><option value="1">1%</option><option value="1.25">1.25%</option><option value="1.5">1.5%</option><option value="2">2%</option><option value="2.5">2.5%</option><option value="3">3%</option><option value="4">4%</option><option value="5">5%</option><option value="6">6%</option><option value="7.5">7.5%</option><option value="9">9%</option><option value="12">12%</option><option value="14">14%</option><option value="20">20%</option></select>
@@ -6896,7 +6900,7 @@ function renderAccounts(){
       </select>${due.overdue ? '<span class="badge badge-overdue">OVERDUE</span>' : ''}</div></td>
       <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.remarks)}</td>
       ${cfCells('purchaseAccounts', r)}${addedByCell(r)}
-      <td>${actionCell(editBtn('purchaseAccounts', r.id), deleteBtn(`deletePurchaseAccount('${r.id}')`))}</td>
+      <td>${actionCell(`<button class="icon-btn" onclick="openPurchaseDocPreview('${r.id}')">View / Print</button> ` + editBtn('purchaseAccounts', r.id), deleteBtn(`deletePurchaseAccount('${r.id}')`))}</td>
     </tr>`;}).join('')}
   </tbody>
   ${purchaseSorted.length>0 ? `<tfoot><tr class="totals-row totals-purchase">
@@ -6942,15 +6946,15 @@ function renderAccounts(){
     const st = sq[q.key] || {};
     const itemsTxt = q.items.map(p=>esc(p.item||'')).filter(Boolean).join(', ');
     return `<tr>
-      <td style="font-family:'IBM Plex Mono',monospace;">${esc(q.poNumber||'-')}</td>
+      <td style="font-family:'IBM Plex Mono',monospace; white-space:normal; word-break:break-word; max-width:180px;">${esc(q.poNumber||'-')}</td>
       <td>${fd(q.poDate)}</td>
       <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(q.customer)}</td>
-      <td style="max-width:260px;">${itemsTxt||'-'}</td>
+      <td style="max-width:360px; min-width:220px; white-space:normal; word-break:break-word;">${queueItemsCell(q.key, itemsTxt)}</td>
       <td style="font-family:'IBM Plex Mono',monospace;">${q.total ? q.total.toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}) : '-'}</td>
       <td>${st.pickedBy ? `<span style="font-weight:600; color:var(--success);">${esc(st.pickedBy)}</span>` : '<span style="opacity:.5;">-</span>'}</td>
-      <td>${st.pickedBy
-        ? actionCell(`<button class="icon-btn" onclick="saFillFromQueue('${q.key}')">&#128221; Create Sales Entry</button> <button class="icon-btn" onclick="unpickSalesQueue('${q.key}')">Unpick</button>`, isAdmin()?`<button class="icon-btn" style="color:#e6577a;" onclick="dismissSalesQueue('${q.key}')">Dismiss</button>`:'')
-        : actionCell(`<button class="icon-btn" style="color:var(--success); font-weight:600;" onclick="pickSalesQueue('${q.key}')">&#9995; Pick</button>`, isAdmin()?`<button class="icon-btn" style="color:#e6577a;" onclick="dismissSalesQueue('${q.key}')">Dismiss</button>`:'')}</td>
+      <td style="white-space:nowrap;">${st.pickedBy
+        ? `<button class="icon-btn" style="color:var(--success); font-weight:600;" onclick="saFillFromQueue('${q.key}')">&#128221; Create Sales Entry</button>`
+        : `<button class="icon-btn" style="color:var(--success); font-weight:600;" onclick="pickSalesQueue('${q.key}')">&#9995; Pick</button>`}</td>
     </tr>`;
   }).join('')}
   </tbody></table>`}
@@ -6964,13 +6968,13 @@ function renderAccounts(){
   <div class="panel-body">
   <form onsubmit="return addSalesAccount(event)">
     <div class="form-grid">
-      <div class="field"><label>Invoice No</label><input type="text" id="sa-invno" value="${esc(nextInvoiceNumber(d))}"></div>
-      <div class="field"><label>Invoice Date</label><input type="date" id="sa-date" value="${today()}" required></div>
+      <div class="field"><label>Invoice No <span style="color:var(--danger);">*</span></label><input type="text" id="sa-invno" value="${esc(nextInvoiceNumber(d))}" required></div>
+      <div class="field"><label>Invoice Date <span style="color:var(--danger);">*</span></label><input type="date" id="sa-date" value="${today()}" required></div>
       <div class="field"><label>DC No.</label><input type="text" id="sa-dcno" placeholder="Optional"></div>
       <div class="field"><label>DC Date</label><input type="date" id="sa-dcdate"></div>
       <div class="field"><label>PO No</label><input type="text" id="sa-pono" placeholder="Optional"></div>
       <div class="field"><label>PO Date</label><input type="date" id="sa-podate"></div>
-      <div class="field"><label>Name of the Customer <span style="color:var(--muted); font-weight:400;">(pick a previous customer to auto-fill details)</span></label><input type="text" id="sa-customer" list="sa-customer-list" oninput="saCustomerAutofill(this.value)" autocomplete="off" required><datalist id="sa-customer-list">${saCustomerOptions()}</datalist></div>
+      <div class="field"><label>Name of the Customer <span style="color:var(--danger);">*</span> <span style="color:var(--muted); font-weight:400;">(pick a previous customer to auto-fill details)</span></label><input type="text" id="sa-customer" list="sa-customer-list" oninput="saCustomerAutofill(this.value)" autocomplete="off" required><datalist id="sa-customer-list">${saCustomerOptions()}</datalist></div>
       <div class="field"><label>Bill To (Name &amp; Address)</label><input type="text" id="sa-billto" placeholder="Optional"></div>
       <div class="field"><label>Place of Supply</label><input type="text" id="sa-pos" placeholder="Optional"></div>
       <div class="field"><label>State Code</label><input type="text" id="sa-statecode" placeholder="e.g. 36"></div>
@@ -7106,11 +7110,58 @@ function paCompute(vals){
   const balance = r2(Math.max(0, gross - (vals.amountPaid||0)));
   return {basic, cgst, sgst, igst, gross, balance};
 }
+function paItemLineHtml(it){
+  it = it || {};
+  return `<div class="out-line pa-item-line" style="flex-wrap:wrap;">
+    <input type="text" class="pa-line-desc" placeholder="Description of item / commodity" value="${esc(it.description||'')}" style="flex:3 1 240px; min-width:200px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:'IBM Plex Sans',sans-serif; font-size:13px; border-radius:4px;">
+    <input type="text" class="pa-line-hsn" placeholder="HSN/SAC" value="${esc(it.hsnSac||'')}" style="flex:1 1 90px; min-width:80px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:'IBM Plex Mono',monospace; font-size:12.5px; border-radius:4px;">
+    <input type="number" class="out-line-qty pa-line-qty" step="any" min="0" placeholder="Qty" value="${esc(it.qty||'')}" oninput="paRecalc()">
+    <select class="pa-line-uom" style="background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 8px; font-family:'IBM Plex Sans',sans-serif; font-size:12.5px; border-radius:4px;">${SA_UOMS.map(u=>`<option value="${u}" ${it.uom===u?'selected':''}>${u}</option>`).join('')}</select>
+    <input type="number" class="pa-line-rate" step="0.01" min="0" placeholder="Unit Price" value="${esc(it.rate||'')}" oninput="paRecalc()" style="flex:0 1 110px; min-width:90px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:'IBM Plex Mono',monospace; font-size:12.5px; border-radius:4px;">
+    <input type="number" class="pa-line-amount" step="0.01" placeholder="Amount" readonly tabindex="-1" style="flex:0 1 120px; min-width:100px; background:var(--bg); border:1px solid var(--border); color:var(--muted); padding:9px 10px; font-family:'IBM Plex Mono',monospace; font-size:12.5px; border-radius:4px;">
+    <button type="button" class="icon-btn out-line-remove" onclick="removePaItemLine(this)" title="Remove this item">&#10005;</button>
+  </div>`;
+}
+function addPaItemLine(){
+  const wrap = document.getElementById('pa-item-lines');
+  if(wrap){ wrap.insertAdjacentHTML('beforeend', paItemLineHtml()); paRecalc(); }
+}
+function removePaItemLine(btn){
+  const wrap = document.getElementById('pa-item-lines');
+  const line = btn.closest('.pa-item-line');
+  if(wrap && line && wrap.querySelectorAll('.pa-item-line').length > 1){ line.remove(); paRecalc(); }
+}
+function readPaItemLines(){
+  return [...document.querySelectorAll('#pa-item-lines .pa-item-line')].map(line=>{
+    const q = parseFloat(line.querySelector('.pa-line-qty').value)||0;
+    const rt = parseFloat(line.querySelector('.pa-line-rate').value)||0;
+    return {
+      description: line.querySelector('.pa-line-desc').value.trim(),
+      hsnSac: line.querySelector('.pa-line-hsn').value.trim(),
+      qty: line.querySelector('.pa-line-qty').value.trim(),
+      uom: line.querySelector('.pa-line-uom').value,
+      rate: line.querySelector('.pa-line-rate').value.trim(),
+      amount: (q && rt) ? String(Math.round(q*rt*100)/100) : ''
+    };
+  }).filter(it=>it.description || it.qty || it.rate);
+}
+function paItemsBasic(){
+  let basic = 0;
+  document.querySelectorAll('#pa-item-lines .pa-item-line').forEach(line=>{
+    const q = parseFloat(line.querySelector('.pa-line-qty').value)||0;
+    const rt = parseFloat(line.querySelector('.pa-line-rate').value)||0;
+    const amt = Math.round(q*rt*100)/100;
+    const amtEl = line.querySelector('.pa-line-amount');
+    if(amtEl) amtEl.value = amt ? amt.toFixed(2) : '';
+    basic += amt;
+  });
+  return Math.round(basic*100)/100;
+}
 function paRecalc(){
   const gv = id => { const el = document.getElementById(id); return el ? (parseFloat(el.value)||0) : 0; };
   const sv = (id, n) => { const el = document.getElementById(id); if(el) el.value = n ? n.toFixed(2) : ''; };
   const c = paCompute({
-    qty: gv('pa-qty'), unitPrice: gv('pa-unitprice'), freight: gv('pa-freight'),
+    qty: 1, unitPrice: paItemsBasic(), freight: gv('pa-freight'),
     cgstPct: gv('pa-cgstpct'), sgstPct: gv('pa-sgstpct'), igstPct: gv('pa-igstpct'),
     roundOff: gv('pa-roundoff'), amountPaid: gv('pa-paid')
   });
@@ -7132,8 +7183,10 @@ async function addPurchaseAccount(e){
   if(dupSup && d.purchaseAccounts.some(r=>(r.supplierInvoiceNo||'').toLowerCase() === dupSup.toLowerCase())){
     if(!confirm('Supplier Invoice No "' + dupSup + '" already exists in the Purchase register. Save it again anyway?')) return false;
   }
+  const items = readPaItemLines();
+  const first = items[0] || {};
   const c = paCompute({
-    qty: gn('pa-qty'), unitPrice: gn('pa-unitprice'), freight: gn('pa-freight'),
+    qty: 1, unitPrice: paItemsBasic(), freight: gn('pa-freight'),
     cgstPct: gn('pa-cgstpct'), sgstPct: gn('pa-sgstpct'), igstPct: gn('pa-igstpct'),
     roundOff: gn('pa-roundoff'), amountPaid: gn('pa-paid')
   });
@@ -7145,11 +7198,12 @@ async function addPurchaseAccount(e){
     gstin: gv('pa-gstin'),
     poNumber: gv('pa-po'),
     poDate: gv('pa-podate'),
-    commodity: gv('pa-commodity'),
-    hsnSac: gv('pa-hsnsac'),
-    qty: gv('pa-qty'),
-    uom: gv('pa-uom') || 'Nos',
-    unitPrice: gv('pa-unitprice'),
+    items: items,
+    commodity: items.map(it=>it.description).filter(Boolean).join('; '),
+    hsnSac: [...new Set(items.map(it=>it.hsnSac).filter(Boolean))].join(', '),
+    qty: String(items.reduce((a,it)=>a+(parseFloat(it.qty)||0),0) || ''),
+    uom: first.uom || 'Nos',
+    unitPrice: first.rate || '',
     taxableValue: c.basic ? String(c.basic) : '',
     freight: gv('pa-freight'),
     cgstPct: gv('pa-cgstpct'),
@@ -7172,6 +7226,106 @@ async function addPurchaseAccount(e){
   render();
   return false;
 }
+/* ---- Purchase Entry document: preview + print ---- */
+let previewPurchaseDocId = null;
+function purchaseItemsOf(r){
+  if(Array.isArray(r.items) && r.items.length) return r.items;
+  /* older single-item entries: build one line from the flat fields */
+  return [{ description: r.commodity||'', hsnSac: r.hsnSac||'', qty: r.qty||'', uom: r.uom||'', rate: r.unitPrice||'', amount: r.taxableValue||'' }];
+}
+function purchaseDocumentHtml(r){
+  const items = purchaseItemsOf(r);
+  const td = 'border:1px solid #444; padding:5px 8px;';
+  const th = 'border:1px solid #444; padding:5px 8px; background:#e8e8e8; font-weight:700; text-align:left;';
+  const rows = items.map((it,i)=>`<tr>
+    <td style="${td} text-align:center; width:40px;">${i+1}</td>
+    <td style="${td}">${esc(it.description||'')}</td>
+    <td style="${td} width:90px;">${esc(it.hsnSac||'')}</td>
+    <td style="${td} width:70px; text-align:right;">${esc(it.qty||'')}</td>
+    <td style="${td} width:60px;">${esc(it.uom||'')}</td>
+    <td style="${td} width:100px; text-align:right;">${esc(it.rate||'')}</td>
+    <td style="${td} width:110px; text-align:right;">${esc(it.amount||'')}</td>
+  </tr>`).join('');
+  const pct = p => p && p !== '0' ? ' ('+esc(p)+'%)' : '';
+  const tot = (label, val, bold) => val ? `<tr><td style="${td} text-align:right; ${bold?'font-weight:700;':''}" colspan="6">${label}</td><td style="${td} text-align:right; ${bold?'font-weight:700;':''}">${esc(val)}</td></tr>` : '';
+  const info = (label, val) => `<div style="display:flex; gap:6px; margin-bottom:3px;"><div style="min-width:150px; font-weight:700;">${label}:</div><div>${esc(val||'-')}</div></div>`;
+  return `
+  <div class="quote-sheet" style="background:#fff; color:#111; margin:0 auto; padding:26px 24px; font-family:'IBM Plex Sans',Arial,sans-serif; font-size:12px; line-height:1.4; max-width:900px;">
+    <div style="display:flex; justify-content:center; margin-bottom:6px;">
+      <img src="${quoteLogoUri(currentLocation)}" style="height:56px; width:auto;" alt="">
+    </div>
+    <div style="text-align:center; font-size:16px; font-weight:800; text-decoration:underline; margin-bottom:18px;">PURCHASE ENTRY</div>
+    <div style="display:flex; gap:40px; margin-bottom:14px;">
+      <div style="flex:1;">
+        ${info('Supplier', r.supplier)}
+        ${info('GSTIN/UIN', r.gstin)}
+        ${info('Supplier Invoice No.', r.supplierInvoiceNo)}
+        ${info('Remarks', r.remarks)}
+      </div>
+      <div style="flex:1;">
+        ${info('Entry Date', fd(r.date))}
+        ${info('P.O Number', r.poNumber)}
+        ${info('P.O Date', fd(r.poDate))}
+        ${info('Payment Status', r.paymentStatus||'Pending')}
+        ${info('Credit Period', r.creditDays ? r.creditDays+' days' : '')}
+      </div>
+    </div>
+    <table style="border-collapse:collapse; width:100%; margin-bottom:0;">
+      <thead><tr>
+        <th style="${th} text-align:center;">Sl</th><th style="${th}">Description of Items</th><th style="${th}">HSN/SAC</th>
+        <th style="${th} text-align:right;">Qty</th><th style="${th}">UOM</th><th style="${th} text-align:right;">Unit Price</th><th style="${th} text-align:right;">Amount</th>
+      </tr></thead>
+      <tbody>
+        ${rows}
+        ${tot('Basic Value', r.taxableValue)}
+        ${tot('Freight', r.freight)}
+        ${tot('CGST'+pct(r.cgstPct), r.cgst)}
+        ${tot('SGST'+pct(r.sgstPct), r.sgst)}
+        ${tot('IGST'+pct(r.igstPct), r.igst)}
+        ${tot('Round Off', r.roundOff)}
+        ${tot('Gross Total', r.grossTotal, true)}
+        ${tot('Amount Paid', r.amountPaid)}
+        ${tot('Balance Outstanding', r.balanceOutstanding, true)}
+      </tbody>
+    </table>
+    <div style="margin-top:26px; display:flex; justify-content:space-between; font-size:11.5px;">
+      <div>Entered by: <b>${esc(r.addedBy||'')}</b></div>
+      <div>Printed on: ${fd(today())}</div>
+    </div>
+  </div>`;
+}
+function openPurchaseDocPreview(id){
+  const d = DATA[currentLocation];
+  const r = (d.purchaseAccounts||[]).find(x=>x && x.id===id);
+  if(!r) return;
+  closeQuotePreview();
+  previewPurchaseDocId = id;
+  const overlay = document.createElement('div');
+  overlay.id = 'quote-preview';
+  overlay.innerHTML = `
+    <div class="quote-actions">
+      <button type="button" class="btn" onclick="printPurchaseDoc()">&#128424; Print / Save as PDF</button>
+      <button type="button" class="btn quote-close-btn" onclick="closeQuotePreview()">&#10005; Close</button>
+    </div>
+    ${purchaseDocumentHtml(r)}`;
+  document.body.appendChild(overlay);
+  const pageStyle = document.createElement('style');
+  pageStyle.id = 'quote-page-style';
+  pageStyle.textContent = '@page{ size: A4 portrait; margin: 10mm; }';
+  document.head.appendChild(pageStyle);
+  document.body.classList.add('quote-open');
+}
+function printPurchaseDoc(){
+  const d = DATA[currentLocation];
+  const r = previewPurchaseDocId ? (d.purchaseAccounts||[]).find(x=>x.id===previewPurchaseDocId) : null;
+  const oldTitle = document.title;
+  document.title = r ? ('Purchase Entry - '+(r.supplier||'')) : 'Purchase Entry';
+  const restore = () => { document.title = oldTitle; window.removeEventListener('afterprint', restore); };
+  window.addEventListener('afterprint', restore);
+  window.print();
+  setTimeout(restore, 3000);
+}
+
 /* Due date = entry date + credit period days. Overdue = still Pending after the due date (vs today). */
 function purchaseDueInfo(r){
   const days = parseInt(r.creditDays);
@@ -7335,6 +7489,23 @@ function invoicePrefix(loc){ return loc==='SOMTEK' ? 'ST-INV-' : 'ET-INV-'; }
 function nextInvoiceNumber(d){
   return invoicePrefix(currentLocation) + String((d.salesAccounts||[]).length + 1).padStart(3,'0');
 }
+/* Sales-queue Items cell: short preview + Show more/less toggle.
+   Expanded keys are tracked in a plain set so the state survives re-render. */
+const SQ_EXPANDED = new Set();
+function queueItemsCell(key, text){
+  text = String(text||'');
+  const LIMIT = 90;
+  const safe = esc(text);
+  if(text.length <= LIMIT) return safe || '-';
+  const expanded = SQ_EXPANDED.has(key);
+  const shown = expanded ? safe : esc(text.slice(0, LIMIT).trim()) + '\u2026';
+  const link = `<a href="javascript:void(0)" onclick="toggleQueueItems('${key}')" style="color:var(--accent-2); font-weight:600; white-space:nowrap; margin-left:4px;">${expanded ? 'show less' : 'show more'}</a>`;
+  return `<span>${shown}</span> ${link}`;
+}
+function toggleQueueItems(key){
+  if(SQ_EXPANDED.has(key)) SQ_EXPANDED.delete(key); else SQ_EXPANDED.add(key);
+  render();
+}
 let saQueueKey = null;
 function sqState(d){
   if(!d.salesQueue || typeof d.salesQueue!=='object' || Array.isArray(d.salesQueue)) d.salesQueue = {};
@@ -7400,6 +7571,19 @@ async function addSalesAccount(e){
   const d = DATA[currentLocation];
   const gv = id => { const el = document.getElementById(id); return el ? (el.value||'').trim() : ''; };
   saRecalc();
+  /* --- required-field validation before an invoice can be saved --- */
+  const missing = [];
+  if(!gv('sa-invno')) missing.push('Invoice No');
+  if(!gv('sa-date')) missing.push('Invoice Date');
+  if(!gv('sa-customer')) missing.push('Name of the Customer');
+  const itemsCheck = readSaItemLines();
+  if(!itemsCheck.length || !itemsCheck.some(it => (it.description||'').trim())) missing.push('at least one item with a description');
+  if(missing.length){
+    alert('Please fill the required fields before saving:\n\n\u2022 ' + missing.join('\n\u2022 '));
+    const focusId = missing[0]==='Invoice No' ? 'sa-invno' : missing[0]==='Invoice Date' ? 'sa-date' : missing[0]==='Name of the Customer' ? 'sa-customer' : null;
+    if(focusId){ const el = document.getElementById(focusId); if(el){ el.focus(); el.scrollIntoView({behavior:'smooth', block:'center'}); } }
+    return false;
+  }
   const dupInv = gv('sa-invno');
   if(dupInv && d.salesAccounts.some(r=>(r.invNo||'').toLowerCase() === dupInv.toLowerCase())){
     if(!confirm('Invoice No "' + dupInv + '" already exists in the Sales register. Save it again anyway?')) return false;
