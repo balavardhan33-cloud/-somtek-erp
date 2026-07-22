@@ -362,6 +362,47 @@ body.quote-open{overflow:hidden;}
 .out-line .out-line-price{flex:0 1 130px; min-width:100px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:'IBM Plex Mono',monospace; font-size:13px; border-radius:4px;}
 .out-line .out-line-remove{flex:0 0 auto; color:#e6577a; border-color:#e6577a;}
 
+/* ---------- REPORTS ---------- */
+.rpt-presets{display:flex; gap:6px; flex-wrap:wrap; margin:2px 0 4px 0;}
+.rpt-preset{background:var(--panel-2); border:1px solid var(--border); color:var(--text); padding:5px 10px;
+  font-family:'Oswald',sans-serif; text-transform:uppercase; letter-spacing:0.05em; font-size:10.5px;
+  cursor:pointer; border-radius:3px;}
+.rpt-preset:hover{border-color:var(--accent); color:var(--accent);}
+.rpt-cols{display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:6px 14px;
+  border:1px solid var(--border); border-radius:4px; padding:12px; background:var(--bg); max-height:230px; overflow-y:auto;}
+.rpt-col{display:flex; align-items:center; gap:7px; font-size:12.5px; cursor:pointer; line-height:1.3;}
+.rpt-col input{flex:0 0 auto; margin:0;}
+.rpt-actions{display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:14px;}
+.rpt-meta{display:flex; gap:18px; flex-wrap:wrap; font-size:12px; color:var(--muted); margin-bottom:12px;}
+.rpt-meta b{color:var(--text); font-family:'IBM Plex Mono',monospace;}
+.rpt-grouprow td{background:var(--panel-2); font-family:'Oswald',sans-serif; text-transform:uppercase;
+  letter-spacing:0.06em; font-size:11.5px; color:var(--accent-2); font-weight:600;}
+.rpt-subtotal td{background:var(--panel-2); font-weight:700;}
+.rpt-total td{border-top:2px solid var(--text); font-weight:700; background:var(--panel-2);}
+.rpt-num{text-align:right; font-family:'IBM Plex Mono',monospace;}
+.rpt-empty{color:var(--muted); padding:22px 4px; text-align:center;}
+/* printable report sheet */
+.rpt-sheet{background:#fff; color:#111; padding:24px 26px; font-family:'IBM Plex Sans',sans-serif; margin:0 auto;}
+.rpt-sheet .rpt-head{display:flex; justify-content:space-between; align-items:flex-start;
+  border-bottom:2px solid #111; padding-bottom:10px; margin-bottom:12px; gap:16px;}
+.rpt-sheet .rpt-head img{max-height:52px; max-width:190px;}
+.rpt-sheet h2{font-family:'Oswald',sans-serif; font-size:19px; margin:0; color:#111;}
+.rpt-sheet .rpt-sub{font-size:11px; color:#444; margin-top:3px;}
+.rpt-sheet .rpt-crit{font-size:11px; color:#333; border:1px solid #ccc; padding:7px 9px; margin-bottom:12px; background:#f7f7f5;}
+.rpt-sheet table{width:100%; border-collapse:collapse; font-size:10.5px;}
+.rpt-sheet th{background:#eceae4; border:1px solid #999; padding:5px 6px; text-align:left;
+  font-family:'Oswald',sans-serif; text-transform:uppercase; letter-spacing:0.04em; font-size:10px; color:#111;}
+.rpt-sheet td{border:1px solid #bbb; padding:4px 6px; vertical-align:top; color:#111;}
+.rpt-sheet .rpt-grouprow td{background:#e2e6ef; font-weight:700; color:#1f4491;}
+.rpt-sheet .rpt-subtotal td{background:#f1efe9; font-weight:700;}
+.rpt-sheet .rpt-total td{background:#e6e3dc; font-weight:700; border-top:2px solid #111;}
+.rpt-sheet .rpt-foot{margin-top:14px; font-size:10px; color:#555; display:flex; justify-content:space-between; gap:12px;}
+@media print{
+  .rpt-sheet{padding:0;}
+  .rpt-sheet thead{display:table-header-group;}
+  .rpt-sheet tr{page-break-inside:avoid;}
+}
+
 /* ---------- ROLE MANAGER ---------- */
 .role-card{border:1px solid var(--border); border-radius:6px; padding:12px 14px; margin-bottom:12px; background:var(--bg);}
 .role-card-head{display:flex; align-items:center; gap:10px; margin-bottom:10px;}
@@ -599,15 +640,16 @@ const TABS = [
   {id:'accounts', num:'09', label:'Accounts', icon:'&#128176;'},
   {id:'quotation', num:'10', label:'Quotation', icon:'&#128221;'},
   {id:'hr', num:'11', label:'HR', icon:'&#128101;'},
+  {id:'reports', num:'12', label:'Reports', icon:'&#128203;'},
   {id:'users', num:'', label:'Users', icon:'&#128100;'}
 ];
 
 const ROLE_TABS = {
-  admin: ['dashboard','po','inward','inventory','outward','logistics','sales','automation','enquiry','accounts','quotation','hr','users'],
-  stores: ['dashboard','inward','inventory','outward'],
-  logistics: ['dashboard','outward','logistics'],
-  automation: ['dashboard','automation'],
-  enquiry: ['dashboard','enquiry','inventory','po']
+  admin: ['dashboard','po','inward','inventory','outward','logistics','sales','automation','enquiry','accounts','quotation','hr','reports','users'],
+  stores: ['dashboard','inward','inventory','outward','reports'],
+  logistics: ['dashboard','outward','logistics','reports'],
+  automation: ['dashboard','automation','reports'],
+  enquiry: ['dashboard','enquiry','inventory','po','reports']
 };
 
 /* ---------------- PER-USER ACCESS (role tabs + extra grants) ---------------- */
@@ -620,7 +662,9 @@ function roleTabsFor(role){
   if(ROLE_TABS[role]) return ROLE_TABS[role];
   const c = CUSTOM_ROLES[role];
   if(c && Array.isArray(c.tabs)){
-    return c.tabs.includes('dashboard') ? c.tabs : ['dashboard'].concat(c.tabs);
+    let t = c.tabs.includes('dashboard') ? c.tabs.slice() : ['dashboard'].concat(c.tabs);
+    if(!t.includes('reports')) t.push('reports');
+    return t;
   }
   return ['dashboard'];
 }
@@ -2363,7 +2407,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.52';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.53';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -2980,6 +3024,7 @@ function renderTabContent(){
     case 'logistics': return renderLogistics();
     case 'sales': return renderSales();
     case 'hr': return renderHR();
+    case 'reports': return renderReports();
     case 'automation': return renderAutomation();
     case 'enquiry': return renderEnquiry();
     case 'accounts': return canSeeTab('accounts') ? renderAccounts() : renderDashboard();
@@ -8817,6 +8862,513 @@ function exportSalesAccounts(){
   const rows = d.salesAccounts.map(r=>[r.invNo, r.date, r.customer, r.billTo, r.gstin, r.dcNo, r.dcDate, r.poNo, r.poDate, r.placeOfSupply, r.stateCode, r.contactPerson, r.contactMobile, (r.description || saItems(r).map(it=>it.description).filter(Boolean).join('; ')), r.hsnSac, r.qty, r.uom, r.rate, r.amount, r.taxable, r.freight, r.cgstPct, r.cgst, r.sgstPct, r.sgst, r.igstPct, r.igst, r.cess, r.roundOff, r.invoiceValue, (r.valueInWords || (r.invoiceValue ? numberToWordsINR(r.invoiceValue) : '')), r.insurance, r.bankDetails, r.amountReceived, r.paymentDate, salesBalance(r), r.creditDays, salesDueInfo(r).dueDate, r.paymentStatus||'Pending', r.addedBy]);
   cfExportAppend('salesAccounts', d.salesAccounts, headers, rows);
   exportToExcel(currentLocation+'_Sales_Accounts', headers, rows);
+}
+
+/* ---------------- REPORTS ----------------
+   Every report source is bound to the module (tab) that owns it. A user only
+   ever sees, runs, exports or prints sources for modules they already have
+   access to - rptAllowedSources() filters on canSeeTab(), and run/export/print
+   each re-check before doing anything. */
+const REPORT_SOURCES = [
+  {key:'vendorPO',         tab:'po',         label:'Purchase - Vendor P.O',        dateKey:'poDate'},
+  {key:'customerPO',       tab:'po',         label:'Purchase - Customer P.O',      dateKey:'poDate'},
+  {key:'inward',           tab:'inward',     label:'Inward',                       dateKey:'date'},
+  {key:'inventory',        tab:'inventory',  label:'Inventory',                    dateKey:'addedOn'},
+  {key:'outward',          tab:'outward',    label:'Outward',                      dateKey:'date'},
+  {key:'logistics',        tab:'logistics',  label:'Logistics',                    dateKey:'date'},
+  {key:'futureShipments',  tab:'logistics',  label:'Future Shipments',             dateKey:'date'},
+  {key:'sales',            tab:'sales',      label:'Sales Register',               dateKey:'date'},
+  {key:'leads',            tab:'sales',      label:'Leads',                        dateKey:'date'},
+  {key:'automation',       tab:'automation', label:'Automation',                   dateKey:'date'},
+  {key:'pendingAssembly',  tab:'automation', label:'Pending Assembly',             dateKey:'date'},
+  {key:'enquiry',          tab:'enquiry',    label:'Enquiry',                      dateKey:'date'},
+  {key:'purchaseAccounts', tab:'accounts',   label:'Accounts - Purchase',          dateKey:'date'},
+  {key:'salesAccounts',    tab:'accounts',   label:'Accounts - Sales Invoices',    dateKey:'date'},
+  {key:'proformaInvoices', tab:'accounts',   label:'Accounts - Proforma Invoices', dateKey:'date'},
+  {key:'quotations',       tab:'quotation',  label:'Quotations',                   dateKey:'quoteDate'},
+  {key:'employees',        tab:'hr',         label:'HR - Employees',               dateKey:'joinDate'},
+  {key:'attendance',       tab:'hr',         label:'HR - Attendance',              dateKey:'date'},
+  {key:'leaves',           tab:'hr',         label:'HR - Leave',                   dateKey:'from'},
+  {key:'salaries',         tab:'hr',         label:'HR - Salary',                  dateKey:'month'}
+];
+
+let RPT = {
+  src:'', dateField:'', from:'', to:'', loc:'',
+  cols:null,            /* null = every column */
+  fKey:'', fVal:'', search:'',
+  sortKey:'', sortDir:'desc', groupKey:'',
+  result:null
+};
+const RPT_SCREEN_LIMIT = 500;   /* on-screen cap; export / print always use every row */
+
+function rptAllowedSources(){ return REPORT_SOURCES.filter(s => canSeeTab(s.tab)); }
+function rptSource(key){ return rptAllowedSources().find(s => s.key === key) || null; }
+
+/* schema columns + any admin-defined custom fields + Added By */
+function rptFields(key){
+  const base = ttFields(key).map(f => ({key:f.key, label:f.label, type:f.type || 'text'}));
+  const cf = cfDefs(key).map(f => ({key:f.key, label:f.label, type:f.type || 'text'}));
+  return base.concat(cf).concat([{key:'addedBy', label:'Added By', type:'text'}]);
+}
+function rptDateFields(key, primary){
+  const out = [];
+  rptFields(key).forEach(f => { if(f.type === 'date') out.push(f); });
+  if(primary && !out.some(f => f.key === primary)){
+    const f = rptFields(key).find(x => x.key === primary);
+    if(f) out.unshift(f);
+  }
+  return out;
+}
+function rptSelectedFields(s){
+  const all = rptFields(s.key);
+  return Array.isArray(RPT.cols) ? all.filter(f => RPT.cols.includes(f.key)) : all.slice();
+}
+
+/* Accepts YYYY-MM-DD, YYYY-MM (salary month) or DD-MM-YYYY. Returns YYYY-MM-DD or ''. */
+function rptDateVal(v){
+  if(v == null) return '';
+  const t = String(v).trim();
+  let m = /^(\d{4})-(\d{2})-(\d{2})/.exec(t);
+  if(m) return m[1] + '-' + m[2] + '-' + m[3];
+  m = /^(\d{4})-(\d{2})$/.exec(t);
+  if(m) return m[1] + '-' + m[2] + '-01';
+  m = /^(\d{2})-(\d{2})-(\d{4})$/.exec(t);
+  if(m) return m[3] + '-' + m[2] + '-' + m[1];
+  return '';
+}
+/* Local-date ISO. Never use toISOString() here - IST is UTC+5:30 and it would
+   roll local midnight back to the previous day. */
+function rptIso(dt){
+  return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
+}
+function rptNum(v){ const n = parseFloat(v); return isNaN(n) ? 0 : n; }
+function rptMoney(n){ return (Math.round(n * 100) / 100).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+function rptSum(rows, idx){ return rows.reduce((a, r) => a + rptNum(r[idx]), 0); }
+
+/* ----- criteria setters (assign only; no re-render, so typing is never lost) ----- */
+function rptSet(k, v){ RPT[k] = v; }
+function rptSetSrc(v){
+  RPT.src = v;
+  RPT.cols = null; RPT.fKey = ''; RPT.fVal = ''; RPT.sortKey = ''; RPT.groupKey = ''; RPT.result = null;
+  const s = rptSource(v);
+  RPT.dateField = s ? (s.dateKey || '') : '';
+  render();
+}
+function rptToggleColIdx(i, on){
+  const s = rptSource(RPT.src); if(!s) return;
+  const all = rptFields(s.key).map(f => f.key);
+  const key = all[i];
+  if(key == null) return;
+  let cur = Array.isArray(RPT.cols) ? RPT.cols.slice() : all.slice();
+  if(on){ if(!cur.includes(key)) cur.push(key); }
+  else { cur = cur.filter(x => x !== key); }
+  RPT.cols = all.filter(k => cur.includes(k));   /* keep schema order */
+}
+function rptAllCols(on){
+  const s = rptSource(RPT.src); if(!s) return;
+  RPT.cols = on ? null : [];
+  render();
+}
+function rptPreset(p){
+  const now = new Date();
+  if(p === 'all'){ RPT.from = ''; RPT.to = ''; }
+  else if(p === 'tm'){ RPT.from = rptIso(new Date(now.getFullYear(), now.getMonth(), 1)); RPT.to = rptIso(new Date(now.getFullYear(), now.getMonth() + 1, 0)); }
+  else if(p === 'lm'){ RPT.from = rptIso(new Date(now.getFullYear(), now.getMonth() - 1, 1)); RPT.to = rptIso(new Date(now.getFullYear(), now.getMonth(), 0)); }
+  else if(p === 'd30'){ const d = new Date(now); d.setDate(d.getDate() - 29); RPT.from = rptIso(d); RPT.to = rptIso(now); }
+  else if(p === 'fy'){ const y = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1; RPT.from = y + '-04-01'; RPT.to = (y + 1) + '-03-31'; }
+  render();
+}
+function rptReset(){
+  RPT = {src:'', dateField:'', from:'', to:'', loc:'', cols:null, fKey:'', fVal:'', search:'', sortKey:'', sortDir:'desc', groupKey:'', result:null};
+  render();
+}
+
+function rptCriteriaText(s, df){
+  const fields = rptFields(s.key);
+  const lab = k => (fields.find(f => f.key === k) || {}).label || k;
+  const parts = ['Module: ' + s.label];
+  if(df && (RPT.from || RPT.to)) parts.push(lab(df) + ': ' + (RPT.from ? fd(RPT.from) : 'beginning') + ' to ' + (RPT.to ? fd(RPT.to) : 'latest'));
+  else parts.push('Period: all records');
+  if(RPT.fKey && String(RPT.fVal || '').trim() !== '') parts.push(lab(RPT.fKey) + ' contains "' + String(RPT.fVal).trim() + '"');
+  if(String(RPT.search || '').trim()) parts.push('Search: "' + String(RPT.search).trim() + '"');
+  if(RPT.groupKey) parts.push('Grouped by ' + lab(RPT.groupKey));
+  return parts.join('   |   ');
+}
+
+/* ----- run ----- */
+async function runReport(){
+  const s = rptSource(RPT.src);
+  if(!s){ alert('Please choose a module to report on.'); return; }
+  if(!canSeeTab(s.tab)){ alert('You do not have access to the ' + s.label + ' module.'); return; }
+
+  const locs = RPT.loc === 'BOTH' ? LOCATIONS.slice() : [RPT.loc || currentLocation];
+  for(const loc of locs){
+    if(!DATA[loc] || !Array.isArray(DATA[loc][s.key])){
+      render(loadingScreen('Loading ' + loc + ' data...'));
+      await loadLocation(loc);
+    }
+  }
+
+  const fields = rptFields(s.key);
+  const cols = rptSelectedFields(s);
+  if(!cols.length){ alert('Select at least one column to include.'); return; }
+
+  const df = RPT.dateField || s.dateKey || '';
+  const from = RPT.from || '', to = RPT.to || '';
+  let recs = [];
+  locs.forEach(loc => {
+    const list = (DATA[loc] && DATA[loc][s.key]) || [];
+    list.forEach(r => recs.push({__loc: loc, r: r}));
+  });
+
+  if(df && (from || to)){
+    recs = recs.filter(x => {
+      const v = rptDateVal(x.r[df]);
+      if(!v) return false;
+      if(from && v < from) return false;
+      if(to && v > to) return false;
+      return true;
+    });
+  }
+  if(RPT.fKey && String(RPT.fVal || '').trim() !== ''){
+    const fv = String(RPT.fVal).trim().toLowerCase();
+    recs = recs.filter(x => String(x.r[RPT.fKey] == null ? '' : x.r[RPT.fKey]).toLowerCase().includes(fv));
+  }
+  const q = String(RPT.search || '').trim().toLowerCase();
+  if(q){
+    recs = recs.filter(x => cols.some(c => String(x.r[c.key] == null ? '' : x.r[c.key]).toLowerCase().includes(q)));
+  }
+
+  const sk = RPT.sortKey || df;
+  if(sk){
+    const dir = RPT.sortDir === 'asc' ? 1 : -1;
+    const isNum = ((fields.find(f => f.key === sk) || {}).type === 'number');
+    recs.sort((a, b) => {
+      let av = a.r[sk], bv = b.r[sk];
+      if(isNum) return (rptNum(av) - rptNum(bv)) * dir;
+      av = String(av == null ? '' : av); bv = String(bv == null ? '' : bv);
+      return av.localeCompare(bv) * dir;
+    });
+  }
+
+  const multiLoc = locs.length > 1;
+  const headers = (multiLoc ? ['Location'] : []).concat(cols.map(c => c.label));
+  const rowOf = x => (multiLoc ? [x.__loc] : []).concat(cols.map(c => x.r[c.key] == null ? '' : x.r[c.key]));
+  const off = multiLoc ? 1 : 0;
+  const numIdx = [];
+  cols.forEach((c, i) => { if(c.type === 'number') numIdx.push(i + off); });
+
+  let groups;
+  if(RPT.groupKey){
+    const map = new Map();
+    recs.forEach(x => {
+      const raw = x.r[RPT.groupKey];
+      const g = (raw == null || String(raw).trim() === '') ? '(blank)' : String(raw);
+      if(!map.has(g)) map.set(g, []);
+      map.get(g).push(x);
+    });
+    groups = Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]))
+      .map(e => ({name: e[0], rows: e[1].map(rowOf)}));
+  } else {
+    groups = [{name:'', rows: recs.map(rowOf)}];
+  }
+
+  RPT.result = {
+    srcKey: s.key, tab: s.tab, label: s.label,
+    headers: headers, groups: groups, numIdx: numIdx, multiLoc: multiLoc,
+    count: recs.length,
+    locLabel: multiLoc ? LOCATIONS.join(' + ') : locs[0],
+    criteria: rptCriteriaText(s, df),
+    generatedAt: new Date().toLocaleString('en-IN'),
+    by: session ? session.name : ''
+  };
+  render();
+}
+
+function rptAllRows(R){ return R.groups.reduce((a, g) => a.concat(g.rows), []); }
+function rptLabelIdx(R){
+  for(let i = 0; i < R.headers.length; i++){ if(!R.numIdx.includes(i)) return i; }
+  return 0;
+}
+
+/* ----- export ----- */
+function exportReport(){
+  const R = RPT.result;
+  if(!R){ alert('Run the report first.'); return; }
+  if(!canSeeTab(R.tab)){ alert('You do not have access to that module.'); return; }
+  const li = rptLabelIdx(R);
+  const rows = [];
+  R.groups.forEach(g => {
+    if(g.name){
+      const gh = new Array(R.headers.length).fill('');
+      gh[li] = g.name + '  (' + g.rows.length + ')';
+      rows.push(gh);
+    }
+    g.rows.forEach(r => rows.push(r.slice()));
+    if(g.name && R.numIdx.length){
+      const sub = new Array(R.headers.length).fill('');
+      sub[li] = 'Subtotal - ' + g.name;
+      R.numIdx.forEach(i => { sub[i] = Math.round(rptSum(g.rows, i) * 100) / 100; });
+      rows.push(sub);
+      rows.push(new Array(R.headers.length).fill(''));
+    }
+  });
+  if(R.numIdx.length){
+    const all = rptAllRows(R);
+    const tot = new Array(R.headers.length).fill('');
+    tot[li] = 'TOTAL (' + R.count + ' records)';
+    R.numIdx.forEach(i => { tot[i] = Math.round(rptSum(all, i) * 100) / 100; });
+    rows.push(tot);
+  }
+  exportToExcel(R.locLabel.replace(/ \+ /g, '_') + '_' + R.label, R.headers, rows);
+  logAudit('DATA CHANGE', 'Report exported: ' + R.label + ' (' + R.count + ' records)');
+}
+
+/* ----- print ----- */
+function reportSheetHtml(R){
+  const li = rptLabelIdx(R);
+  const isNum = i => R.numIdx.includes(i);
+  const cell = (v, i) => '<td' + (isNum(i) ? ' class="rpt-num"' : '') + '>' + esc(v == null ? '' : v) + '</td>';
+  const logo = currentLocation === 'EVISSAT'
+    ? '<img src="' + QUOTE_LOGO_ET + '" alt="Evissat">'
+    : '<img src="' + LOGO_DATA_URI + '" alt="Somtek">';
+  let body = '';
+  R.groups.forEach(g => {
+    if(g.name){
+      body += '<tr class="rpt-grouprow"><td colspan="' + R.headers.length + '">' + esc(g.name) + ' &mdash; ' + g.rows.length + ' record(s)</td></tr>';
+    }
+    if(!g.rows.length){
+      body += '<tr><td colspan="' + R.headers.length + '" style="text-align:center;color:#777;">No records</td></tr>';
+    }
+    g.rows.forEach(r => { body += '<tr>' + r.map((v, i) => cell(v, i)).join('') + '</tr>'; });
+    if(g.name && R.numIdx.length){
+      let sub = '';
+      for(let i = 0; i < R.headers.length; i++){
+        if(isNum(i)) sub += '<td class="rpt-num">' + rptMoney(rptSum(g.rows, i)) + '</td>';
+        else sub += '<td>' + (i === li ? 'Subtotal' : '') + '</td>';
+      }
+      body += '<tr class="rpt-subtotal">' + sub + '</tr>';
+    }
+  });
+  let totRow = '';
+  if(R.numIdx.length){
+    const all = rptAllRows(R);
+    for(let i = 0; i < R.headers.length; i++){
+      if(isNum(i)) totRow += '<td class="rpt-num">' + rptMoney(rptSum(all, i)) + '</td>';
+      else totRow += '<td>' + (i === li ? 'TOTAL (' + R.count + ' records)' : '') + '</td>';
+    }
+    totRow = '<tr class="rpt-total">' + totRow + '</tr>';
+  }
+  return `
+  <div class="quote-sheet rpt-sheet">
+    <div class="rpt-head">
+      <div>${logo}</div>
+      <div style="text-align:right;">
+        <h2>${esc(R.label)}</h2>
+        <div class="rpt-sub">${esc(R.locLabel)} &nbsp;&bull;&nbsp; ${esc(R.count)} record(s)</div>
+        <div class="rpt-sub">Generated ${esc(R.generatedAt)} by ${esc(R.by)}</div>
+      </div>
+    </div>
+    <div class="rpt-crit">${esc(R.criteria)}</div>
+    <table>
+      <thead><tr>${R.headers.map((h, i) => '<th' + (isNum(i) ? ' style="text-align:right;"' : '') + '>' + esc(h) + '</th>').join('')}</tr></thead>
+      <tbody>${body}${totRow}</tbody>
+    </table>
+    <div class="rpt-foot">
+      <span>${esc(APP_VERSION_LABEL)}</span>
+      <span>This is a system-generated report.</span>
+    </div>
+  </div>`;
+}
+function printReport(){
+  const R = RPT.result;
+  if(!R){ alert('Run the report first.'); return; }
+  if(!canSeeTab(R.tab)){ alert('You do not have access to that module.'); return; }
+  closeQuotePreview();
+  const overlay = document.createElement('div');
+  overlay.id = 'quote-preview';
+  overlay.innerHTML = `
+    <div class="quote-actions">
+      <button type="button" class="btn" onclick="doPrintReport()">&#128424; Print / Save as PDF</button>
+      <button type="button" class="btn quote-close-btn" onclick="closeQuotePreview()">&#10005; Close</button>
+    </div>
+    ${reportSheetHtml(R)}`;
+  document.body.appendChild(overlay);
+  const st = document.createElement('style');
+  st.id = 'quote-page-style';
+  st.textContent = '@page{ size: A4 landscape; margin: 8mm; }';
+  document.head.appendChild(st);
+  document.body.classList.add('quote-open');
+}
+function doPrintReport(){
+  const R = RPT.result;
+  const oldTitle = document.title;
+  document.title = (R ? (R.locLabel + ' - ' + R.label) : 'Report').replace(/[\\\/:*?"<>|]/g, '-');
+  const restore = () => { document.title = oldTitle; window.removeEventListener('afterprint', restore); };
+  window.addEventListener('afterprint', restore);
+  window.print();
+  setTimeout(restore, 3000);
+}
+
+/* ----- on-screen result ----- */
+function reportResultHtml(R){
+  const li = rptLabelIdx(R);
+  const isNum = i => R.numIdx.includes(i);
+  if(!R.count){
+    return `<div class="panel"><div class="panel-head"><h3>Result</h3></div>
+      <div class="panel-body"><div class="rpt-empty">No records match this criteria. Widen the date range or clear the filters.</div></div></div>`;
+  }
+  let shown = 0, truncated = false, body = '';
+  R.groups.forEach(g => {
+    if(g.name) body += `<tr class="rpt-grouprow"><td colspan="${R.headers.length}">${esc(g.name)} &mdash; ${g.rows.length} record(s)</td></tr>`;
+    g.rows.forEach(r => {
+      if(shown >= RPT_SCREEN_LIMIT){ truncated = true; return; }
+      shown++;
+      body += '<tr>' + r.map((v, i) => `<td${isNum(i) ? ' class="rpt-num"' : ''}>${esc(v == null ? '' : v)}</td>`).join('') + '</tr>';
+    });
+    if(g.name && R.numIdx.length){
+      let sub = '';
+      for(let i = 0; i < R.headers.length; i++){
+        sub += isNum(i) ? `<td class="rpt-num">${rptMoney(rptSum(g.rows, i))}</td>` : `<td>${i === li ? 'Subtotal' : ''}</td>`;
+      }
+      body += `<tr class="rpt-subtotal">${sub}</tr>`;
+    }
+  });
+  let tot = '';
+  if(R.numIdx.length){
+    const all = rptAllRows(R);
+    for(let i = 0; i < R.headers.length; i++){
+      tot += isNum(i) ? `<td class="rpt-num">${rptMoney(rptSum(all, i))}</td>` : `<td>${i === li ? 'TOTAL (' + R.count + ' records)' : ''}</td>`;
+    }
+    tot = `<tr class="rpt-total">${tot}</tr>`;
+  }
+  return `
+  <div class="panel">
+    <div class="panel-head"><h3>Result &mdash; ${esc(R.label)}</h3>
+      <div class="panel-head-actions">
+        <button type="button" class="export-btn" onclick="exportReport()">&#8681; Export Excel</button>
+        <button type="button" class="export-btn" onclick="printReport()" style="background:var(--accent-2);">&#128424; Print / PDF</button>
+      </div>
+    </div>
+    <div class="panel-body">
+      <div class="rpt-meta">
+        <span>Records: <b>${esc(R.count)}</b></span>
+        <span>Location: <b>${esc(R.locLabel)}</b></span>
+        <span>Generated: <b>${esc(R.generatedAt)}</b></span>
+        <span>By: <b>${esc(R.by)}</b></span>
+      </div>
+      <div style="font-size:11.5px;color:var(--muted);margin-bottom:12px;">${esc(R.criteria)}</div>
+      ${truncated ? `<div style="font-size:11.5px;color:var(--accent);margin-bottom:10px;">Showing the first ${RPT_SCREEN_LIMIT} rows on screen. Export or print to get all ${R.count}.</div>` : ''}
+      <table>
+        <thead><tr>${R.headers.map((h, i) => `<th${isNum(i) ? ' style="text-align:right;"' : ''}>${esc(h)}</th>`).join('')}</tr></thead>
+        <tbody>${body}${tot}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+function renderReports(){
+  const srcs = rptAllowedSources();
+  const head = tabHeader(currentLocation, 'Reports') + secHead('&#128203;', 'Report Builder');
+  if(!srcs.length){
+    return `${head}
+    <div class="panel"><div class="panel-body">
+      <div class="rpt-empty">Your account does not have access to any module that can be reported on.<br>
+      Ask an administrator to grant you module access from the Users tab.</div>
+    </div></div>`;
+  }
+  const s = rptSource(RPT.src);
+  const fields = s ? rptFields(s.key) : [];
+  const selKeys = s ? rptSelectedFields(s).map(f => f.key) : [];
+  const dateFields = s ? rptDateFields(s.key, s.dateKey) : [];
+  const opt = (v, lbl, cur) => `<option value="${esc(v)}"${String(cur) === String(v) ? ' selected' : ''}>${esc(lbl)}</option>`;
+
+  return `${head}
+  <div class="panel">
+    <div class="panel-head"><h3>Criteria</h3>
+      <div class="panel-head-actions"><button type="button" class="icon-btn" onclick="rptReset()">&#8635; Reset</button></div>
+    </div>
+    <div class="panel-body">
+      <div class="form-grid">
+        <div class="field"><label>Module / report</label>
+          <select onchange="rptSetSrc(this.value)">
+            ${opt('', '-- Select a module --', RPT.src)}
+            ${srcs.map(x => opt(x.key, x.label, RPT.src)).join('')}
+          </select>
+        </div>
+        <div class="field"><label>Location</label>
+          <select onchange="rptSet('loc', this.value)">
+            ${opt('', 'Current (' + currentLocation + ')', RPT.loc)}
+            ${LOCATIONS.map(l => opt(l, l, RPT.loc)).join('')}
+            ${opt('BOTH', 'Both companies', RPT.loc)}
+          </select>
+        </div>
+        <div class="field"><label>Date field</label>
+          <select onchange="rptSet('dateField', this.value)" ${s ? '' : 'disabled'}>
+            ${opt('', s ? '(no date filter)' : '--', RPT.dateField)}
+            ${dateFields.map(f => opt(f.key, f.label, RPT.dateField)).join('')}
+          </select>
+        </div>
+        <div class="field"><label>From date</label><input type="date" value="${esc(RPT.from)}" onchange="rptSet('from', this.value)" ${s ? '' : 'disabled'}></div>
+        <div class="field"><label>To date</label><input type="date" value="${esc(RPT.to)}" onchange="rptSet('to', this.value)" ${s ? '' : 'disabled'}></div>
+      </div>
+      <div class="rpt-presets" style="margin-top:12px;">
+        <button type="button" class="rpt-preset" onclick="rptPreset('tm')">This month</button>
+        <button type="button" class="rpt-preset" onclick="rptPreset('lm')">Last month</button>
+        <button type="button" class="rpt-preset" onclick="rptPreset('d30')">Last 30 days</button>
+        <button type="button" class="rpt-preset" onclick="rptPreset('fy')">This financial year</button>
+        <button type="button" class="rpt-preset" onclick="rptPreset('all')">All time</button>
+      </div>
+      ${!s ? '' : `
+      <div class="form-grid" style="margin-top:16px;">
+        <div class="field"><label>Filter field</label>
+          <select onchange="rptSet('fKey', this.value)">
+            ${opt('', '(none)', RPT.fKey)}
+            ${fields.map(f => opt(f.key, f.label, RPT.fKey)).join('')}
+          </select>
+        </div>
+        <div class="field"><label>Filter value (contains)</label><input type="text" value="${esc(RPT.fVal)}" placeholder="e.g. Executed" onchange="rptSet('fVal', this.value)"></div>
+        <div class="field"><label>Search all columns</label><input type="text" value="${esc(RPT.search)}" placeholder="Any text" onchange="rptSet('search', this.value)"></div>
+        <div class="field"><label>Group by</label>
+          <select onchange="rptSet('groupKey', this.value)">
+            ${opt('', '(no grouping)', RPT.groupKey)}
+            ${fields.map(f => opt(f.key, f.label, RPT.groupKey)).join('')}
+          </select>
+        </div>
+        <div class="field"><label>Sort by</label>
+          <select onchange="rptSet('sortKey', this.value)">
+            ${opt('', '(default)', RPT.sortKey)}
+            ${fields.map(f => opt(f.key, f.label, RPT.sortKey)).join('')}
+          </select>
+        </div>
+        <div class="field"><label>Order</label>
+          <select onchange="rptSet('sortDir', this.value)">
+            ${opt('desc', 'Newest / highest first', RPT.sortDir)}
+            ${opt('asc', 'Oldest / lowest first', RPT.sortDir)}
+          </select>
+        </div>
+      </div>
+      <div style="margin-top:18px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
+          <label style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--muted);font-family:'Oswald',sans-serif;">Columns to include (${selKeys.length}/${fields.length})</label>
+          <span style="display:flex;gap:6px;">
+            <button type="button" class="rpt-preset" onclick="rptAllCols(true)">Select all</button>
+            <button type="button" class="rpt-preset" onclick="rptAllCols(false)">Clear all</button>
+          </span>
+        </div>
+        <div class="rpt-cols">
+          ${fields.map((f, i) => `<label class="rpt-col"><input type="checkbox" ${selKeys.includes(f.key) ? 'checked' : ''} onchange="rptToggleColIdx(${i}, this.checked)"> ${esc(f.label)}</label>`).join('')}
+        </div>
+      </div>`}
+      <div class="rpt-actions">
+        <button type="button" class="btn" onclick="runReport()">&#9654; Run Report</button>
+        ${RPT.result ? `<button type="button" class="export-btn" onclick="exportReport()">&#8681; Export Excel</button>
+        <button type="button" class="export-btn" onclick="printReport()" style="background:var(--accent-2);">&#128424; Print / PDF</button>` : ''}
+        <span style="font-size:11.5px;color:var(--muted);">You can only report on modules your account has access to.</span>
+      </div>
+    </div>
+  </div>
+  ${RPT.result ? reportResultHtml(RPT.result) : ''}`;
 }
 
 /* ---------------- EDIT RECORD MODAL (available to all users) ---------------- */
