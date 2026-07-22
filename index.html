@@ -654,10 +654,10 @@ const DEFAULT_USERS = [
 ];
 
 function emptyLocationData(){
-  return { inventory:[], po:[], vendorPO:[], customerPO:[], poContractDocs:[], inward:[], outward:[], logistics:[], futureShipments:[], invoice:[], sales:[], employees:[], attendance:[], leaves:[], salaries:[], automation:[], pendingAssembly:[], enquiry:[], purchaseAccounts:[], salesAccounts:[], quotations:[], quoteCompany:null };
+  return { inventory:[], po:[], vendorPO:[], customerPO:[], poContractDocs:[], inward:[], outward:[], logistics:[], futureShipments:[], invoice:[], sales:[], employees:[], attendance:[], leaves:[], salaries:[], automation:[], pendingAssembly:[], enquiry:[], purchaseAccounts:[], salesAccounts:[], proformaInvoices:[], quotations:[], quoteCompany:null };
 }
 function ensureShape(d){
-  const keys = ['inventory','po','vendorPO','customerPO','poContractDocs','inward','outward','logistics','futureShipments','invoice','sales','employees','attendance','leaves','salaries','automation','pendingAssembly','enquiry','purchaseAccounts','salesAccounts','quotations'];
+  const keys = ['inventory','po','vendorPO','customerPO','poContractDocs','inward','outward','logistics','futureShipments','invoice','sales','employees','attendance','leaves','salaries','automation','pendingAssembly','enquiry','purchaseAccounts','salesAccounts','proformaInvoices','quotations'];
   keys.forEach(k=>{ if(!Array.isArray(d[k])) d[k] = []; });
   return d;
 }
@@ -1641,7 +1641,7 @@ const AUDIT_TABLE_LABELS = {
   poContractDocs:'PO Contract Docs', inward:'Inward', outward:'Outward', logistics:'Logistics',
   futureShipments:'Future Shipments', invoice:'Invoice', sales:'Sales', employees:'HR Employees', attendance:'HR Attendance', leaves:'HR Leave', salaries:'HR Salary', automation:'Automation',
   pendingAssembly:'Pending Assembly', enquiry:'Enquiry', purchaseAccounts:'Purchase Accounts',
-  salesAccounts:'Sales Accounts', quotations:'Quotations'
+  salesAccounts:'Sales Accounts', proformaInvoices:'Proforma Invoices', quotations:'Quotations'
 };
 
 async function loadAudit(){
@@ -2363,7 +2363,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.51';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.52';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -6818,8 +6818,9 @@ function renderAccounts(){
 
   const purchaseSorted = applyTableTools('purchaseAccounts', d.purchaseAccounts.slice().sort((a,b)=>(a.date||'').localeCompare(b.date||'')));
   const purchaseShown = limitRows('purchaseAccounts', purchaseSorted);
-  const salesSorted = applyTableTools('salesAccounts', d.salesAccounts.slice().sort((a,b)=>(a.date||'').localeCompare(b.date||'')));
+  const salesSorted = applySalesBalanceFilter(applyTableTools('salesAccounts', d.salesAccounts.slice().sort((a,b)=>(a.date||'').localeCompare(b.date||''))));
   const salesShown = limitRows('salesAccounts', salesSorted);
+  const salesOutstandingTotal = salesSorted.reduce((a,r)=>a+(parseFloat(salesBalance(r))||0), 0);
 
   const purchaseSection = `
   <div class="subsection-title">Purchase</div>
@@ -6935,26 +6936,29 @@ function renderAccounts(){
     queueGroups[key].total += parseFloat(rowTotal(p.qty,p.unitPrice)||p.totalValue||0) || 0;
   });
   const salesQueueList = Object.values(queueGroups).sort((a,b)=> String(b.poDate||'').localeCompare(String(a.poDate||'')));
+  SALES_QUEUE_LIST = salesQueueList;
   const salesQueueCount = salesQueueList.length;
   const salesQueuePanel = `
   ${secHead('&#128257;', 'Queue')}
   <div class="panel"><div class="panel-head"><h3>Sales Queue &mdash; Customer P.O awaiting invoice${salesQueueCount?` <span style="color:var(--success);">(${salesQueueCount})</span>`:''}</h3></div>
   <div class="panel-body">
   ${salesQueueCount===0 ? '<div style="opacity:.6; padding:6px 2px;">Queue is empty. New Customer P.O entries from the Purchase tab appear here automatically.</div>' : `
-  <table><thead><tr><th>P.O No</th><th>P.O Date</th><th>Customer</th><th>Items</th><th>Total Value</th><th>Assigned To</th><th></th></tr></thead><tbody>
-  ${salesQueueList.map(q=>{
+  <table><thead><tr><th>P.O No</th><th>P.O Date</th><th>Customer</th><th>Items</th><th>Qty</th><th>Unit Price</th><th>Total Value</th><th>Assigned To</th><th></th></tr></thead><tbody>
+  ${salesQueueList.map((q, qi)=>{
     const st = sq[q.key] || {};
     const itemsTxt = q.items.map(p=>esc(p.item||'')).filter(Boolean).join(', ');
     return `<tr>
       <td style="font-family:'IBM Plex Mono',monospace; white-space:normal; word-break:break-word; max-width:180px;">${esc(q.poNumber||'-')}</td>
       <td>${fd(q.poDate)}</td>
       <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(q.customer)}</td>
-      <td style="max-width:360px; min-width:220px; white-space:normal; word-break:break-word;">${queueItemsCell(q.key, itemsTxt)}</td>
-      <td style="font-family:'IBM Plex Mono',monospace;">${q.total ? q.total.toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}) : '-'}</td>
+      <td style="max-width:340px; min-width:200px; white-space:normal; word-break:break-word;">${queueItemsCell(qi, itemsTxt)}</td>
+      <td style="font-family:'IBM Plex Mono',monospace; text-align:right;">${esc(queueQtyText(q))}</td>
+      <td style="font-family:'IBM Plex Mono',monospace; text-align:right;">${esc(queueUnitPriceText(q))}</td>
+      <td style="font-family:'IBM Plex Mono',monospace; text-align:right;">${q.total ? q.total.toLocaleString('en-IN',{minimumFractionDigits:2, maximumFractionDigits:2}) : '-'}</td>
       <td>${st.pickedBy ? `<span style="font-weight:600; color:var(--success);">${esc(st.pickedBy)}</span>` : '<span style="opacity:.5;">-</span>'}</td>
       <td style="white-space:nowrap;">${st.pickedBy
-        ? `<button class="icon-btn" style="color:var(--success); font-weight:600;" onclick="saFillFromQueue('${q.key}')">&#128221; Create Sales Entry</button>`
-        : `<button class="icon-btn" style="color:var(--success); font-weight:600;" onclick="pickSalesQueue('${q.key}')">&#9995; Pick</button>`}</td>
+        ? `<button class="icon-btn" style="color:var(--success); font-weight:600;" onclick="saFillFromQueueIdx(${qi})">&#128221; Create Sales Entry</button>`
+        : `<button class="icon-btn" style="color:var(--success); font-weight:600;" onclick="pickSalesQueueIdx(${qi})">&#9995; Pick</button>`}</td>
     </tr>`;
   }).join('')}
   </tbody></table>`}
@@ -7018,6 +7022,7 @@ function renderAccounts(){
   <div class="panel"><div class="panel-head"><h3>Sales register &mdash; ${locationLabel(currentLocation, 14)} <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(sorted by date)</span></h3><div class="panel-head-actions">${importBtn('salesAccounts')}${exportBtn('exportSalesAccounts')}</div></div>
   <div class="panel-body table-scroll">
   ${tableToolbar('salesAccounts', d.salesAccounts)}
+  ${salesBalanceFilterBar(salesSorted.length, salesOutstandingTotal)}
   <table><thead><tr>
     <th>Invoice No</th><th>Date</th><th>Name of the Customer</th><th>Bill To</th><th>GST No.</th>
     <th>DC No.</th><th>DC Date</th><th>PO No</th><th>PO Date</th><th>Place of Supply</th><th>State Code</th><th>Contact Person &amp; Phone</th>
@@ -7093,11 +7098,344 @@ function renderAccounts(){
   <div class="acct-switch">
     <button type="button" class="acct-switch-btn ${accountsSection==='purchase'?'active':''}" onclick="switchAccountsSection('purchase')">&#128176; Purchase</button>
     <button type="button" class="acct-switch-btn ${accountsSection==='sales'?'active':''}" onclick="switchAccountsSection('sales')">&#128179; Sales${salesQueueCount?` <span style="background:var(--success); color:#fff; border-radius:9px; padding:1px 7px; font-size:11px;">${salesQueueCount}</span>`:''}</button>
+    <button type="button" class="acct-switch-btn ${accountsSection==='proforma'?'active':''}" onclick="switchAccountsSection('proforma')">&#129534; Proforma Invoice</button>
     <button type="button" class="acct-switch-btn ${accountsSection==='summary'?'active':''}" onclick="switchAccountsSection('summary')">&#128197; Monthly Summary</button>
   </div>
 
-  ${accountsSection==='purchase' ? purchaseSection : accountsSection==='summary' ? monthlySummarySection(d) : salesSection}`;
+  ${accountsSection==='purchase' ? purchaseSection : accountsSection==='summary' ? monthlySummarySection(d) : accountsSection==='proforma' ? proformaSection(d) : salesSection}`;
 }
+/* =====================  PROFORMA INVOICE  =====================
+   A proforma is issued before the sale (for advance payment / customer
+   approval), so it is kept in its own list and never touches the statutory
+   sales register. It reuses the Tax Invoice layout with a PROFORMA INVOICE
+   title, and can be converted into a real sales entry in one click. */
+function pfItemLineHtml(it){
+  it = it || {};
+  return `<div class="out-line pf-item-line" style="flex-wrap:wrap;">
+    <input type="text" class="pf-line-desc" placeholder="Description of goods" value="${esc(it.description||'')}" style="flex:3 1 240px; min-width:200px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:'IBM Plex Sans',sans-serif; font-size:13px; border-radius:4px;">
+    <input type="text" class="pf-line-hsn" placeholder="HSN/SAC" value="${esc(it.hsnSac||'')}" style="flex:1 1 90px; min-width:80px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:'IBM Plex Mono',monospace; font-size:12.5px; border-radius:4px;">
+    <input type="number" class="out-line-qty pf-line-qty" step="any" min="0" placeholder="Qty" value="${esc(it.qty||'')}" oninput="pfRecalc()">
+    <select class="pf-line-uom" style="background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 8px; font-family:'IBM Plex Sans',sans-serif; font-size:12.5px; border-radius:4px;">${SA_UOMS.map(u=>`<option value="${u}" ${it.uom===u?'selected':''}>${u}</option>`).join('')}</select>
+    <input type="number" class="pf-line-rate" step="0.01" min="0" placeholder="Rate" value="${esc(it.rate||'')}" oninput="pfRecalc()" style="flex:0 1 110px; min-width:90px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:'IBM Plex Mono',monospace; font-size:12.5px; border-radius:4px;">
+    <input type="number" class="pf-line-amount" step="0.01" placeholder="Amount" readonly tabindex="-1" style="flex:0 1 120px; min-width:100px; background:var(--bg); border:1px solid var(--border); color:var(--muted); padding:9px 10px; font-family:'IBM Plex Mono',monospace; font-size:12.5px; border-radius:4px;">
+    <button type="button" class="icon-btn out-line-remove" onclick="removePfItemLine(this)" title="Remove this item">&#10005;</button>
+  </div>`;
+}
+function addPfItemLine(){
+  const wrap = document.getElementById('pf-item-lines');
+  if(wrap){ wrap.insertAdjacentHTML('beforeend', pfItemLineHtml()); pfRecalc(); }
+}
+function removePfItemLine(btn){
+  const wrap = document.getElementById('pf-item-lines');
+  const line = btn.closest('.pf-item-line');
+  if(wrap && line && wrap.querySelectorAll('.pf-item-line').length > 1){ line.remove(); pfRecalc(); }
+}
+function readPfItemLines(){
+  return [...document.querySelectorAll('#pf-item-lines .pf-item-line')].map(line=>{
+    const q = parseFloat(line.querySelector('.pf-line-qty').value)||0;
+    const rt = parseFloat(line.querySelector('.pf-line-rate').value)||0;
+    return {
+      description: line.querySelector('.pf-line-desc').value.trim(),
+      hsnSac: line.querySelector('.pf-line-hsn').value.trim(),
+      qty: line.querySelector('.pf-line-qty').value.trim(),
+      uom: line.querySelector('.pf-line-uom').value,
+      rate: line.querySelector('.pf-line-rate').value.trim(),
+      amount: (q && rt) ? String(Math.round(q*rt*100)/100) : ''
+    };
+  }).filter(it=>it.description || it.qty || it.rate);
+}
+function pfRecalc(){
+  const r2 = n => Math.round(n*100)/100;
+  let taxable = 0;
+  document.querySelectorAll('#pf-item-lines .pf-item-line').forEach(line=>{
+    const qty = parseFloat((line.querySelector('.pf-line-qty')||{}).value)||0;
+    const rate = parseFloat((line.querySelector('.pf-line-rate')||{}).value)||0;
+    const amt = r2(qty*rate);
+    const amtEl = line.querySelector('.pf-line-amount');
+    if(amtEl) amtEl.value = amt ? amt.toFixed(2) : '';
+    taxable += amt;
+  });
+  taxable = r2(taxable);
+  const gv = id => { const el = document.getElementById(id); return el ? (parseFloat(el.value)||0) : 0; };
+  const freight = gv('pf-freight');
+  const gstBase = r2(taxable + freight);
+  [['pf-cgstpct','pf-cgst'],['pf-sgstpct','pf-sgst'],['pf-igstpct','pf-igst']].forEach(pair=>{
+    const pEl = document.getElementById(pair[0]);
+    const aEl = document.getElementById(pair[1]);
+    if(!pEl || !aEl) return;
+    const p = parseFloat(pEl.value)||0;
+    aEl.value = (p && gstBase) ? r2(gstBase*p/100).toFixed(2) : '';
+  });
+  const total = r2(taxable + freight + gv('pf-cgst') + gv('pf-sgst') + gv('pf-igst') + gv('pf-roundoff'));
+  const taxEl = document.getElementById('pf-taxable');
+  if(taxEl) taxEl.value = taxable ? taxable.toFixed(2) : '';
+  const totEl = document.getElementById('pf-invval');
+  if(totEl) totEl.value = total ? total.toFixed(2) : '';
+}
+function nextProformaNumber(d){
+  const n = (d.proformaInvoices||[]).length + 1;
+  return (currentLocation==='SOMTEK' ? 'SE/PI/' : 'ET/PI/') + String(n).padStart(3,'0');
+}
+function proformaSection(d){
+  const list = applyTableTools('proformaInvoices', (d.proformaInvoices||[]).slice().reverse());
+  const rows = limitRows('proformaInvoices', list);
+  const ci = saCompanyInfo();
+  return `
+  <div class="subsection-title">Proforma Invoice</div>
+  ${secHead('&#10133;', 'New Proforma')}
+  <div class="panel"><div class="panel-head"><h3>New proforma invoice &mdash; ${esc(ci.name)}</h3></div>
+  <div class="panel-body">
+  <form onsubmit="return addProformaInvoice(event)">
+    <div class="form-grid">
+      <div class="field"><label>Proforma No <span style="color:var(--danger);">*</span></label><input type="text" id="pf-invno" value="${esc(nextProformaNumber(d))}" required></div>
+      <div class="field"><label>Date <span style="color:var(--danger);">*</span></label><input type="date" id="pf-date" value="${today()}" required></div>
+      <div class="field"><label>Valid Until</label><input type="date" id="pf-validity"></div>
+      <div class="field"><label>Name of the Customer <span style="color:var(--danger);">*</span></label>
+        <input type="text" id="pf-customer" list="pf-customer-list" placeholder="Customer name" required oninput="saCustomerAutofillInto(this.value, 'pf')">
+        <datalist id="pf-customer-list">${saCustomerOptions()}</datalist>
+      </div>
+      <div class="field"><label>GST No.</label><input type="text" id="pf-gstin" placeholder="Customer GSTIN"></div>
+      <div class="field"><label>PO No</label><input type="text" id="pf-pono" placeholder="Optional"></div>
+      <div class="field"><label>PO Date</label><input type="date" id="pf-podate"></div>
+      <div class="field"><label>Place of Supply</label><input type="text" id="pf-pos" placeholder="Optional"></div>
+      <div class="field"><label>State Code</label><input type="text" id="pf-statecode" placeholder="Optional"></div>
+      <div class="field"><label>Contact Person</label><input type="text" id="pf-contact" placeholder="Optional"></div>
+      <div class="field"><label>Mobile Number</label><input type="text" id="pf-mobile" placeholder="Optional"></div>
+    </div>
+    <div class="form-grid" style="margin-top:14px;">
+      <div class="field" style="grid-column:1/-1;"><label>Bill To (Name &amp; Address)</label><textarea id="pf-billto" rows="2" placeholder="Customer billing address"></textarea></div>
+      <div class="field" style="grid-column:1/-1;"><label>Ship To Address</label><textarea id="pf-shipto" rows="2" placeholder="Optional"></textarea></div>
+    </div>
+    <div class="out-lines-head">Description of Goods</div>
+    <div id="pf-item-lines">${pfItemLineHtml()}</div>
+    <div style="margin:10px 0 14px 0;"><button type="button" class="btn btn-ghost" onclick="addPfItemLine()">+ Add another item</button></div>
+    <div class="form-grid">
+      <div class="field"><label>Taxable Value <span style="color:var(--muted); font-weight:400;">(auto)</span></label><input type="number" step="0.01" id="pf-taxable" placeholder="Auto" readonly tabindex="-1"></div>
+      <div class="field"><label>Freight Charges</label><input type="number" step="0.01" min="0" id="pf-freight" placeholder="Optional" oninput="pfRecalc()"></div>
+      <div class="field"><label>CGST %</label><select id="pf-cgstpct" onchange="pfRecalc()"><option value="">-</option>${SA_GST_PCTS.map(p=>`<option value="${p}">${p}%</option>`).join('')}</select></div>
+      <div class="field"><label>CGST <span style="color:var(--muted); font-weight:400;">(auto)</span></label><input type="number" step="0.01" id="pf-cgst" placeholder="Auto" readonly tabindex="-1"></div>
+      <div class="field"><label>SGST %</label><select id="pf-sgstpct" onchange="pfRecalc()"><option value="">-</option>${SA_GST_PCTS.map(p=>`<option value="${p}">${p}%</option>`).join('')}</select></div>
+      <div class="field"><label>SGST <span style="color:var(--muted); font-weight:400;">(auto)</span></label><input type="number" step="0.01" id="pf-sgst" placeholder="Auto" readonly tabindex="-1"></div>
+      <div class="field"><label>IGST %</label><select id="pf-igstpct" onchange="pfRecalc()"><option value="">-</option>${SA_GST_PCTS.map(p=>`<option value="${p}">${p}%</option>`).join('')}</select></div>
+      <div class="field"><label>IGST <span style="color:var(--muted); font-weight:400;">(auto)</span></label><input type="number" step="0.01" id="pf-igst" placeholder="Auto" readonly tabindex="-1"></div>
+      <div class="field"><label>Round Off</label><input type="number" step="0.01" id="pf-roundoff" placeholder="Optional" oninput="pfRecalc()"></div>
+      <div class="field"><label>Total Value <span style="color:var(--muted); font-weight:400;">(auto)</span></label><input type="number" step="0.01" id="pf-invval" placeholder="Auto" readonly tabindex="-1"></div>
+      <div class="field"><label>Terms of Delivery &amp; Payment</label><input type="text" id="pf-terms" placeholder="e.g. 50% advance, balance before dispatch"></div>
+      <div class="field"><label>Delivery Period</label><input type="text" id="pf-delivery" placeholder="e.g. 3-4 weeks"></div>
+      <div class="field"><label>Mode Of Transport</label><input type="text" id="pf-transport" placeholder="Optional"></div>
+      <div class="field"><label>Vehicle No</label><input type="text" id="pf-vehicle" placeholder="Optional"></div>
+      <div class="field"><label>Date of Removal</label><input type="date" id="pf-removaldate"></div>
+      <div class="field"><label>Time of Removal</label><input type="text" id="pf-removaltime" placeholder="Optional"></div>
+      <div class="field"><label>Tax Payable on Reverse Charge</label><select id="pf-reverse"><option value="">-</option><option value="No">No</option><option value="Yes">Yes</option></select></div>
+      <div class="field"><label>Electronic Reference No. &amp; Date</label><input type="text" id="pf-eref" placeholder="Optional"></div>
+      <div class="field" style="grid-column:1/-1;"><label>Notes / Remarks</label><input type="text" id="pf-notes" placeholder="Optional"></div>
+    </div>
+    <div style="margin-top:16px;"><button type="submit" class="btn">Save Proforma Invoice</button></div>
+  </form>
+  <p style="margin:10px 0 0 0; font-size:11.5px; color:var(--muted);">A proforma invoice is not a tax invoice &mdash; it is a priced offer sent before the sale. Amount is auto-calculated per item (Qty &times; Rate); GST applies to Taxable Value + Freight. Use <b>Convert to Sales</b> in the register below once the customer confirms, and the details carry over into a real sales entry.</p>
+  </div></div>
+
+  ${secHead('&#128203;', 'Records')}
+  <div class="panel"><div class="panel-head"><h3>Proforma register &mdash; ${locationLabel(currentLocation, 14)}</h3><div class="panel-head-actions">${exportBtn('exportProformaInvoices')}</div></div>
+  <div class="panel-body">
+  ${tableToolbar('proformaInvoices', d.proformaInvoices||[])}
+  <table><thead><tr>
+    <th>Proforma No</th><th>Date</th><th>Valid Until</th><th>Customer</th><th>GST No.</th><th>PO No</th>
+    <th>Description of Goods</th><th>Qty</th><th>Taxable Value</th><th>Total Value</th><th>Status</th><th>Added By</th><th></th>
+  </tr></thead><tbody>
+  ${rows.length===0 ? noMatchRow(13, (d.proformaInvoices||[]).length) :
+    rows.map(r=>{
+      const its = saItems(r);
+      const desc = its.map(it=>it.description).filter(Boolean).join('; ');
+      const totQty = its.reduce((a,it)=>a+(parseFloat(it.qty)||0),0);
+      return `<tr>
+      <td style="font-family:'IBM Plex Mono',monospace;">${esc(r.invNo)}</td>
+      <td>${fd(r.date)}</td>
+      <td>${fd(r.validity)}</td>
+      <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.customer)}</td>
+      <td>${esc(r.gstin)}</td>
+      <td>${esc(r.poNo)}</td>
+      <td style="max-width:260px; min-width:180px; white-space:normal;" title="${esc(desc)}"><div class="cell-clamp">${esc(desc)}</div></td>
+      <td>${totQty||''}</td>
+      <td style="font-family:'IBM Plex Mono',monospace;">${esc(r.taxable)}</td>
+      <td style="font-family:'IBM Plex Mono',monospace;"><b>${esc(r.invoiceValue)}</b></td>
+      <td>${r.convertedInvNo
+            ? `<span style="color:var(--success); font-weight:700;">Converted</span><div style="font-size:10px; color:var(--muted);">${esc(r.convertedInvNo)}</div>`
+            : '<span style="color:var(--muted);">Open</span>'}</td>
+      ${addedByCell(r)}
+      <td>${actionCell(
+          `<button class="icon-btn" onclick="openProformaPreview('${r.id}')">View / Print</button> `
+          + (r.convertedInvNo ? '' : `<button class="icon-btn" style="color:var(--success); font-weight:600;" onclick="convertProformaToSales('${r.id}')">&#8594; Convert to Sales</button> `)
+          + editBtn('proformaInvoices', r.id),
+          deleteBtn(`deleteProformaInvoice('${r.id}')`))}</td>
+    </tr>`;}).join('')}
+  </tbody></table>
+  ${showMoreBar('proformaInvoices', list.length)}
+  </div></div>`;
+}
+/* Fills customer details into either the sales (sa) or proforma (pf) form. */
+function saCustomerAutofillInto(name, prefix){
+  const d = DATA[currentLocation];
+  const key = String(name||'').trim().toLowerCase();
+  if(!key) return;
+  const match = (d.salesAccounts||[]).slice().reverse().find(r=>String(r.customer||'').trim().toLowerCase()===key);
+  if(!match) return;
+  const set = (id, v) => { const el = document.getElementById(id); if(el && !el.value) el.value = v||''; };
+  set(prefix+'-billto', match.billTo);
+  set(prefix+'-gstin', match.gstin);
+  set(prefix+'-pos', match.placeOfSupply);
+  set(prefix+'-statecode', match.stateCode);
+  set(prefix+'-contact', match.contactPerson);
+  set(prefix+'-mobile', match.contactMobile);
+  set(prefix+'-shipto', match.shipTo);
+}
+async function addProformaInvoice(e){
+  e.preventDefault();
+  if(!canSeeTab('accounts')) return false;
+  const d = DATA[currentLocation];
+  if(!Array.isArray(d.proformaInvoices)) d.proformaInvoices = [];
+  const gv = id => { const el = document.getElementById(id); return el ? (el.value||'').trim() : ''; };
+  pfRecalc();
+  const items = readPfItemLines();
+  const missing = [];
+  if(!gv('pf-invno')) missing.push('Proforma No');
+  if(!gv('pf-date')) missing.push('Date');
+  if(!gv('pf-customer')) missing.push('Name of the Customer');
+  if(!items.length || !items.some(it=>(it.description||'').trim())) missing.push('at least one item with a description');
+  if(missing.length){
+    alert('Please fill the required fields before saving:\n\n\u2022 ' + missing.join('\n\u2022 '));
+    return false;
+  }
+  const first = items[0] || {};
+  d.proformaInvoices.push({
+    id: uid(),
+    invNo: gv('pf-invno'),
+    date: gv('pf-date'),
+    validity: gv('pf-validity'),
+    customer: gv('pf-customer'),
+    billTo: gv('pf-billto'),
+    shipTo: gv('pf-shipto'),
+    gstin: gv('pf-gstin'),
+    poNo: gv('pf-pono'),
+    poDate: gv('pf-podate'),
+    placeOfSupply: gv('pf-pos'),
+    stateCode: gv('pf-statecode'),
+    contactPerson: gv('pf-contact'),
+    contactMobile: gv('pf-mobile'),
+    items: items,
+    description: items.map(it=>it.description).filter(Boolean).join('; '),
+    hsnSac: [...new Set(items.map(it=>it.hsnSac).filter(Boolean))].join(', '),
+    qty: String(items.reduce((a,it)=>a+(parseFloat(it.qty)||0),0) || ''),
+    uom: first.uom || '',
+    rate: first.rate || '',
+    taxable: gv('pf-taxable'),
+    freight: gv('pf-freight'),
+    cgstPct: gv('pf-cgstpct'), cgst: gv('pf-cgst'),
+    sgstPct: gv('pf-sgstpct'), sgst: gv('pf-sgst'),
+    igstPct: gv('pf-igstpct'), igst: gv('pf-igst'),
+    roundOff: gv('pf-roundoff'),
+    invoiceValue: gv('pf-invval'),
+    valueInWords: gv('pf-invval') ? numberToWordsINR(gv('pf-invval')) : '',
+    termsOfDelivery: gv('pf-terms'),
+    deliveryPeriod: gv('pf-delivery'),
+    modeOfTransport: gv('pf-transport'),
+    vehicleNo: gv('pf-vehicle'),
+    dateOfRemoval: gv('pf-removaldate'),
+    timeOfRemoval: gv('pf-removaltime'),
+    reverseCharge: gv('pf-reverse'),
+    eRefNo: gv('pf-eref'),
+    notes: gv('pf-notes'),
+    bankDetails: defaultBankDetails(currentLocation),
+    addedBy: actorName()
+  });
+  await saveLocation(currentLocation);
+  render();
+  return false;
+}
+async function deleteProformaInvoice(id){
+  if(!isAdmin()) return;
+  if(!confirm('Delete this proforma invoice?')) return;
+  const d = DATA[currentLocation];
+  d.proformaInvoices = (d.proformaInvoices||[]).filter(x=>x.id!==id);
+  await saveLocation(currentLocation);
+  render();
+}
+let previewProformaId = null;
+function openProformaPreview(id){
+  const d = DATA[currentLocation];
+  const r = (d.proformaInvoices||[]).find(x=>x.id===id);
+  if(!r) return;
+  closeQuotePreview();
+  previewProformaId = id;
+  const overlay = document.createElement('div');
+  overlay.id = 'quote-preview';
+  overlay.innerHTML = `
+    <div class="quote-actions">
+      <button type="button" class="btn" onclick="printProforma()">&#128424; Print / Save as PDF</button>
+      <button type="button" class="btn quote-close-btn" onclick="closeQuotePreview()">&#10005; Close</button>
+    </div>
+    ${invoiceDocumentHtml(r, null, 'PROFORMA INVOICE')}`;
+  document.body.appendChild(overlay);
+  const pageStyle = document.createElement('style');
+  pageStyle.id = 'quote-page-style';
+  pageStyle.textContent = '@page{ size: A4 portrait; margin: 10mm; }';
+  document.head.appendChild(pageStyle);
+  document.body.classList.add('quote-open');
+}
+function printProforma(){
+  const d = DATA[currentLocation];
+  const r = previewProformaId ? (d.proformaInvoices||[]).find(x=>x.id===previewProformaId) : null;
+  const oldTitle = document.title;
+  document.title = r ? ('Proforma Invoice - ' + (r.invNo||'')) : 'Proforma Invoice';
+  const restore = () => { document.title = oldTitle; window.removeEventListener('afterprint', restore); };
+  window.addEventListener('afterprint', restore);
+  window.print();
+  setTimeout(restore, 3000);
+}
+/* Carries a confirmed proforma into the Sales entry form so it can be raised as
+   a real tax invoice. The proforma stays on record, marked Converted. */
+function convertProformaToSales(id){
+  const d = DATA[currentLocation];
+  const r = (d.proformaInvoices||[]).find(x=>x.id===id);
+  if(!r) return;
+  accountsSection = 'sales';
+  render();
+  setTimeout(()=>{
+    const set = (elId, v) => { const el = document.getElementById(elId); if(el) el.value = v||''; };
+    set('sa-customer', r.customer);
+    set('sa-billto', r.billTo);
+    set('sa-shipto', r.shipTo);
+    set('sa-gstin', r.gstin);
+    set('sa-pono', r.poNo);
+    set('sa-podate', r.poDate);
+    set('sa-pos', r.placeOfSupply);
+    set('sa-statecode', r.stateCode);
+    set('sa-contact', r.contactPerson);
+    set('sa-mobile', r.contactMobile);
+    set('sa-freight', r.freight);
+    set('sa-cgstpct', r.cgstPct);
+    set('sa-sgstpct', r.sgstPct);
+    set('sa-igstpct', r.igstPct);
+    set('sa-roundoff', r.roundOff);
+    const wrap = document.getElementById('sa-item-lines');
+    if(wrap){
+      const its = saItems(r);
+      if(its.length) wrap.innerHTML = its.map(it=>saItemLineHtml(it)).join('');
+    }
+    if(typeof saRecalc==='function') saRecalc();
+    PROFORMA_CONVERT_ID = id;
+    const anchor = document.getElementById('sa-invno');
+    if(anchor) anchor.scrollIntoView({behavior:'smooth', block:'center'});
+  }, 60);
+}
+let PROFORMA_CONVERT_ID = null;
+function exportProformaInvoices(){
+  const d = DATA[currentLocation];
+  const headers = ['Proforma No','Date','Valid Until','Customer','Bill To','GST No.','PO No','PO Date','Place of Supply','State Code','Contact Person','Mobile','Description of Goods','HSN/SAC','Qty','Taxable Value','Freight','CGST %','CGST','SGST %','SGST','IGST %','IGST','Round Off','Total Value','Terms','Delivery Period','Notes','Status','Added By'];
+  const rows = (d.proformaInvoices||[]).map(r=>[r.invNo, r.date, r.validity, r.customer, r.billTo, r.gstin, r.poNo, r.poDate, r.placeOfSupply, r.stateCode, r.contactPerson, r.contactMobile, (r.description || saItems(r).map(it=>it.description).filter(Boolean).join('; ')), r.hsnSac, r.qty, r.taxable, r.freight, r.cgstPct, r.cgst, r.sgstPct, r.sgst, r.igstPct, r.igst, r.roundOff, r.invoiceValue, r.termsOfDelivery, r.deliveryPeriod, r.notes, (r.convertedInvNo ? 'Converted ('+r.convertedInvNo+')' : 'Open'), r.addedBy]);
+  exportToExcel(currentLocation+'_Proforma_Invoices', headers, rows);
+}
+
 /* Live GST math for the purchase entry form. GST is applied on Basic Value + Freight. */
 function paCompute(vals){
   const r2 = n => Math.round(n*100)/100;
@@ -7349,6 +7687,40 @@ function salesDueInfo(r){
   return {dueDate: dueStr, overdue: overdue};
 }
 /* Balance Outstanding = Total Invoice Value - Amount Received (always live-computed) */
+/* ---- Balance-outstanding filter for the Sales register ----
+   Balance is derived (Invoice Value - Amount Received), not a stored column, so
+   it needs its own filter rather than the generic column filter. */
+let SALES_BAL_FILTER = 'all';
+function setSalesBalFilter(v){ SALES_BAL_FILTER = v; getTableUI('salesAccounts').limit = TABLE_PAGE_SIZE; render(); }
+function applySalesBalanceFilter(rows){
+  const f = SALES_BAL_FILTER;
+  if(f === 'all') return rows;
+  return rows.filter(r=>{
+    const bal = parseFloat(salesBalance(r)) || 0;
+    if(f === 'outstanding') return bal > 0;
+    if(f === 'cleared')     return bal <= 0;
+    if(f === 'overdue')     return bal > 0 && salesDueInfo(r).overdue;
+    return true;
+  });
+}
+function salesBalanceFilterBar(count, outstandingTotal){
+  const opts = [
+    ['all','All invoices'],
+    ['outstanding','Balance outstanding'],
+    ['cleared','Fully received'],
+    ['overdue','Overdue only']
+  ];
+  const money = outstandingTotal.toLocaleString('en-IN',{minimumFractionDigits:2, maximumFractionDigits:2});
+  return `<div class="table-tools" style="margin-top:-4px;">
+    <span style="font-size:11.5px; color:var(--muted); font-weight:600;">Balance:</span>
+    <select class="tt-select" onchange="setSalesBalFilter(this.value)" title="Filter by balance outstanding">
+      ${opts.map(o=>`<option value="${o[0]}" ${SALES_BAL_FILTER===o[0]?'selected':''}>${o[1]}</option>`).join('')}
+    </select>
+    <span style="font-size:11.5px; color:var(--muted);">${count} invoice${count===1?'':'s'} &middot; total outstanding
+      <b style="font-family:'IBM Plex Mono',monospace; color:${outstandingTotal>0?'#e6577a':'var(--success)'};">${money}</b></span>
+    ${SALES_BAL_FILTER!=='all' ? `<button type="button" class="tt-clear" onclick="setSalesBalFilter('all')">&#10005; Clear</button>` : ''}
+  </div>`;
+}
 function salesBalance(r){
   const inv = parseFloat(r.invoiceValue);
   if(isNaN(inv)) return r.balanceOutstanding || '';
@@ -7489,21 +7861,48 @@ function invoicePrefix(loc){ return loc==='SOMTEK' ? 'ST-INV-' : 'ET-INV-'; }
 function nextInvoiceNumber(d){
   return invoicePrefix(currentLocation) + String((d.salesAccounts||[]).length + 1).padStart(3,'0');
 }
-/* Sales-queue Items cell: short preview + Show more/less toggle.
-   Expanded keys are tracked in a plain set so the state survives re-render. */
+/* The sales queue currently on screen. Click handlers reference rows by a plain
+   integer index instead of the P.O key, because real P.O numbers contain spaces,
+   slashes, brackets and quotes which break an inline onclick attribute. */
+let SALES_QUEUE_LIST = [];
+function pickSalesQueueIdx(i){ const q = SALES_QUEUE_LIST[i]; if(q) pickSalesQueue(q.key); }
+function saFillFromQueueIdx(i){ const q = SALES_QUEUE_LIST[i]; if(q) saFillFromQueue(q.key); }
+
+/* Qty column: total quantity across the P.O's item rows (with UOM when they agree). */
+function queueQtyText(q){
+  const items = (q && q.items) || [];
+  let sum = 0, any = false;
+  items.forEach(p=>{ const v = parseFloat(p.qty); if(!isNaN(v)){ sum += v; any = true; } });
+  if(!any) return '-';
+  const uoms = [...new Set(items.map(p=>String(p.uom||'').trim()).filter(Boolean))];
+  const n = Math.round(sum*1000)/1000;
+  return uoms.length===1 ? (n+' '+uoms[0]) : String(n);
+}
+/* Unit Price column: the rate when it is unambiguous, otherwise a range. */
+function queueUnitPriceText(q){
+  const items = (q && q.items) || [];
+  const rates = items.map(p=>parseFloat(p.unitPrice)).filter(v=>!isNaN(v));
+  if(!rates.length) return '-';
+  const money = v => v.toLocaleString('en-IN',{minimumFractionDigits:2, maximumFractionDigits:2});
+  const uniq = [...new Set(rates)];
+  if(uniq.length===1) return money(uniq[0]);
+  return money(Math.min(...rates)) + ' - ' + money(Math.max(...rates));
+}
+
+/* Sales-queue Items cell: short preview + Show more/less toggle, keyed by row index. */
 const SQ_EXPANDED = new Set();
-function queueItemsCell(key, text){
+function queueItemsCell(idx, text){
   text = String(text||'');
   const LIMIT = 90;
   const safe = esc(text);
   if(text.length <= LIMIT) return safe || '-';
-  const expanded = SQ_EXPANDED.has(key);
+  const expanded = SQ_EXPANDED.has(idx);
   const shown = expanded ? safe : esc(text.slice(0, LIMIT).trim()) + '\u2026';
-  const link = `<a href="javascript:void(0)" onclick="toggleQueueItems('${key}')" style="color:var(--accent-2); font-weight:600; white-space:nowrap; margin-left:4px;">${expanded ? 'show less' : 'show more'}</a>`;
+  const link = `<a href="javascript:void(0)" onclick="toggleQueueItems(${idx})" style="color:var(--accent-2); font-weight:600; white-space:nowrap; margin-left:4px;">${expanded ? 'show less' : 'show more'}</a>`;
   return `<span>${shown}</span> ${link}`;
 }
-function toggleQueueItems(key){
-  if(SQ_EXPANDED.has(key)) SQ_EXPANDED.delete(key); else SQ_EXPANDED.add(key);
+function toggleQueueItems(idx){
+  if(SQ_EXPANDED.has(idx)) SQ_EXPANDED.delete(idx); else SQ_EXPANDED.add(idx);
   render();
 }
 let saQueueKey = null;
@@ -7636,6 +8035,11 @@ async function addSalesAccount(e){
     paymentStatus: gv('sa-paystatus') || 'Pending',
     addedBy: actorName()
   });
+  if(PROFORMA_CONVERT_ID){
+    const pf = (d.proformaInvoices||[]).find(x=>x && x.id===PROFORMA_CONVERT_ID);
+    if(pf){ pf.convertedInvNo = gv('sa-invno'); pf.convertedOn = today(); pf.convertedBy = actorName(); }
+    PROFORMA_CONVERT_ID = null;
+  }
   if(saQueueKey){
     const sq2 = sqState(d);
     sq2[saQueueKey] = { ...(sq2[saQueueKey]||{}), done:true, invNo: gv('sa-invno'), doneBy: actorName(), doneAt: today() };
@@ -7692,10 +8096,10 @@ function invoiceRtgsHtml(r){
 const SA_COMPANY_INFO = {
   SOMTEK: {
     name: 'SOMTEK EQUIPMENTS LLP',
-    gstin: '',
+    gstin: '36AEWFS7071K1Z3',
     mail: '', /* paste SOMTEK mail id here */
     phones: '', /* paste SOMTEK contact numbers here */
-    pan: '', /* paste SOMTEK PAN here */
+    pan: 'AEWFS7071K',
     address: 'Independent Shed, Phase-5, K.K Owners Society, Srinivasa Weigh Bridge, IDA Jeedimetla, Medchal Malkajgiri, Hyderabad, Telangana - 500055.',
     godown: 'Independent Shed, Phase-5, K.K Owners Society, Srinivasa Weigh Bridge, IDA Jeedimetla, Medchal Malkajgiri, Hyderabad, Telangana - 500055.',
     regOff: 'SOMTEK EQUIPMENTS LLP, OPP-Sai Siddhardha School, Plot No.165/A, 3rd Floor, Flat No.302, Balaji Towers, Mothinagar, Hyderabad, Medchal Malkajgiri, Telangana - 500114.'
@@ -8118,13 +8522,14 @@ function printAllInvoiceCopies(id){
   document.body.classList.add('quote-open');
 }
 
-function invoiceDocumentHtml(r, heading){
+function invoiceDocumentHtml(r, heading, docTitle){
   /* Mirrors the official printed Tax Invoice: MSME strip, logo + centred title,
      company block, Bill To / Place of Supply grid with copy-label + INVOICE/DC/PO
      boxes on the right, items table with GST rows, value in words, transport &
      certification block, and RTGS / signature strip at the bottom. */
   const ci = saCompanyInfo();
-  const copyLabel = (heading && heading !== 'TAX INVOICE') ? heading : 'ORIGINAL FOR RECIPIENT';
+  const isPf = (docTitle === 'PROFORMA INVOICE');
+  const copyLabel = isPf ? '' : (heading && heading !== 'TAX INVOICE') ? heading : 'ORIGINAL FOR RECIPIENT';
   /* Every copy keeps the same TAX INVOICE layout; only the copy label changes. */
   const fmt2 = n => { const v = parseFloat(n); return isNaN(v) ? '' : v.toLocaleString('en-IN',{minimumFractionDigits:2, maximumFractionDigits:2}); };
   const B = '1px solid #222';
@@ -8159,7 +8564,7 @@ function invoiceDocumentHtml(r, heading){
     <table style="border-collapse:collapse; width:100%; margin-top:-1px;">
       <tr>
         <td style="border:${B}; padding:6px 10px; width:26%; vertical-align:middle;"><img src="${quoteLogoUri(currentLocation)}" style="height:52px; width:auto;" alt=""></td>
-        <td style="border:${B}; text-align:center; vertical-align:middle; font-weight:800; font-size:17px; letter-spacing:0.12em;">TAX INVOICE<div style="font-size:9.5px; font-weight:800; letter-spacing:0.1em; margin-top:2px;">${esc(copyLabel)}</div></td>
+        <td style="border:${B}; text-align:center; vertical-align:middle; font-weight:800; font-size:17px; letter-spacing:0.12em;">${esc(docTitle || 'TAX INVOICE')}${copyLabel ? `<div style="font-size:9.5px; font-weight:800; letter-spacing:0.1em; margin-top:2px;">${esc(copyLabel)}</div>` : ''}</td>
       </tr>
     </table>
     <div style="border:${B}; border-top:none; padding:5px 10px; text-align:center;">
@@ -8170,6 +8575,30 @@ function invoiceDocumentHtml(r, heading){
       <div style="font-size:8.5px; font-weight:700; margin-top:1px;">All the correspondence should be made with Head Office only.</div>
     </div>
     <table style="border-collapse:collapse; width:100%; margin-top:-1px;">
+      ${isPf ? `
+      <tr>
+        <td rowspan="2" style="${cell} width:33%;">
+          <div style="font-size:9.5px; font-weight:700;">Bill To:</div>
+          <div style="font-weight:800; font-size:12px; margin-top:2px;">${esc(dash(r.customer))}</div>
+          ${(r.billTo && String(r.billTo).trim() && String(r.billTo).trim() !== String(r.customer||'').trim()) ? `<div style="font-weight:400; font-size:11px; line-height:1.5; margin-top:2px;">${esc(r.billTo)}</div>` : ''}
+          <div style="margin-top:14px;">Contact Person : ${esc(dash(saContactDisplay(r) || ''))}</div>
+          <div style="font-weight:800; margin-top:3px;">GSTIN No. ${esc(dash(r.gstin))}</div>
+        </td>
+        <td rowspan="2" style="${cell} width:31%;">
+          <div style="font-size:9.5px; font-weight:700;">Place of Supply:</div>
+          <div style="font-weight:800; font-size:11.5px; margin-top:2px; line-height:1.5;">${esc(dash(r.shipTo || r.customer || r.billTo))}</div>
+          <div style="margin-top:8px;"><b>STATE: ${esc(dash(gstStateName(r)))}</b></div>
+          <div><b>STATE CODE: ${esc(dash(r.stateCode))}</b></div>
+          <div style="margin-top:14px;">Contact Person : ${esc(dash(saContactDisplay(r) || ''))}</div>
+          <div style="font-weight:800; margin-top:3px;">GSTIN No. ${esc(dash(r.gstin))}</div>
+        </td>
+        <td style="${box} width:18%; font-weight:800;">P.F.INVOICE NO<div style="font-weight:400; margin-top:4px;">${esc(dash(r.invNo))}</div></td>
+        <td style="${box} width:18%; font-weight:800;">DATE<div style="font-weight:400; margin-top:4px;">${esc(dash(fd(r.date)))}</div></td>
+      </tr>
+      <tr>
+        <td style="${box} font-weight:800;">PO NO.<div style="font-weight:400; margin-top:4px;">${esc(dash(r.poNo))}</div></td>
+        <td style="${box} font-weight:800;">DATE<div style="font-weight:400; margin-top:4px;">${esc(dash(fd(r.poDate)))}</div></td>
+      </tr>` : `
       <tr>
         <td rowspan="3" style="${cell} width:33%;">
           <div style="font-size:9.5px; font-weight:700;">Bill To:</div>
@@ -8203,7 +8632,7 @@ function invoiceDocumentHtml(r, heading){
         </td>
         <td style="${box} font-weight:800;">PO NO<div style="font-weight:400; margin-top:4px;">${esc(dash(r.poNo))}</div></td>
         <td style="${box} font-weight:800;">DATE<div style="font-weight:400; margin-top:4px;">${esc(dash(fd(r.poDate)))}</div></td>
-      </tr>
+      </tr>`}
     </table>
     <table style="border-collapse:collapse; width:100%; margin-top:-1px;">
       <thead><tr>
@@ -8613,6 +9042,40 @@ const EDIT_SCHEMAS = {
     {key:'creditDays', label:'Credit Period (days)', type:'number'},
     {key:'paymentStatus', label:'Payment Status', type:'select', options:['Pending','Received']},
     {key:'remarks', label:'Remarks', type:'text'}
+  ],
+  proformaInvoices: [
+    {key:'invNo', label:'Proforma No', type:'text'},
+    {key:'date', label:'Date', type:'date'},
+    {key:'validity', label:'Valid Until', type:'date'},
+    {key:'customer', label:'Name of the Customer', type:'text'},
+    {key:'billTo', label:'Bill To (Name & Address)', type:'text'},
+    {key:'shipTo', label:'Ship To Address', type:'text'},
+    {key:'gstin', label:'GST No.', type:'text'},
+    {key:'poNo', label:'PO No', type:'text'},
+    {key:'poDate', label:'PO Date', type:'date'},
+    {key:'placeOfSupply', label:'Place of Supply', type:'text'},
+    {key:'stateCode', label:'State Code', type:'text'},
+    {key:'contactPerson', label:'Contact Person', type:'text'},
+    {key:'contactMobile', label:'Mobile Number', type:'text'},
+    {key:'taxable', label:'Taxable Value', type:'number'},
+    {key:'freight', label:'Freight Charges', type:'number'},
+    {key:'cgstPct', label:'CGST %', type:'select', options: SA_GST_PCTS.map(String)},
+    {key:'cgst', label:'CGST', type:'number'},
+    {key:'sgstPct', label:'SGST %', type:'select', options: SA_GST_PCTS.map(String)},
+    {key:'sgst', label:'SGST', type:'number'},
+    {key:'igstPct', label:'IGST %', type:'select', options: SA_GST_PCTS.map(String)},
+    {key:'igst', label:'IGST', type:'number'},
+    {key:'roundOff', label:'Round Off', type:'number'},
+    {key:'invoiceValue', label:'Total Value', type:'number'},
+    {key:'termsOfDelivery', label:'Terms of Delivery & Payment', type:'text'},
+    {key:'deliveryPeriod', label:'Delivery Period', type:'text'},
+    {key:'modeOfTransport', label:'Mode Of Transport', type:'text'},
+    {key:'vehicleNo', label:'Vehicle No', type:'text'},
+    {key:'dateOfRemoval', label:'Date of Removal', type:'date'},
+    {key:'timeOfRemoval', label:'Time of Removal', type:'text'},
+    {key:'reverseCharge', label:'Tax Payable on Reverse Charge (Yes/No)', type:'text'},
+    {key:'eRefNo', label:'Electronic Reference No. & Date', type:'text'},
+    {key:'notes', label:'Notes', type:'text'}
   ],
   salesAccounts: [
     {key:'followedUpOn', label:'Followed Up On (date)', type:'date'},
