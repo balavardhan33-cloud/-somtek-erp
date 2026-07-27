@@ -271,6 +271,90 @@ tbody tr:hover{background:rgba(31,68,145,0.04);}
 .kpi-purple{background:#f2eff9; border-left-color:#a48fdb;}
 .kpi-purple .val{color:#8168bd;}
 
+/* ---------- DASHBOARD MODULE ZONES (premium) ---------- */
+.dash-zone{margin-bottom:28px;}
+.dash-zone-head{display:flex; align-items:center; gap:11px; margin:0 0 14px;}
+.dash-zone-head .dz-ico{width:32px; height:32px; border-radius:9px; display:flex; align-items:center; justify-content:center; font-size:16px; line-height:1; flex-shrink:0;}
+.dash-zone-head .dz-title{font-family:'Oswald',sans-serif; text-transform:uppercase; letter-spacing:0.07em; font-size:14px; font-weight:600; color:var(--text); white-space:nowrap;}
+.dash-zone-head .dz-count{font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--muted); background:var(--panel-2); padding:2px 8px; border-radius:20px; flex-shrink:0;}
+.dash-zone-head .dz-line{flex:1; height:1px; background:var(--border);}
+.dash-cards{display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:14px;}
+.mcard{position:relative; background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:15px 16px 16px; box-shadow:0 1px 2px rgba(15,20,32,0.05), 0 4px 12px rgba(15,20,32,0.04); transition:transform .15s ease, box-shadow .15s ease, border-color .15s ease; overflow:hidden;}
+.mcard::before{content:''; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--mc-accent,var(--accent-2));}
+.mcard:hover{transform:translateY(-2px); box-shadow:0 6px 18px rgba(15,20,32,0.10), 0 2px 6px rgba(15,20,32,0.06); border-color:var(--mc-accent,var(--accent-2));}
+.mcard-top{display:flex; align-items:center; justify-content:space-between; gap:8px;}
+.mcard-ico{width:34px; height:34px; border-radius:9px; display:flex; align-items:center; justify-content:center; font-size:17px; line-height:1; background:var(--mc-tint,rgba(91,141,239,0.12)); flex-shrink:0;}
+.mcard-star{cursor:pointer; font-size:15px; line-height:1; opacity:0.25; user-select:none; transition:opacity .12s ease, color .12s ease; color:var(--muted);}
+.mcard-star:hover{opacity:0.75;}
+.mcard-star.faved{opacity:1; color:#e0a955;}
+.mcard-val{font-family:'Oswald',sans-serif; font-size:28px; font-weight:700; line-height:1.1; margin-top:14px; color:var(--text); word-break:break-word;}
+.mcard-lbl{font-size:10.5px; color:var(--muted); text-transform:uppercase; letter-spacing:0.05em; margin-top:5px; font-weight:600;}
+.dash-zone .chart-grid{margin-bottom:0;}
+@media (max-width:560px){
+  .dash-cards{grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:11px;}
+  .mcard-val{font-size:24px;}
+  .mcard-ico{width:30px; height:30px; font-size:15px;}
+}
+
+.wg-note{}
+/* ---------- WIDGET-GRID DASHBOARD ---------- */
+.wgrid{display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-bottom:24px;}
+.widget{background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:16px 18px; box-shadow:0 1px 2px rgba(15,20,32,0.05),0 4px 14px rgba(15,20,32,0.04); display:flex; flex-direction:column; min-height:158px; overflow:hidden;}
+.widget-head{display:flex; align-items:center; gap:8px; margin-bottom:12px;}
+.widget-ico{width:26px; height:26px; border-radius:7px; display:flex; align-items:center; justify-content:center; font-size:14px; line-height:1; background:var(--panel-2); flex-shrink:0;}
+.widget-title{font-family:'Oswald',sans-serif; text-transform:uppercase; letter-spacing:0.05em; font-size:12px; font-weight:600; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.widget-body{flex:1; display:flex; flex-direction:column; min-height:0;}
+.widget.kpi .kpi-num{font-family:'Oswald',sans-serif; font-size:33px; font-weight:700; line-height:1.05; color:var(--text); margin-top:auto; word-break:break-word;}
+.widget.kpi .kpi-sub{font-size:11.5px; color:var(--muted); margin-top:6px;}
+.widget.kpi .kpi-sub b{color:var(--success);}
+.widget.kpi .kpi-sub b.neg{color:var(--danger);}
+.widget.accent-green{border-top:3px solid #48bb78;}
+.widget.accent-blue{border-top:3px solid #5b8def;}
+.widget.accent-purple{border-top:3px solid #a48fdb;}
+.funnel-wrap{margin-top:2px;}
+.funnel-row{display:flex; align-items:center; gap:8px; margin-bottom:8px;}
+.funnel-lbl{width:70px; font-size:11px; color:var(--muted); flex-shrink:0; text-align:right;}
+.funnel-track{flex:1; background:var(--panel-2); border-radius:6px; overflow:hidden;}
+.funnel-bar{height:22px; border-radius:6px; color:#fff; font-size:11px; font-weight:700; display:flex; align-items:center; padding:0 8px; min-width:24px; box-sizing:border-box;}
+.mcal-grid{display:grid; grid-template-columns:repeat(7,1fr); gap:2px; margin-top:2px;}
+.mcal-wd{font-size:9px; text-align:center; color:var(--muted); font-weight:700; padding:1px 0;}
+.mcal-cell{position:relative; aspect-ratio:1; display:flex; align-items:center; justify-content:center; font-size:11px; color:var(--text); border-radius:6px;}
+.mcal-cell.empty{visibility:hidden;}
+.mcal-cell.today{background:var(--accent-2); color:#fff; font-weight:700;}
+.mcal-cell.marked{font-weight:700;}
+.mcal-dot{position:absolute; bottom:3px; left:50%; transform:translateX(-50%); width:4px; height:4px; border-radius:50%; background:#e0a955;}
+.mcal-cell.today .mcal-dot{background:#fff;}
+.mcal-foot{margin-top:8px; font-size:11px; color:var(--muted); text-align:center;}
+.mcal-foot b{color:var(--accent-2);}
+.wmini{display:flex; flex-direction:column; gap:0; margin-top:2px;}
+.wmini-row{display:flex; justify-content:space-between; align-items:baseline; padding:8px 0; border-bottom:1px dashed var(--border);}
+.wmini-row:last-child{border-bottom:none;}
+.wmini-lbl{font-size:11.5px; color:var(--muted);}
+.wmini-val{font-family:'Oswald',sans-serif; font-size:18px; font-weight:700; color:var(--text);}
+.wmini-val.warn{color:#e0a955;}
+.wmini-val.money{font-size:15px; color:var(--success);}
+.insight-item{display:flex; gap:9px; align-items:flex-start; font-size:12px; color:var(--text); padding:7px 0; border-bottom:1px dashed var(--border); line-height:1.35;}
+.insight-item:last-child{border-bottom:none;}
+.insight-ico{flex-shrink:0; font-size:13px; line-height:1.2;}
+.insight-item.bad{color:var(--danger);}
+.wlist{display:flex; flex-direction:column;}
+.wlist-item{display:flex; justify-content:space-between; gap:10px; align-items:center; padding:8px 0; border-bottom:1px solid var(--border); font-size:12px; cursor:pointer;}
+.wlist-item:last-child{border-bottom:none;}
+.wlist-item:hover{background:var(--panel-2);}
+.wlist-main{min-width:0; overflow:hidden; display:flex; align-items:center; gap:6px;}
+.wlist-dot{width:7px; height:7px; border-radius:50%; background:var(--accent-2); flex-shrink:0;}
+.wlist-txt{min-width:0; overflow:hidden;}
+.wlist-t{font-weight:600; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.wlist-s{font-size:10.5px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.wlist-r{flex-shrink:0; text-align:right; font-size:11px; color:var(--muted); white-space:nowrap;}
+.wlist-empty{font-size:12px; color:var(--muted); margin:auto 0; text-align:center; padding:16px 0;}
+.qa-grid{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:2px;}
+.qa-btn{display:flex; flex-direction:column; align-items:center; gap:5px; padding:12px 6px; background:var(--panel-2); border:1px solid var(--border); border-radius:10px; cursor:pointer; font-family:'Oswald',sans-serif; text-transform:uppercase; letter-spacing:0.03em; font-size:9.5px; color:var(--text); transition:border-color .12s ease, transform .12s ease;}
+.qa-btn:hover{border-color:var(--accent-2); transform:translateY(-1px);}
+.qa-btn .qa-ico{font-size:18px; line-height:1;}
+@media(max-width:900px){ .wgrid{grid-template-columns:repeat(2,1fr);} }
+@media(max-width:560px){ .wgrid{grid-template-columns:1fr;} .widget.kpi .kpi-num{font-size:30px;} }
+
 /* ---------- BI SECTION HEADER BARS ---------- */
 .bi-section-header{background:#152341; color:#fff; font-family:'Oswald',sans-serif; font-weight:700; letter-spacing:0.04em; font-size:14px; text-transform:uppercase; padding:11px 18px; margin:26px 0 14px;}
 .bi-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:16px; margin-bottom:8px;}
@@ -1463,7 +1547,7 @@ function reportSheetFor(section, loc, d){
 }
 
 async function generateReport(s, auto){
-  const locs = s.loc === 'Both' ? Object.keys(LOCATIONS) : [s.loc];
+  const locs = s.loc === 'Both' ? LOCATIONS.slice() : [s.loc];
   const sheets = [];
   for(const loc of locs){
     if(!DATA[loc] || !Object.keys(DATA[loc]||{}).length){ await loadLocation(loc); }
@@ -1526,7 +1610,7 @@ function reportSchedulesPanelHtml(){
     <div class="form-grid">
       <div class="field"><label>Report name</label><input type="text" id="rs-name" placeholder="e.g. Weekly Sales &amp; Outstanding"></div>
       <div class="field"><label>Frequency</label><select id="rs-freq"><option>Daily</option><option selected>Weekly</option><option>Monthly</option></select></div>
-      <div class="field"><label>Location</label><select id="rs-loc">${Object.keys(LOCATIONS).map(l=>`<option ${l===currentLocation?'selected':''}>${l}</option>`).join('')}<option>Both</option></select></div>
+      <div class="field"><label>Location</label><select id="rs-loc">${LOCATIONS.map(l=>`<option ${l===currentLocation?'selected':''}>${l}</option>`).join('')}<option>Both</option></select></div>
     </div>
     <div class="field" style="margin-top:10px;"><label>Sections to include</label>
       <div style="display:flex; flex-wrap:wrap; gap:10px 18px; margin-top:6px;">
@@ -1861,7 +1945,7 @@ async function loadHrShared(){
   }else if(fsGetLastStatus === 'missing'){
     /* First run: build the shared copy by merging both companies' HR data. */
     const merged = { employees:[], attendance:[], leaves:[], salaries:[], hrInfo:{shifts:'',holidays:'',leavePolicies:''} };
-    for(const loc of Object.keys(LOCATIONS)){
+    for(const loc of LOCATIONS){
       const d = DATA[loc] && Object.keys(DATA[loc]).length ? DATA[loc] : (await fsGet('loc_'+loc)) || {};
       ['employees','attendance','leaves','salaries'].forEach(k=>{
         (Array.isArray(d[k]) ? d[k] : []).forEach(r=>{ if(r && !merged[k].some(x=>x && r.id && x.id===r.id)) merged[k].push(r); });
@@ -2407,7 +2491,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.53';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.55';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -3945,213 +4029,204 @@ function paymentsDueSectionHtml(d, allowedTabs){
   </tbody></table>
   </div></div>`;
 }
+function dashOpenRecord(tab, table, id){
+  currentTab = tab;
+  render();
+  try{ openEditModal(table, id); }catch(e){}
+}
+
 function renderDashboard(){
   const d = DATA[currentLocation];
   const allowedTabs = sessionAllowedTabs();
-  const cards = [];
+  const can = t => allowedTabs.includes(t);
+  const inr = n => '&#8377;' + Math.round(Number(n)||0).toLocaleString('en-IN');
+  const now = new Date();
+  const pad2 = n => String(n).padStart(2,'0');
+  const ymNow = now.getFullYear() + '-' + pad2(now.getMonth()+1);
+  const todayStr = today();
 
-  if(allowedTabs.includes('inventory')){
-    const allInv = d.inventory || [];
-    const totalUnits = allInv.reduce((a,i)=>a+(Number(i.qty)||0),0);
-    const totalValue = allInv.reduce((a,i)=>a+(Number(i.qty)||0)*(Number(i.cost)||0),0);
-    const skuCount = allInv.length;
-    const deadStock = allInv.filter(i=>i.deadStock==='Yes' || (Number(i.qty)||0)===0).length;
-    cards.push({val:totalUnits.toLocaleString(), lbl:'Total Inventory', ico:'&#128230;'});
-    cards.push({val:totalValue.toLocaleString(undefined,{maximumFractionDigits:0}), lbl:'Inventory Value', ico:'&#128176;'});
-    cards.push({val:skuCount, lbl:"SKU's", ico:'&#127991;'});
-    cards.push({val:deadStock, lbl:'Dead Stock', ico:'&#128683;'});
-    const lowStock = allInv.filter(i=>isLowStock(i)).length;
-    if(lowStock) cards.push({val:lowStock, lbl:'Low Stock', ico:'&#9888;&#65039;'});
-  }
-  if(allowedTabs.includes('po')){
-    const pendingPO = d.vendorPO.length + d.customerPO.length;
-    cards.push({val:pendingPO, lbl:'Purchase orders', ico:'&#128196;'});
-  }
-  if(allowedTabs.includes('inward')){
-    const inwardUnits = d.inward.reduce((a,r)=>a+(Number(r.qty)||0),0);
-    cards.push({val:d.inward.length, lbl:'Inward entries', ico:'&#128229;'});
-    cards.push({val:inwardUnits.toLocaleString(), lbl:'Units received', ico:'&#128230;'});
-  }
-  if(allowedTabs.includes('outward')){
-    cards.push({val:d.outward.length, lbl:'Outward dispatches', ico:'&#128666;'});
-  }
-  if(allowedTabs.includes('logistics')){
-    const inTransit = d.logistics.filter(l=>l.status!=='Delivered').length;
-    const deliveredLogistics = d.logistics.filter(l=>l.status==='Delivered').length;
-    cards.push({val:inTransit, lbl:'Shipments in transit', ico:'&#128667;'});
-    cards.push({val:deliveredLogistics, lbl:'Shipments delivered', ico:'&#9989;'});
-  }
-  if(allowedTabs.includes('sales')){
-    cards.push({val:(d.sales||[]).length, lbl:'Sales entries', ico:'&#128200;'});
-  }
-  if(allowedTabs.includes('hr')){
-    cards.push({val:(d.employees||[]).filter(e=>(e.status||'Active')==='Active').length, lbl:'Active employees', ico:'&#128101;'});
-  }
-  if(allowedTabs.includes('automation')){
-    cards.push({val:d.automation.length, lbl:'Automation jobs', ico:'&#9881;'});
-  }
-  if(allowedTabs.includes('enquiry')){
-    const enq = d.enquiry || [];
-    const pendingResponse = enq.filter(e=>e.response!=='Yes').length;
-    const quotesPending = enq.filter(e=>e.quoting==='Yes' && e.submitted!=='Yes').length;
-    const highPriorityOpen = enq.filter(e=>e.priority==='H' && e.action!=='Accepted' && e.action!=='Rejected').length;
-    const acceptedCount = enq.filter(e=>e.action==='Accepted').length;
-    const actionPending = enq.filter(e=>!e.action || e.action==='Pending').length;
-    const today_ = today();
-    const overdue = enq.filter(e=>e.dueDate && e.dueDate < today_ && e.action!=='Accepted' && e.action!=='Rejected').length;
-    cards.push({val:enq.length, lbl:'Total enquiries', ico:'&#129489;&#8205;&#128187;'});
-    cards.push({val:pendingResponse, lbl:'Awaiting response', ico:'&#128232;'});
-    cards.push({val:quotesPending, lbl:'Quotes pending', ico:'&#128221;'});
-    cards.push({val:actionPending, lbl:'Action pending', ico:'&#9200;'});
-    cards.push({val:highPriorityOpen, lbl:'High priority open', ico:'&#128293;'});
-    cards.push({val:overdue, lbl:'Overdue enquiries', ico:'&#9888;'});
-    cards.push({val:acceptedCount, lbl:'Enquiries accepted', ico:'&#9989;'});
-  }
-  if(allowedTabs.includes('accounts')){
-    const pa = d.purchaseAccounts || [];
+  const widget = (cls, ico, title, body) =>
+    `<div class="widget ${cls}"><div class="widget-head"><div class="widget-ico">${ico}</div><div class="widget-title">${title}</div></div><div class="widget-body">${body}</div></div>`;
+
+  const tiles = [];   /* {show, html} in Bala's grid order */
+
+  /* ---- 1. Revenue ---- */
+  {
     const sa = d.salesAccounts || [];
-    const purchaseTotal = pa.reduce((a,r)=>a+(parseFloat(r.grossTotal)||0),0);
-    const purchaseOutstanding = pa.reduce((a,r)=>a+(parseFloat(r.balanceOutstanding)||0),0);
-    const salesTotal = sa.reduce((a,r)=>a+(parseFloat(r.invoiceValue)||0),0);
-    const paymentsPending = pa.filter(r=>(r.paymentStatus||'Pending')==='Pending').length + sa.filter(r=>(r.paymentStatus||'Pending')==='Pending').length;
-    cards.push({val:purchaseTotal.toLocaleString(undefined,{maximumFractionDigits:0}), lbl:'Total Purchase Value', ico:'&#128176;'});
-    cards.push({val:purchaseOutstanding.toLocaleString(undefined,{maximumFractionDigits:0}), lbl:'Purchase Outstanding', ico:'&#9888;'});
-    cards.push({val:salesTotal.toLocaleString(undefined,{maximumFractionDigits:0}), lbl:'Total Sales Value', ico:'&#128179;'});
-    cards.push({val:paymentsPending, lbl:'Payments Pending', ico:'&#8987;'});
+    const total = sa.reduce((a,r)=>a+(parseFloat(r.invoiceValue)||0),0);
+    const month = sa.filter(r=>(r.date||'').slice(0,7)===ymNow).reduce((a,r)=>a+(parseFloat(r.invoiceValue)||0),0);
+    tiles.push({show:can('accounts'), html: widget('kpi accent-green','&#128176;','Revenue',
+      `<div class="kpi-num">${inr(total)}</div><div class="kpi-sub"><b>${inr(month)}</b> this month</div>`)});
   }
-
-  let extraPanels = '';
-  if(allowedTabs.includes('inventory')){
-    extraPanels += `
-    ${paymentsDueSectionHtml(d, allowedTabs)}${activityFeedSectionHtml()}${secHead('&#128230;', 'Inventory Overview')}
-  <div class="panel"><div class="panel-head"><h3>Item register &mdash; ${locationLabel(currentLocation, 14)}</h3><div class="panel-head-actions">${exportBtn('exportDashboardInventory')}</div></div>
-    <div class="panel-body">
-    <table><thead><tr><th>Item</th><th>Qty</th><th>Specifications</th><th>Cost</th></tr></thead><tbody>
-    ${d.inventory.length===0 ? `<tr class="empty-row"><td colspan="4">No stock recorded yet.</td></tr>` :
-      d.inventory.slice(0,8).map(i=>`<tr><td>${esc(i.name)}</td><td>${esc(i.qty)}</td><td>${esc(i.specs)}</td><td>${esc(i.cost)}</td></tr>`).join('')}
-    </tbody></table>
-    </div></div>`;
+  /* ---- 2. Profit (approx: Sales - Purchase) ---- */
+  {
+    const salesTotal = (d.salesAccounts||[]).reduce((a,r)=>a+(parseFloat(r.invoiceValue)||0),0);
+    const purchaseTotal = (d.purchaseAccounts||[]).reduce((a,r)=>a+(parseFloat(r.grossTotal)||0),0);
+    const profit = salesTotal - purchaseTotal;
+    const margin = salesTotal>0 ? Math.round(profit/salesTotal*100) : 0;
+    const neg = profit < 0;
+    tiles.push({show:can('accounts'), html: widget('kpi accent-blue','&#128200;','Profit',
+      `<div class="kpi-num" style="color:${neg?'var(--danger)':'var(--text)'};">${inr(profit)}</div><div class="kpi-sub"><b class="${neg?'neg':''}">${margin}% margin</b> &middot; Sales &minus; Purchase</div>`)});
   }
-  if(allowedTabs.includes('inward')){
-    const recentInward = d.inward.slice().reverse().slice(0,8);
-    extraPanels += `
-    ${secHead('&#128229;', 'Recent Activity')}
-  <div class="panel"><div class="panel-head"><h3>Recent inward &mdash; ${locationLabel(currentLocation, 14)}</h3><div class="panel-head-actions">${exportBtn('exportInward')}</div></div>
-    <div class="panel-body table-scroll">
-    <table><thead><tr><th>Date</th><th>Vendor</th><th>PO Number</th><th>Item</th><th>Item Type</th><th>Qty</th></tr></thead><tbody>
-    ${recentInward.length===0 ? `<tr class="empty-row"><td colspan="6">No inward entries yet.</td></tr>` :
-      recentInward.map(r=>`<tr><td>${fd(r.date)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.vendor)}</td><td>${esc(r.poNumber)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.item)}</td><td>${esc(r.itemType)}</td><td>${esc(r.qty)}</td></tr>`).join('')}
-    </tbody></table>
-    </div></div>`;
+  /* ---- 3. Orders ---- */
+  {
+    const cpo = d.customerPO || [];
+    const open = cpo.filter(r=>r.status!=='Executed').length;
+    tiles.push({show:can('po'), html: widget('kpi accent-purple','&#128196;','Orders',
+      `<div class="kpi-num">${cpo.length.toLocaleString('en-IN')}</div><div class="kpi-sub">${open} open &middot; ${cpo.length-open} executed</div>`)});
   }
-  if(allowedTabs.includes('enquiry')){
-    const PRIORITY_ORDER = {H:0, M:1, L:2, '':3};
-    const enq = (d.enquiry || []).slice().sort((a,b)=>{
-      const pa = PRIORITY_ORDER[a.priority||''] ?? 3;
-      const pb = PRIORITY_ORDER[b.priority||''] ?? 3;
-      if(pa !== pb) return pa - pb;
-      return (b.date||'').localeCompare(a.date||'');
-    }).slice(0,8);
-    extraPanels += `
-    ${secHead('&#128222;', 'Enquiries')}
-  <div class="panel"><div class="panel-head"><h3>Recent enquiries &mdash; ${locationLabel(currentLocation, 14)} <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(sorted by priority, high first &mdash; click a row for full details)</span></h3><div class="panel-head-actions">${exportBtn('exportEnquiry')}</div></div>
-    <div class="panel-body table-scroll">
-    <table><thead><tr><th>Date</th><th>E.Num</th><th>Customer</th><th>Region</th><th>Sales Person</th><th>Priority</th><th>Action</th></tr></thead><tbody>
-    ${enq.length===0 ? `<tr class="empty-row"><td colspan="7">No enquiries recorded yet.</td></tr>` :
-      enq.map(r=>`<tr class="clickable-row" onclick="viewEnquiryFromDashboard('${r.id}')"><td>${fd(r.date)}</td><td>${esc(r.enum)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.customer)}</td><td>${esc(r.region)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.salesPerson)}</td><td>${enquiryPriorityBadge(r.priority)}</td><td>${enquiryActionBadge(r.action)}</td></tr>`).join('')}
-    </tbody></table>
-    </div></div>`;
+  /* ---- 4. Monthly Sales ---- */
+  {
+    const months = [];
+    for(let k=5;k>=0;k--){ const dt=new Date(now.getFullYear(), now.getMonth()-k, 1); months.push({ym:dt.getFullYear()+'-'+pad2(dt.getMonth()+1), label:dt.toLocaleString('en-US',{month:'short'})}); }
+    const sums = {};
+    (d.salesAccounts||[]).forEach(r=>{ const ym=(r.date||'').slice(0,7); if(ym) sums[ym]=(sums[ym]||0)+(parseFloat(r.invoiceValue)||0); });
+    const data = months.map(m=>({label:m.label, value:Math.round(sums[m.ym]||0)}));
+    const anyData = data.some(x=>x.value>0);
+    tiles.push({show:can('accounts'), html: widget('','&#128202;','Monthly Sales',
+      anyData ? svgBarChart(data) : `<div class="wlist-empty">No sales invoices yet.</div>`)});
   }
-
-  let analyticsCharts = '';
-  if(allowedTabs.includes('po')){
-    const poData = [
-      {label:'Vendor PO', value:d.vendorPO.length, color:'var(--accent-2)'},
-      {label:'Customer PO', value:d.customerPO.length, color:'var(--accent)'}
-    ];
-    analyticsCharts += chartCard('Purchase Orders', svgBarChart(poData));
-  }
-  if(allowedTabs.includes('inward')){
-    const typeMap = {};
-    d.inward.forEach(r=>{
-      const t = (r.itemType||'').trim() || 'Unspecified';
-      typeMap[t] = (typeMap[t]||0) + (Number(r.qty)||0);
-    });
-    const inwardData = Object.entries(typeMap)
-      .sort((a,b)=>b[1]-a[1])
-      .slice(0,6)
-      .map(([label,value])=>({label, value}));
-    analyticsCharts += chartCard('Inward by Item Type', svgBarChart(inwardData));
-  }
-  if(allowedTabs.includes('logistics')){
-    const logisticsData = [
-      {label:'In Transit', value:d.logistics.filter(l=>l.status!=='Delivered').length, color:'#3d8bef'},
-      {label:'Delivered', value:d.logistics.filter(l=>l.status==='Delivered').length, color:'var(--success)'}
-    ];
-    analyticsCharts += chartCard('Shipment Status', svgBarChart(logisticsData));
-  }
-  if(allowedTabs.includes('automation')){
-    const automationData = [
-      {label:'Automation Jobs', value:d.automation.length, color:'var(--accent-2)'},
-      {label:'Pending Assembly', value:d.pendingAssembly.length, color:'#e0a955'}
-    ];
-    analyticsCharts += chartCard('Automation Workload', svgBarChart(automationData));
-  }
-  if(allowedTabs.includes('enquiry')){
+  /* ---- 5. Sales Funnel ---- */
+  {
     const enq = d.enquiry || [];
-    const priorityData = [
-      {label:'High', value:enq.filter(e=>e.priority==='H').length, color:'var(--danger)'},
-      {label:'Medium', value:enq.filter(e=>e.priority==='M').length, color:'#e0a955'},
-      {label:'Low', value:enq.filter(e=>e.priority==='L').length, color:'var(--accent-2)'}
+    const stages = [
+      {label:'Enquiries', value:enq.length, color:'#5b8def'},
+      {label:'Quoted', value:enq.filter(e=>e.quoting==='Yes').length, color:'#a48fdb'},
+      {label:'Submitted', value:enq.filter(e=>e.submitted==='Yes').length, color:'#e0a955'},
+      {label:'Accepted', value:enq.filter(e=>e.action==='Accepted').length, color:'#48bb78'}
     ];
-    analyticsCharts += chartCard('Enquiries by Priority', svgBarChart(priorityData));
-
-    const actionData = [
-      {label:'Accepted', value:enq.filter(e=>e.action==='Accepted').length, color:'var(--success)'},
-      {label:'Rejected', value:enq.filter(e=>e.action==='Rejected').length, color:'var(--danger)'},
-      {label:'Pending', value:enq.filter(e=>!e.action||e.action==='Pending').length, color:'#e0a955'}
-    ];
-    analyticsCharts += chartCard('Enquiries by Action Status', svgBarChart(actionData));
+    const fmax = Math.max(1, ...stages.map(x=>x.value));
+    const body = enq.length ? `<div class="funnel-wrap">${stages.map(x=>
+      `<div class="funnel-row"><div class="funnel-lbl">${x.label}</div><div class="funnel-track"><div class="funnel-bar" style="width:${Math.max(9, Math.round(x.value/fmax*100))}%; background:${x.color};">${x.value}</div></div></div>`).join('')}</div>`
+      : `<div class="wlist-empty">No enquiries yet.</div>`;
+    tiles.push({show:can('enquiry'), html: widget('','&#128293;','Sales Funnel', body)});
   }
-  if(allowedTabs.includes('accounts')){
-    const pa = d.purchaseAccounts || [];
-    const sa = d.salesAccounts || [];
-    const purchaseTotal = pa.reduce((a,r)=>a+(parseFloat(r.grossTotal)||0),0);
-    const salesTotal = sa.reduce((a,r)=>a+(parseFloat(r.invoiceValue)||0),0);
-    const accountsData = [
-      {label:'Purchase Value', value:purchaseTotal, color:'var(--accent)'},
-      {label:'Sales Value', value:salesTotal, color:'var(--success)'}
-    ];
-    analyticsCharts += chartCard('Purchase vs Sales', svgBarChart(accountsData));
-
-    const paymentStatusData = [
-      {label:'Purchase Pending', value:pa.filter(r=>(r.paymentStatus||'Pending')==='Pending').length, color:'#e0a955'},
-      {label:'Purchase Received', value:pa.filter(r=>r.paymentStatus==='Received').length, color:'var(--accent)'},
-      {label:'Sales Pending', value:sa.filter(r=>(r.paymentStatus||'Pending')==='Pending').length, color:'#e0a955'},
-      {label:'Sales Received', value:sa.filter(r=>r.paymentStatus==='Received').length, color:'var(--success)'}
-    ];
-    analyticsCharts += chartCard('Payment Status', svgBarChart(paymentStatusData));
+  /* ---- 6. Calendar ---- */
+  {
+    const cy=now.getFullYear(), cm=now.getMonth();
+    const firstDow=new Date(cy,cm,1).getDay();
+    const dim=new Date(cy,cm+1,0).getDate();
+    const todayD=now.getDate();
+    const marks={};
+    let upcoming=0;
+    (d.enquiry||[]).forEach(e=>{ if(e.dueDate && e.dueDate.slice(0,7)===ymNow && e.action!=='Accepted' && e.action!=='Rejected'){ marks[parseInt(e.dueDate.slice(8,10),10)]=true; if(e.dueDate>=todayStr) upcoming++; }});
+    (d.leads||[]).forEach(l=>{ if(l.followUp && l.followUp.slice(0,7)===ymNow && l.converted!=='Yes'){ marks[parseInt(l.followUp.slice(8,10),10)]=true; if(l.followUp>=todayStr) upcoming++; }});
+    let cal='<div class="mcal-grid">';
+    ['S','M','T','W','T','F','S'].forEach(w=> cal+=`<div class="mcal-wd">${w}</div>`);
+    for(let b=0;b<firstDow;b++) cal+='<div class="mcal-cell empty"></div>';
+    for(let day=1;day<=dim;day++){
+      const cls=(day===todayD?' today':'')+(marks[day]?' marked':'');
+      cal+=`<div class="mcal-cell${cls}">${day}${marks[day]?'<span class="mcal-dot"></span>':''}</div>`;
+    }
+    cal+='</div>';
+    cal+=`<div class="mcal-foot">${now.toLocaleString('en-US',{month:'long', year:'numeric'})} &middot; <b>${upcoming}</b> upcoming</div>`;
+    tiles.push({show:can('enquiry')||can('sales'), html: widget('','&#128197;','Calendar', cal)});
+  }
+  /* ---- 7. Inventory ---- */
+  {
+    const inv = d.inventory || [];
+    const units = inv.reduce((a,i)=>a+(Number(i.qty)||0),0);
+    const value = inv.reduce((a,i)=>a+(Number(i.qty)||0)*(Number(i.cost)||0),0);
+    const low = inv.filter(isLowStock).length;
+    const body = `<div class="wmini">
+      <div class="wmini-row"><span class="wmini-lbl">Total units</span><span class="wmini-val">${units.toLocaleString('en-IN')}</span></div>
+      <div class="wmini-row"><span class="wmini-lbl">Stock value</span><span class="wmini-val money">${inr(value)}</span></div>
+      <div class="wmini-row"><span class="wmini-lbl">SKUs</span><span class="wmini-val">${inv.length}</span></div>
+      <div class="wmini-row"><span class="wmini-lbl">Low stock</span><span class="wmini-val ${low?'warn':''}">${low}</span></div>
+    </div>`;
+    tiles.push({show:can('inventory'), html: widget('','&#128230;','Inventory', body)});
+  }
+  /* ---- 8. AI Insights (rule-based, computed from this location's data) ---- */
+  {
+    const ins=[];   /* prio: higher = more urgent, surfaces first within the 4-item cap */
+    if(can('enquiry')){
+      const enq=d.enquiry||[];
+      const overdue=enq.filter(e=>e.dueDate && e.dueDate<todayStr && e.action!=='Accepted' && e.action!=='Rejected').length;
+      if(overdue) ins.push({prio:100, bad:true, ico:'&#128293;', text:`${overdue} enquir${overdue>1?'ies':'y'} overdue`});
+    }
+    if(can('inventory')){
+      const low=(d.inventory||[]).filter(isLowStock).length;
+      if(low) ins.push({prio:90, ico:'&#9888;&#65039;', text:`${low} item${low>1?'s':''} low on stock`});
+      const dead=(d.inventory||[]).filter(i=>i.deadStock==='Yes'||(Number(i.qty)||0)===0).length;
+      if(dead) ins.push({prio:40, ico:'&#128683;', text:`${dead} dead-stock item${dead>1?'s':''}`});
+    }
+    if(can('accounts')){
+      const out=(d.purchaseAccounts||[]).reduce((a,r)=>a+(parseFloat(r.balanceOutstanding)||0),0);
+      if(out>0) ins.push({prio:80, ico:'&#128176;', text:`${inr(out)} purchase outstanding`});
+      const pend=(d.salesAccounts||[]).filter(r=>(r.paymentStatus||'Pending')==='Pending').length;
+      if(pend) ins.push({prio:70, ico:'&#8987;', text:`${pend} sales payment${pend>1?'s':''} pending`});
+      const byCust={};
+      (d.salesAccounts||[]).forEach(r=>{ const c=(r.customer||'').trim(); if(c) byCust[c]=(byCust[c]||0)+(parseFloat(r.invoiceValue)||0); });
+      const top=Object.entries(byCust).sort((a,b)=>b[1]-a[1])[0];
+      if(top) ins.push({prio:20, ico:'&#11088;', text:`Top customer: ${top[0]}`});
+    }
+    if(can('enquiry')){
+      const enq=d.enquiry||[];
+      const acc=enq.filter(e=>e.action==='Accepted').length;
+      if(enq.length) ins.push({prio:30, ico:'&#127919;', text:`Enquiry win rate ${Math.round(acc/enq.length*100)}%`});
+    }
+    if(!ins.length) ins.push({prio:0, ico:'&#9989;', text:'All clear \u2014 nothing needs attention.'});
+    ins.sort((a,b)=>b.prio-a.prio);
+    const body = ins.slice(0,4).map(x=>`<div class="insight-item${x.bad?' bad':''}"><span class="insight-ico">${x.ico}</span><span>${esc(x.text)}</span></div>`).join('');
+    tiles.push({show:true, html: widget('','&#129504;','AI Insights', body)});
+  }
+  /* ---- 9. Notifications ---- */
+  {
+    const list = (typeof activeNotifs==='function' ? activeNotifs() : []).slice(0,4);
+    const read = (typeof getReadNotifIds==='function' ? getReadNotifIds() : []);
+    const body = list.length ? `<div class="wlist">${list.map(n=>{
+      const unread = read.indexOf(n.id)===-1;
+      return `<div class="wlist-item" onclick="openNotifModal('${esc(n.id)}')"><div class="wlist-main">${unread?'<span class="wlist-dot"></span>':''}<div class="wlist-txt"><div class="wlist-t">${esc(n.title||'(no title)')}</div><div class="wlist-s">${esc((n.msg||'').split('\n')[0])}</div></div></div><div class="wlist-r">${esc(n.at?new Date(n.at).toLocaleDateString('en-IN'):'')}</div></div>`;
+    }).join('')}</div>` : `<div class="wlist-empty">No notifications.<br><span style="font-size:10px;">They clear after 24 hours.</span></div>`;
+    tiles.push({show:true, html: widget('','&#128276;','Notifications', body)});
+  }
+  /* ---- 10. Recent Orders ---- */
+  {
+    const orders = (d.customerPO||[]).slice().sort((a,b)=>(b.poDate||'').localeCompare(a.poDate||'')).slice(0,5);
+    const body = orders.length ? `<div class="wlist">${orders.map(r=>{
+      const val=(Number(r.qty)||0)*(Number(r.unitPrice)||0);
+      return `<div class="wlist-item" onclick="dashOpenRecord('po','customerPO','${esc(r.id)}')"><div class="wlist-main"><div class="wlist-txt"><div class="wlist-t">${esc(r.customer||'(no customer)')}</div><div class="wlist-s">${esc(r.poNumber||'')} &middot; ${fd(r.poDate)}</div></div></div><div class="wlist-r">${val>0?inr(val):poStatusBadge(r.status)}</div></div>`;
+    }).join('')}</div>` : `<div class="wlist-empty">No customer orders yet.</div>`;
+    tiles.push({show:can('po'), html: widget('','&#128230;','Recent Orders', body)});
+  }
+  /* ---- 11. Follow-ups ---- */
+  {
+    const fups=[];
+    (d.enquiry||[]).forEach(e=>{ if(e.dueDate && e.dueDate>=todayStr && e.action!=='Accepted' && e.action!=='Rejected') fups.push({date:e.dueDate, who:e.customer, kind:'Enquiry', tab:'enquiry', table:'enquiry', id:e.id}); });
+    (d.leads||[]).forEach(l=>{ if(l.followUp && l.followUp>=todayStr && l.converted!=='Yes') fups.push({date:l.followUp, who:l.customer, kind:'Lead', tab:'sales', table:'leads', id:l.id}); });
+    fups.sort((a,b)=>a.date.localeCompare(b.date));
+    const top=fups.slice(0,5);
+    const body = top.length ? `<div class="wlist">${top.map(f=>
+      `<div class="wlist-item" onclick="dashOpenRecord('${f.tab}','${f.table}','${esc(f.id)}')"><div class="wlist-main"><div class="wlist-txt"><div class="wlist-t">${esc(f.who||'(no name)')}</div><div class="wlist-s">${f.kind}</div></div></div><div class="wlist-r">${fd(f.date)}</div></div>`).join('')}</div>`
+      : `<div class="wlist-empty">No upcoming follow-ups.</div>`;
+    tiles.push({show:can('enquiry')||can('sales'), html: widget('','&#128467;','Follow-ups', body)});
+  }
+  /* ---- 12. Quick Actions ---- */
+  {
+    const defs=[
+      {tab:'enquiry', ico:'&#129489;&#8205;&#128187;', label:'Enquiries'},
+      {tab:'inward', ico:'&#128229;', label:'Inward'},
+      {tab:'quotation', ico:'&#128221;', label:'Quotation'},
+      {tab:'sales', ico:'&#128200;', label:'Sales'},
+      {tab:'po', ico:'&#128196;', label:'Purchase'},
+      {tab:'reports', ico:'&#128203;', label:'Reports'}
+    ].filter(x=>can(x.tab)).slice(0,6);
+    const body = defs.length ? `<div class="qa-grid">${defs.map(x=>
+      `<div class="qa-btn" onclick="switchTab('${x.tab}')"><span class="qa-ico">${x.ico}</span>${x.label}</div>`).join('')}</div>`
+      : `<div class="wlist-empty">No actions available.</div>`;
+    tiles.push({show:true, html: widget('','&#9889;','Quick Actions', body)});
   }
 
-  const KPI_COLORS = ['kpi-green','kpi-blue','kpi-pink','kpi-orange','kpi-purple'];
-  const favSet = getFavWidgets();
-  const kpiCard = (c, idx) => {
-    const faved = favSet.indexOf(c.lbl) !== -1;
-    return `<div class="stat-card kpi-block ${KPI_COLORS[idx % KPI_COLORS.length]}"><div class="kpi-top"><div class="lbl">${esc(c.lbl)}</div><div style="display:flex; align-items:center; flex-shrink:0;">${c.ico ? `<div class="kpi-ico">${c.ico}</div>` : ''}<span class="kpi-star ${faved?'faved':''}" data-k="${esc(c.lbl)}" onclick="toggleFavWidget(this.dataset.k)" title="${faved?'Remove from favourites':'Add to favourites'}">&#9733;</span></div></div><div class="val">${esc(c.val)}</div></div>`;
-  };
-  const favCards = cards.filter(c=>favSet.indexOf(c.lbl)!==-1);
+  const grid = tiles.filter(t=>t.show).map(t=>t.html).join('');
+
   return `
   ${tabHeader(currentLocation, 'Overview', true)}
   ${noticeBannerHtml()}
   ${birthdayBannerHtml()}
-  ${favCards.length ? `<div class="subsection-title">&#9733; Favourites</div><div class="stat-row">${favCards.map((c,idx)=>kpiCard(c,idx)).join('')}</div><div class="subsection-title">All Widgets</div>` : ''}
-  <div class="stat-row">
-    ${cards.map((c,idx)=>kpiCard(c,idx)).join('')}
-  </div>
-  ${allowedTabs.includes('inventory') ? renderInventoryBISection() : ''}
-  ${analyticsCharts ? `<div class="subsection-title">Analytics</div><div class="chart-grid">${analyticsCharts}</div>` : ''}
-  ${extraPanels}`;
+  <div class="wgrid">${grid}</div>
+  ${can('inventory') ? renderInventoryBISection() : ''}`;
 }
+
 /* ---- Favourite dashboard widgets (starred, saved per user per device) ---- */
 function favWidgetsKey(){ return 'somtek_favw_' + (session ? session.username : ''); }
 function getFavWidgets(){
