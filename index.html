@@ -2491,7 +2491,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.55';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.56';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -4165,20 +4165,30 @@ function renderDashboard(){
       const acc=enq.filter(e=>e.action==='Accepted').length;
       if(enq.length) ins.push({prio:30, ico:'&#127919;', text:`Enquiry win rate ${Math.round(acc/enq.length*100)}%`});
     }
+    if(can('po')){
+      const open=(d.customerPO||[]).filter(r=>r.status!=='Executed').length;
+      if(open) ins.push({prio:50, ico:'&#128196;', text:`${open} order${open>1?'s':''} open`});
+    }
+    if(can('logistics')){
+      const transit=(d.logistics||[]).filter(l=>l.status!=='Delivered').length;
+      if(transit) ins.push({prio:60, ico:'&#128667;', text:`${transit} shipment${transit>1?'s':''} in transit`});
+    }
+    if(can('enquiry')||can('sales')){
+      const wk=new Date(Date.now()+7*86400000);
+      const wkStr=wk.getFullYear()+'-'+pad2(wk.getMonth()+1)+'-'+pad2(wk.getDate());
+      let due=0;
+      (d.enquiry||[]).forEach(e=>{ if(e.dueDate && e.dueDate>=todayStr && e.dueDate<=wkStr && e.action!=='Accepted' && e.action!=='Rejected') due++; });
+      (d.leads||[]).forEach(l=>{ if(l.followUp && l.followUp>=todayStr && l.followUp<=wkStr && l.converted!=='Yes') due++; });
+      if(due) ins.push({prio:85, ico:'&#128467;', text:`${due} follow-up${due>1?'s':''} due this week`});
+    }
+    if(can('inventory')){
+      const val=(d.inventory||[]).reduce((a,i)=>a+(Number(i.qty)||0)*(Number(i.cost)||0),0);
+      if(val>0) ins.push({prio:15, ico:'&#128230;', text:`Stock value ${inr(val)}`});
+    }
     if(!ins.length) ins.push({prio:0, ico:'&#9989;', text:'All clear \u2014 nothing needs attention.'});
     ins.sort((a,b)=>b.prio-a.prio);
-    const body = ins.slice(0,4).map(x=>`<div class="insight-item${x.bad?' bad':''}"><span class="insight-ico">${x.ico}</span><span>${esc(x.text)}</span></div>`).join('');
-    tiles.push({show:true, html: widget('','&#129504;','AI Insights', body)});
-  }
-  /* ---- 9. Notifications ---- */
-  {
-    const list = (typeof activeNotifs==='function' ? activeNotifs() : []).slice(0,4);
-    const read = (typeof getReadNotifIds==='function' ? getReadNotifIds() : []);
-    const body = list.length ? `<div class="wlist">${list.map(n=>{
-      const unread = read.indexOf(n.id)===-1;
-      return `<div class="wlist-item" onclick="openNotifModal('${esc(n.id)}')"><div class="wlist-main">${unread?'<span class="wlist-dot"></span>':''}<div class="wlist-txt"><div class="wlist-t">${esc(n.title||'(no title)')}</div><div class="wlist-s">${esc((n.msg||'').split('\n')[0])}</div></div></div><div class="wlist-r">${esc(n.at?new Date(n.at).toLocaleDateString('en-IN'):'')}</div></div>`;
-    }).join('')}</div>` : `<div class="wlist-empty">No notifications.<br><span style="font-size:10px;">They clear after 24 hours.</span></div>`;
-    tiles.push({show:true, html: widget('','&#128276;','Notifications', body)});
+    const body = ins.slice(0,6).map(x=>`<div class="insight-item${x.bad?' bad':''}"><span class="insight-ico">${x.ico}</span><span>${esc(x.text)}</span></div>`).join('');
+    tiles.push({show:true, html: widget('','&#129504;','Data Insights', body)});
   }
   /* ---- 10. Recent Orders ---- */
   {
@@ -4203,16 +4213,26 @@ function renderDashboard(){
   }
   /* ---- 12. Quick Actions ---- */
   {
-    const defs=[
+    const mods=[
       {tab:'enquiry', ico:'&#129489;&#8205;&#128187;', label:'Enquiries'},
-      {tab:'inward', ico:'&#128229;', label:'Inward'},
-      {tab:'quotation', ico:'&#128221;', label:'Quotation'},
       {tab:'sales', ico:'&#128200;', label:'Sales'},
+      {tab:'quotation', ico:'&#128221;', label:'Quotation'},
       {tab:'po', ico:'&#128196;', label:'Purchase'},
-      {tab:'reports', ico:'&#128203;', label:'Reports'}
-    ].filter(x=>can(x.tab)).slice(0,6);
+      {tab:'inward', ico:'&#128229;', label:'Inward'},
+      {tab:'outward', ico:'&#128666;', label:'Outward'},
+      {tab:'inventory', ico:'&#128230;', label:'Inventory'},
+      {tab:'reports', ico:'&#128203;', label:'Reports'},
+      {tab:'accounts', ico:'&#128179;', label:'Accounts'},
+      {tab:'logistics', ico:'&#128667;', label:'Logistics'},
+      {tab:'hr', ico:'&#128101;', label:'HR'}
+    ].filter(x=>can(x.tab)).slice(0,8).map(x=>({act:`switchTab('${x.tab}')`, ico:x.ico, label:x.label}));
+    const utils=[
+      {act:'openGlobalSearch()', ico:'&#128269;', label:'Search'},
+      {act:'manualRefresh()', ico:'&#128260;', label:'Refresh'}
+    ];
+    const defs=mods.concat(utils);
     const body = defs.length ? `<div class="qa-grid">${defs.map(x=>
-      `<div class="qa-btn" onclick="switchTab('${x.tab}')"><span class="qa-ico">${x.ico}</span>${x.label}</div>`).join('')}</div>`
+      `<div class="qa-btn" onclick="${x.act}"><span class="qa-ico">${x.ico}</span>${x.label}</div>`).join('')}</div>`
       : `<div class="wlist-empty">No actions available.</div>`;
     tiles.push({show:true, html: widget('','&#9889;','Quick Actions', body)});
   }
