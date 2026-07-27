@@ -814,6 +814,25 @@ let auditSearch = '';
 function uid(){ return Math.random().toString(36).slice(2,9); }
 function today(){ return new Date().toISOString().slice(0,10); }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+/* ---- Generic "Show more / Show less" helper for long text cells (descriptions, notes, remarks, reasons, etc.)
+   Used across every tab's table so long values collapse to a short preview with an expand/collapse toggle
+   instead of stretching the row or getting cut off. `key` must be unique per cell (e.g. tableName+':'+id+':'+field). */
+let DESC_CELL_EXPANDED = {};
+function toggleDescCell(key){
+  DESC_CELL_EXPANDED[key] = !DESC_CELL_EXPANDED[key];
+  render();
+}
+function descCellHtml(key, text, limit){
+  limit = limit || 60;
+  const full = String(text==null?'':text).trim();
+  if(!full) return '';
+  if(full.length <= limit) return esc(full);
+  if(DESC_CELL_EXPANDED[key]){
+    return `<div style="white-space:normal;">${esc(full)}</div><span class="desc-toggle" onclick="toggleDescCell('${key}')">&#9650; Show less</span>`;
+  }
+  const shortHtml = esc(full.slice(0, limit).trimEnd()) + '&hellip;';
+  return `<div style="white-space:normal;" title="${esc(full)}">${shortHtml}</div><span class="desc-toggle" onclick="toggleDescCell('${key}')">Show more &#9660;</span>`;
+}
 /* Convert a YYYY-MM-DD (or any date-ish) string into DD-MM-YYYY for display purposes.
    Leaves non-date / empty values untouched so it is safe to wrap around any field. */
 function fd(s){
@@ -1514,8 +1533,9 @@ function reportSheetFor(section, loc, d){
       ['Purchase Payments Overdue', pa.filter(r=>purchaseDueInfo(r).overdue).length],
       ['Inventory Items', inv.length],
       ['Inventory Value', money(invValue)],
-      ['Aging Stock (>90 days)', inv.filter(i=>!(i.deadStock==='Yes'||(Number(i.qty)||0)===0) && (invAgeDays(i)||0)>90).length],
-      ['Dead Stock Items', inv.filter(i=>i.deadStock==='Yes'||(Number(i.qty)||0)===0).length],
+      ['Aging Stock (>90 days, <2 yrs)', inv.filter(i=>!isLowStockFlag(i) && !isDeadStockNow(i) && (invAgeDays(i)||0)>90).length],
+      ['Low Stock Items', inv.filter(isLowStockFlag).length],
+      ['Dead Stock Items (2 yrs+, not moving)', inv.filter(isDeadStockNow).length],
       ['Pending Enquiries', (d.enquiry||[]).filter(r=>(r.action||'Pending')==='Pending').length]
     ];
     return { name: loc+' Summary', headers: ['Metric','Value'], rows: rows };
@@ -1533,7 +1553,7 @@ function reportSheetFor(section, loc, d){
   if(section === 'inventory'){
     const rows = (d.inventory||[]).map(i=>{
       const days = invAgeDays(i);
-      const flag = (i.deadStock==='Yes'||(Number(i.qty)||0)===0) ? 'DEAD STOCK' : (days>365?'>1 yr':(days>90?'>90 days':''));
+      const flag = isLowStockFlag(i) ? 'LOW STOCK' : (isDeadStockNow(i) ? 'DEAD STOCK' : (days>365?'>1 yr':(days>90?'>90 days':'')));
       return [i.name, i.qty, i.cost, ((parseFloat(i.qty)||0)*(parseFloat(i.cost)||0))||'', i.category||'', i.lastInwardOn||i.addedOn||'', days==null?'':days, flag];
     });
     return { name: loc+' Inventory', headers: ['Item','Qty','Cost','Total Value','Category','Stock Since','Age (days)','Flag'], rows: rows };
@@ -3214,7 +3234,7 @@ const IMPORT_SCHEMAS = {
     {key:'specs', header:'Specifications'},
     {key:'cost', header:'Cost'},
     {key:'category', header:'Category'},
-    {key:'deadStock', header:'Dead Stock', options:['Yes','No']}
+    {key:'deadStock', header:'Low Stock', options:['Yes','No']}
   ],
   vendorPO: [
     {key:'poNumber', header:'P.O Number'},
@@ -3259,7 +3279,7 @@ const IMPORT_SCHEMAS = {
     {key:'amountPaid', header:'Amount Paid'},
     {key:'paidBy', header:'Paid By', options:['Paid by us','Paid by vendor']},
     {key:'paidVendor', header:'Paying Vendor'},
-    {key:'deadStock', header:'Dead Stock', options:['No','Yes']}
+    {key:'deadStock', header:'Low Stock', options:['No','Yes']}
   ],
   outward: [
     {key:'date', header:'Date', type:'date'},
@@ -4151,8 +4171,10 @@ function renderDashboard(){
     if(can('inventory')){
       const low=(d.inventory||[]).filter(isLowStock).length;
       if(low) ins.push({prio:90, ico:'&#9888;&#65039;', text:`${low} item${low>1?'s':''} low on stock`});
-      const dead=(d.inventory||[]).filter(i=>i.deadStock==='Yes'||(Number(i.qty)||0)===0).length;
-      if(dead) ins.push({prio:40, ico:'&#128683;', text:`${dead} dead-stock item${dead>1?'s':''}`});
+      const flaggedLow=(d.inventory||[]).filter(isLowStockFlag).length;
+      if(flaggedLow) ins.push({prio:40, ico:'&#128683;', text:`${flaggedLow} item${flaggedLow>1?'s':''} flagged low stock`});
+      const trueDead=(d.inventory||[]).filter(isDeadStockNow).length;
+      if(trueDead) ins.push({prio:35, ico:'&#9760;&#65039;', text:`${trueDead} dead-stock item${trueDead>1?'s':''} (2yrs+, not moving)`});
     }
     if(can('accounts')){
       const out=(d.purchaseAccounts||[]).reduce((a,r)=>a+(parseFloat(r.balanceOutstanding)||0),0);
@@ -4388,7 +4410,7 @@ function renderPO(){
   <table><thead><tr><th>P.O Number</th><th>P.O Date</th><th>Vendor Name</th><th>Customer Name</th><th>Customer P.O</th><th>Sub</th><th>Ref</th><th>Item Description</th><th>Qty</th><th>Unit Price</th><th>Total Value</th><th>O.A Number</th><th>O.A / DOD Date</th><th>Status</th>${cfHeaders('vendorPO')}<th>Added By</th><th></th></tr></thead><tbody>
   ${vpoRows.length===0 ? noMatchRow(16, d.vendorPO.length) :
     vpoRows.map(p=>`<tr>
-      <td>${esc(p.poNumber)}</td><td>${fd(p.poDate)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(p.vendor)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(p.customer)}</td><td>${esc(p.customerPO)}</td><td>${esc(p.sub)}</td><td>${esc(p.ref)}</td><td>${esc(p.item)}</td><td>${esc(p.qty)}</td><td>${esc(p.unitPrice)}</td><td>${rowTotal(p.qty, p.unitPrice) || esc(p.totalValue)}</td><td>${esc(p.oaNumber)}</td><td>${fd(p.oaDodDate)}</td>
+      <td>${esc(p.poNumber)}</td><td>${fd(p.poDate)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(p.vendor)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(p.customer)}</td><td>${esc(p.customerPO)}</td><td>${esc(p.sub)}</td><td>${esc(p.ref)}</td><td>${descCellHtml('vendorPO:'+p.id+':item', p.item)}</td><td>${esc(p.qty)}</td><td>${esc(p.unitPrice)}</td><td>${rowTotal(p.qty, p.unitPrice) || esc(p.totalValue)}</td><td>${esc(p.oaNumber)}</td><td>${fd(p.oaDodDate)}</td>
       <td>
         <select class="status-select ${poStatusClass(p.status)}" onchange="updateVendorPOStatus('${p.id}', this.value)">
           <option value="Non-Executed" ${(!p.status||p.status==='Non-Executed')?'selected':''}>Non-Executed</option>
@@ -4441,7 +4463,7 @@ function renderPO(){
   <table><thead><tr><th>P.O Number</th><th>P.O Date</th><th>Customer Name</th><th>Customer Address</th><th>Vendor P.O Num</th><th>Item Description</th><th>Qty</th><th>Unit Price</th><th>Total Value</th><th>DOD</th><th>Status</th>${cfHeaders('customerPO')}<th>Added By</th><th></th></tr></thead><tbody>
   ${cpoRows.length===0 ? noMatchRow(13, d.customerPO.length) :
     cpoRows.map(p=>`<tr>
-      <td>${esc(p.poNumber)}</td><td>${fd(p.poDate)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(p.customer)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(p.customerAddress)}</td><td>${esc(p.vendorPoNum)}</td><td>${esc(p.item)}</td><td>${esc(p.qty)}</td><td>${esc(p.unitPrice)}</td><td>${rowTotal(p.qty, p.unitPrice) || esc(p.totalValue)}</td><td>${fd(p.dod)}</td>
+      <td>${esc(p.poNumber)}</td><td>${fd(p.poDate)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(p.customer)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${descCellHtml('customerPO:'+p.id+':address', p.customerAddress)}</td><td>${esc(p.vendorPoNum)}</td><td>${descCellHtml('customerPO:'+p.id+':item', p.item)}</td><td>${esc(p.qty)}</td><td>${esc(p.unitPrice)}</td><td>${rowTotal(p.qty, p.unitPrice) || esc(p.totalValue)}</td><td>${fd(p.dod)}</td>
       <td>
         <select class="status-select ${poStatusClass(p.status)}" onchange="updateCustomerPOStatus('${p.id}', this.value)">
           <option value="Non-Executed" ${(!p.status||p.status==='Non-Executed')?'selected':''}>Non-Executed</option>
@@ -4867,10 +4889,10 @@ function renderInward(){
   <div class="panel"><div class="panel-head"><h3>Inward log</h3><div class="panel-head-actions">${importBtn('inward')}${exportBtn('exportInward')}</div></div>
   <div class="panel-body">
   ${tableToolbar('inward', d.inward)}
-  <table><thead><tr><th>Date</th><th>Vendor Name</th><th>PO Number</th><th>PO Date</th><th>ITEM</th><th>Item Type</th><th>Qty</th><th>Price</th><th>Total Value</th><th>Transporter</th><th>L.R No</th><th>Amount Paid</th><th>Paid By</th><th>Aging</th><th>Dead Stock</th>${cfHeaders('inward')}<th>Added By</th><th></th></tr></thead><tbody>
+  <table><thead><tr><th>Date</th><th>Vendor Name</th><th>PO Number</th><th>PO Date</th><th>ITEM</th><th>Item Type</th><th>Qty</th><th>Price</th><th>Total Value</th><th>Transporter</th><th>L.R No</th><th>Amount Paid</th><th>Paid By</th><th>Aging</th><th>Low Stock</th>${cfHeaders('inward')}<th>Added By</th><th></th></tr></thead><tbody>
   ${inwardRows.length===0 ? noMatchRow(17, d.inward.length) :
     inwardRows.map(r=>`<tr>
-      <td>${fd(r.date)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.vendor)}</td><td>${esc(r.poNumber)}</td><td>${fd(r.poDate)}</td><td>${esc(r.item)}</td><td>${esc(r.itemType)}</td><td>${esc(r.qty)}</td><td>${esc(r.price)}</td><td>${rowTotal(r.qty, r.price)}</td><td>${esc(r.transporter)}</td><td>${esc(r.lrNumber)}</td><td>${esc(r.amountPaid)}</td><td>${esc(inPaidByDisplay(r))}</td><td>${ageChip(inwardAgeDays(r)) || '<span style="color:var(--muted); font-size:11px;">&mdash;</span>'}</td><td>${esc(r.deadStock||'No')}</td>${cfCells('inward', r)}${addedByCell(r)}
+      <td>${fd(r.date)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.vendor)}</td><td>${esc(r.poNumber)}</td><td>${fd(r.poDate)}</td><td>${descCellHtml('inward:'+r.id+':item', r.item)}</td><td>${esc(r.itemType)}</td><td>${esc(r.qty)}</td><td>${esc(r.price)}</td><td>${rowTotal(r.qty, r.price)}</td><td>${esc(r.transporter)}</td><td>${esc(r.lrNumber)}</td><td>${esc(r.amountPaid)}</td><td>${esc(inPaidByDisplay(r))}</td><td>${ageChip(inwardAgeDays(r)) || '<span style="color:var(--muted); font-size:11px;">&mdash;</span>'}</td><td>${esc(r.deadStock||'No')}</td>${cfCells('inward', r)}${addedByCell(r)}
       <td>${actionCell(editBtn('inward', r.id), deleteBtn(`deleteInward('${r.id}')`))}</td>
     </tr>`).join('')}
   </tbody>${totalFootRow(17 + cfDefs('inward').length, 'Total Value (all matching entries)', sumTotal(inwardAll,'qty','price'))}</table>
@@ -4904,9 +4926,9 @@ function inItemLineHtml(){
     <input type="text" class="out-line-item in-line-type" style="flex:1 1 160px; min-width:130px;" placeholder="Item Type / Category">
     <input type="number" class="out-line-qty in-line-qty" placeholder="Qty" oninput="updateInLinesTotal()">
     <input type="number" step="0.01" class="out-line-price in-line-price" placeholder="Price per item" oninput="updateInLinesTotal()">
-    <select class="out-line-item in-line-deadstock" style="flex:0 1 120px; min-width:100px;" title="Dead Stock">
-      <option value="No" selected>Dead: No</option>
-      <option value="Yes">Dead: Yes</option>
+    <select class="out-line-item in-line-deadstock" style="flex:0 1 120px; min-width:100px;" title="Low Stock">
+      <option value="No" selected>Low: No</option>
+      <option value="Yes">Low: Yes</option>
     </select>
     <button type="button" class="icon-btn out-line-remove" onclick="removeInItemLine(this)" title="Remove this item">&#10005;</button>
   </div>`;
@@ -5041,7 +5063,7 @@ async function addInward(e){
 }
 function exportInward(){
   const d = DATA[currentLocation];
-  const headers = ['Date','Vendor Name','PO Number','PO Date','ITEM','Item Type','Qty','Price','Total Value','Transporter','LR Number','Amount Paid','Paid By','Paying Vendor','Dead Stock','Added By'];
+  const headers = ['Date','Vendor Name','PO Number','PO Date','ITEM','Item Type','Qty','Price','Total Value','Transporter','LR Number','Amount Paid','Paid By','Paying Vendor','Low Stock','Added By'];
   const rows = d.inward.map(r=>[r.date, r.vendor, r.poNumber, r.poDate, r.item, r.itemType, r.qty, r.price, ((parseFloat(r.qty)||0)*(parseFloat(r.price)||0))||'', r.transporter||'', r.lrNumber||'', r.amountPaid||'', r.paidBy||'', r.paidVendor||'', r.deadStock||'No', r.addedBy]);
   cfExportAppend('inward', d.inward, headers, rows);
   exportToExcel(currentLocation+'_Inward', headers, rows);
@@ -5082,6 +5104,39 @@ function ageChip(days){
   if(days > 90) return '<span class="age-chip age-yellow">&gt;90 days</span>';
   return '';
 }
+/* Days since the item's most recent OUTWARD (sale/dispatch) movement,
+   matched by item name. Returns null if the item has never moved out. */
+function lastOutwardDays(i){
+  const d = DATA[currentLocation] || {};
+  const nm = String(i.name||'').trim().toLowerCase();
+  let ts = 0;
+  if(nm){
+    (d.outward||[]).forEach(r=>{
+      if(String(r.item||'').trim().toLowerCase() === nm){
+        const t = Date.parse(r.date) || 0;
+        if(t > ts) ts = t;
+      }
+    });
+  }
+  if(!ts) return null;
+  return Math.max(0, Math.floor((Date.now() - ts) / 86400000));
+}
+/* Manually flagged as low stock, or zero quantity on hand. */
+function isLowStockFlag(i){
+  return i.deadStock === 'Yes' || (Number(i.qty)||0) === 0;
+}
+/* True Dead Stock: still holding quantity, in stock for more than 2 years
+   (730 days, counted automatically from the entry/inward date), and has
+   not moved out (no outward/sale) in that same 2-year window. */
+const DEAD_STOCK_DAYS = 730;
+function isDeadStockNow(i){
+  if(isLowStockFlag(i)) return false;
+  const age = invAgeDays(i);
+  if(age === null || age <= DEAD_STOCK_DAYS) return false;
+  const moved = lastOutwardDays(i);
+  if(moved !== null && moved <= DEAD_STOCK_DAYS) return false;
+  return true;
+}
 function invStampDates(d){
   /* Legacy items have no date - stamp them once so aging starts counting. */
   const t = today();
@@ -5099,16 +5154,18 @@ function switchInvSection(s){ invSection = s; render(); }
 function renderInventory(){
   const d = DATA[currentLocation];
   invStampDates(d);
-  const deadStock = d.inventory.filter(i => i.deadStock==='Yes' || (Number(i.qty)||0) === 0);
+  const lowStockList = d.inventory.filter(isLowStockFlag);
+  const deadStockList = d.inventory.filter(isDeadStockNow);
   const agingStock = d.inventory
-    .filter(i => !(i.deadStock==='Yes' || (Number(i.qty)||0)===0) && (invAgeDays(i)||0) > 90);
+    .filter(i => !isLowStockFlag(i) && !isDeadStockNow(i) && (invAgeDays(i)||0) > 90);
   const invAll = applyTableTools('inventory', d.inventory);
   const invRows = limitRows('inventory', invAll);
   const switcher = `
   <div class="acct-switch" style="margin-bottom:14px;">
     <button type="button" class="acct-switch-btn ${invSection==='stock'?'active':''}" onclick="switchInvSection('stock')">&#128230; Stock</button>
     <button type="button" class="acct-switch-btn ${invSection==='aging'?'active':''}" onclick="switchInvSection('aging')">&#9203; Aging Stock${agingStock.length?` (${agingStock.length})`:''}</button>
-    <button type="button" class="acct-switch-btn ${invSection==='dead'?'active':''}" onclick="switchInvSection('dead')">&#9888;&#65039; Dead Stock${deadStock.length?` (${deadStock.length})`:''}</button>
+    <button type="button" class="acct-switch-btn ${invSection==='low'?'active':''}" onclick="switchInvSection('low')">&#128683; Low Stock${lowStockList.length?` (${lowStockList.length})`:''}</button>
+    <button type="button" class="acct-switch-btn ${invSection==='dead'?'active':''}" onclick="switchInvSection('dead')">&#9888;&#65039; Dead Stock${deadStockList.length?` (${deadStockList.length})`:''}</button>
   </div>`;
   const stockSection = `
   ${secHead('&#10133;', 'New Entry')}
@@ -5122,7 +5179,7 @@ function renderInventory(){
       <div class="field"><label>Specifications</label><input type="text" id="inv-specs" placeholder="Optional"></div>
       <div class="field"><label>Cost</label><input type="number" step="0.01" id="inv-cost" placeholder="Cost per item"></div>
       <div class="field"><label>Category</label><input type="text" id="inv-cat" placeholder="Optional"></div>
-      <div class="field"><label>Dead Stock</label>
+      <div class="field"><label>Low Stock</label>
         <select id="inv-deadstock">
           <option value="No" selected>No</option>
           <option value="Yes">Yes</option>
@@ -5136,7 +5193,7 @@ function renderInventory(){
   <div class="panel"><div class="panel-head"><h3>Stock &mdash; ${locationLabel(currentLocation, 14)}</h3><div class="panel-head-actions">${importBtn('inventory')}${exportBtn('exportInventory')}</div></div>
   <div class="panel-body">
   ${tableToolbar('inventory', d.inventory)}
-  <table><thead><tr><th>Item</th><th>Qty</th><th>Specifications</th><th>Cost</th><th>Total Value</th><th>Category</th><th>Aging</th><th>Dead Stock</th>${cfHeaders('inventory')}<th>Added By</th><th></th></tr></thead><tbody>
+  <table><thead><tr><th>Item</th><th>Qty</th><th>Specifications</th><th>Cost</th><th>Total Value</th><th>Category</th><th>Aging</th><th>Low Stock</th>${cfHeaders('inventory')}<th>Added By</th><th></th></tr></thead><tbody>
   ${invRows.length===0 ? noMatchRow(10, d.inventory.length) :
     invRows.map(i=>`<tr>
       <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(i.name)}</td><td>${esc(i.qty)}${isLowStock(i) ? ' <span class="badge badge-overdue" title="At or below minimum quantity of ' + esc(i.minQty) + '">LOW</span>' : ''}</td><td>${esc(i.specs)}</td><td>${esc(i.cost)}</td><td>${rowTotal(i.qty, i.cost)}</td><td>${esc(i.category)}</td>
@@ -5151,26 +5208,50 @@ function renderInventory(){
   </tbody>${totalFootRow(10 + cfDefs('inventory').length, 'Total Stock Value (all matching items)', sumTotal(invAll,'qty','cost'))}</table>
   ${showMoreBar('inventory', invAll.length)}
   </div></div>`;
-  const deadSection = `
-  ${secHead('&#9888;&#65039;', 'Dead Stock')}
-  <div class="panel"><div class="panel-head"><h3>&#9888;&#65039; Dead Stock &mdash; ${locationLabel(currentLocation, 14)} <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(marked as dead stock, or zero quantity on hand)</span></h3><div class="panel-head-actions">${exportBtn('exportDeadStock')}</div></div>
+  const lowRows = limitRows('inventoryLow', lowStockList);
+  const lowSection = `
+  ${secHead('&#128683;', 'Low Stock')}
+  <div class="panel"><div class="panel-head"><h3>&#128683; Low Stock &mdash; ${locationLabel(currentLocation, 14)} <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(marked as low stock, or zero quantity on hand)</span></h3><div class="panel-head-actions">${exportBtn('exportLowStock')}</div></div>
   <div class="panel-body">
   <table><thead><tr><th>Item</th><th>Qty</th><th>Specifications</th><th>Cost</th><th>Category</th><th>Added By</th><th></th></tr></thead><tbody>
-  ${deadStock.length===0 ? `<tr class="empty-row"><td colspan="7">No dead stock &mdash; every item currently has quantity on hand.</td></tr>` :
-    deadStock.map(i=>`<tr>
+  ${lowRows.length===0 ? `<tr class="empty-row"><td colspan="7">No low stock items &mdash; every item currently has quantity on hand.</td></tr>` :
+    lowRows.map(i=>`<tr>
       <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(i.name)}</td><td>${esc(i.qty)}</td><td>${esc(i.specs)}</td><td>${esc(i.cost)}</td><td>${esc(i.category)}</td>${addedByCell(i)}
       <td>${actionCell(editBtn('inventory', i.id), deleteBtn(`deleteInventory('${i.id}')`))}</td>
     </tr>`).join('')}
   </tbody></table>
+  ${showMoreBar('inventoryLow', lowStockList.length)}
+  </div></div>`;
+  const deadSorted = deadStockList.slice().sort((a,b)=>(invAgeDays(b)||0)-(invAgeDays(a)||0));
+  const deadRows = limitRows('inventoryDead', deadSorted);
+  const deadSection = `
+  ${secHead('&#9888;&#65039;', 'Dead Stock')}
+  <div class="panel"><div class="panel-head"><h3>&#9888;&#65039; Dead Stock &mdash; ${locationLabel(currentLocation, 14)} <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(in stock for more than 2 years and not moving &mdash; no outward/sale in that time, calculated automatically from entry &amp; dispatch dates)</span></h3><div class="panel-head-actions">${exportBtn('exportDeadStock')}</div></div>
+  <div class="panel-body">
+  <table><thead><tr><th>Item</th><th>Qty</th><th>Cost</th><th>Total Value</th><th>Category</th><th>Stock Since</th><th>Age</th><th>Last Movement</th><th></th></tr></thead><tbody>
+  ${deadRows.length===0 ? `<tr class="empty-row"><td colspan="9">No dead stock &mdash; nothing has been sitting unmoved for more than 2 years.</td></tr>` :
+    deadRows.map(i=>{
+      const days = invAgeDays(i);
+      const mv = lastOutwardDays(i);
+      return `<tr>
+      <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(i.name)}</td><td>${esc(i.qty)}</td><td>${esc(i.cost)}</td><td>${rowTotal(i.qty, i.cost)}</td><td>${esc(i.category)}</td>
+      <td>${esc(i.lastInwardOn || i.addedOn || '')}</td>
+      <td>${days} days <span class="age-chip age-red">DEAD</span></td>
+      <td>${mv===null ? '<span style="color:var(--muted); font-size:11px;">never moved</span>' : mv + ' days ago'}</td>
+      <td>${actionCell(editBtn('inventory', i.id), deleteBtn(`deleteInventory('${i.id}')`))}</td>
+    </tr>`;}).join('')}
+  </tbody></table>
+  ${showMoreBar('inventoryDead', deadStockList.length)}
   </div></div>`;
   const agingSorted = agingStock.slice().sort((a,b)=>(invAgeDays(b)||0)-(invAgeDays(a)||0));
+  const agingRows = limitRows('inventoryAging', agingSorted);
   const agingSection = `
   ${secHead('&#9203;', 'Aging Stock')}
-  <div class="panel"><div class="panel-head"><h3>&#9203; Aging Stock &mdash; ${locationLabel(currentLocation, 14)} <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(in stock for more than 90 days &mdash; age calculated automatically from entry date; &gt;90 days flags yellow, &gt;1 year flags red)</span></h3><div class="panel-head-actions">${exportBtn('exportAgingStock')}</div></div>
+  <div class="panel"><div class="panel-head"><h3>&#9203; Aging Stock &mdash; ${locationLabel(currentLocation, 14)} <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(in stock for more than 90 days, up to 2 years &mdash; age calculated automatically from entry date; &gt;90 days flags yellow, &gt;1 year flags red)</span></h3><div class="panel-head-actions">${exportBtn('exportAgingStock')}</div></div>
   <div class="panel-body">
   <table><thead><tr><th>Item</th><th>Qty</th><th>Cost</th><th>Total Value</th><th>Category</th><th>Stock Since</th><th>Age</th><th></th></tr></thead><tbody>
-  ${agingSorted.length===0 ? `<tr class="empty-row"><td colspan="8">No aging stock &mdash; nothing has been sitting for more than 90 days.</td></tr>` :
-    agingSorted.map(i=>{
+  ${agingRows.length===0 ? `<tr class="empty-row"><td colspan="8">No aging stock &mdash; nothing has been sitting for more than 90 days.</td></tr>` :
+    agingRows.map(i=>{
       const days = invAgeDays(i);
       return `<tr>
       <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(i.name)}</td><td>${esc(i.qty)}</td><td>${esc(i.cost)}</td><td>${rowTotal(i.qty, i.cost)}</td><td>${esc(i.category)}</td>
@@ -5179,16 +5260,18 @@ function renderInventory(){
       <td>${actionCell(editBtn('inventory', i.id), deleteBtn(`deleteInventory('${i.id}')`))}</td>
     </tr>`;}).join('')}
   </tbody></table>
+  ${showMoreBar('inventoryAging', agingSorted.length)}
   </div></div>`;
+  const sectionMap = { aging: agingSection, low: lowSection, dead: deadSection };
   return `
   ${tabHeader(currentLocation, 'Inventory')}
   ${switcher}
-  ${invSection==='dead' ? deadSection : (invSection==='aging' ? agingSection : stockSection)}`;
+  ${sectionMap[invSection] || stockSection}`;
 }
 function exportAgingStock(){
   const d = DATA[currentLocation];
   const aging = d.inventory
-    .filter(i => !(i.deadStock==='Yes' || (Number(i.qty)||0)===0) && (invAgeDays(i)||0) > 90)
+    .filter(i => !isLowStockFlag(i) && !isDeadStockNow(i) && (invAgeDays(i)||0) > 90)
     .sort((a,b)=>(invAgeDays(b)||0)-(invAgeDays(a)||0));
   const headers = ['Item','Qty','Cost','Total Value','Category','Stock Since','Age (days)','Flag'];
   const rows = aging.map(i=>{
@@ -5223,16 +5306,28 @@ async function updateInventoryDeadStock(id, value){
 }
 function exportInventory(){
   const d = DATA[currentLocation];
-  const headers = ['Item','Qty','Specifications','Cost','Total Value','Category','Dead Stock','Added By'];
+  const headers = ['Item','Qty','Specifications','Cost','Total Value','Category','Low Stock','Added By'];
   const rows = d.inventory.map(i=>[i.name, i.qty, i.specs, i.cost, ((parseFloat(i.qty)||0)*(parseFloat(i.cost)||0))||'', i.category, i.deadStock||'No', i.addedBy]);
   cfExportAppend('inventory', d.inventory, headers, rows);
   exportToExcel(currentLocation+'_Inventory', headers, rows);
 }
+function exportLowStock(){
+  const d = DATA[currentLocation];
+  const lowStockList = d.inventory.filter(isLowStockFlag);
+  const headers = ['Item','Qty','Specifications','Cost','Category','Added By'];
+  const rows = lowStockList.map(i=>[i.name, i.qty, i.specs, i.cost, i.category, i.addedBy]);
+  exportToExcel(currentLocation+'_LowStock', headers, rows);
+}
 function exportDeadStock(){
   const d = DATA[currentLocation];
-  const deadStock = d.inventory.filter(i => i.deadStock==='Yes' || (Number(i.qty)||0) === 0);
-  const headers = ['Item','Qty','Specifications','Cost','Category','Added By'];
-  const rows = deadStock.map(i=>[i.name, i.qty, i.specs, i.cost, i.category, i.addedBy]);
+  const deadStockList = d.inventory.filter(isDeadStockNow)
+    .sort((a,b)=>(invAgeDays(b)||0)-(invAgeDays(a)||0));
+  const headers = ['Item','Qty','Cost','Total Value','Category','Stock Since','Age (days)','Last Movement'];
+  const rows = deadStockList.map(i=>{
+    const days = invAgeDays(i);
+    const mv = lastOutwardDays(i);
+    return [i.name, i.qty, i.cost, ((parseFloat(i.qty)||0)*(parseFloat(i.cost)||0))||'', i.category, i.lastInwardOn||i.addedOn||'', days, mv===null?'never moved':(mv+' days ago')];
+  });
   exportToExcel(currentLocation+'_DeadStock', headers, rows);
 }
 async function deleteInventory(id){
@@ -5277,7 +5372,7 @@ function renderOutward(){
   <table><thead><tr><th>Date</th><th>Customer Name</th><th>Customer P.O</th><th>P.O Date</th><th>Item</th><th>Qty</th><th>Unit Price</th><th>Total Price</th>${cfHeaders('outward')}<th>Added By</th><th></th></tr></thead><tbody>
   ${outwardRows.length===0 ? noMatchRow(10, d.outward.length) :
     outwardRows.map(r=>`<tr>
-      <td>${fd(r.date)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.customer)}</td><td>${esc(r.customerPO)}</td><td>${fd(r.poDate)}</td><td>${esc(r.item)}</td><td>${esc(r.qty)}</td><td>${esc(r.unitPrice)}</td><td>${rowTotal(r.qty, r.unitPrice) || esc(r.totalPrice)}</td>${cfCells('outward', r)}${addedByCell(r)}
+      <td>${fd(r.date)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.customer)}</td><td>${esc(r.customerPO)}</td><td>${fd(r.poDate)}</td><td>${descCellHtml('outward:'+r.id+':item', r.item)}</td><td>${esc(r.qty)}</td><td>${esc(r.unitPrice)}</td><td>${rowTotal(r.qty, r.unitPrice) || esc(r.totalPrice)}</td>${cfCells('outward', r)}${addedByCell(r)}
       <td>${actionCell(editBtn('outward', r.id), deleteBtn(`deleteOutward('${r.id}')`))}</td>
     </tr>`).join('')}
   </tbody>${totalFootRow(10 + cfDefs('outward').length, 'Total Value (all matching dispatches)', sumTotal(outwardAll,'qty','unitPrice'))}</table>
@@ -5490,7 +5585,7 @@ function renderLogistics(){
   <table><thead><tr><th>P.O Num</th><th>Expected Date</th><th>Customer Name</th><th>Item</th><th>Qty</th><th>Mode of Transport</th><th>Transporter</th><th>Remarks</th><th>Assigned To</th>${cfHeaders('futureShipments')}<th>Added By</th><th></th></tr></thead><tbody>
   ${futureRows.length===0 ? noMatchRow(11, (d.futureShipments||[]).length) :
     futureRows.map(r=>`<tr>
-      <td>${esc(r.poNumber)}</td><td>${fd(r.date)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.customer)}</td><td>${esc(r.item)}</td><td>${esc(r.qty)}</td><td>${esc(r.mode)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.transporter)}</td><td>${esc(r.remarks)}</td><td>${esc(r.assignedTo)}</td>${cfCells('futureShipments', r)}${addedByCell(r)}
+      <td>${esc(r.poNumber)}</td><td>${fd(r.date)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.customer)}</td><td>${descCellHtml('futureShipments:'+r.id+':item', r.item)}</td><td>${esc(r.qty)}</td><td>${esc(r.mode)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.transporter)}</td><td>${descCellHtml('futureShipments:'+r.id+':remarks', r.remarks)}</td><td>${esc(r.assignedTo)}</td>${cfCells('futureShipments', r)}${addedByCell(r)}
       <td>${actionCell((r.assignedTo? '' : pickBtn(r.id, 'pickFutureShipment')) + editBtn('futureShipments', r.id), deleteBtn(`deleteFutureShipment('${r.id}')`))}</td>
     </tr>`).join('')}
   </tbody></table>
@@ -5711,8 +5806,8 @@ function renderSales(){
   <table><thead><tr><th>Date</th><th>Lead Status</th><th>Order Status</th><th>Customer</th><th>Customer P.O</th><th>Item</th><th>Qty</th><th>Unit Price</th><th>Total Value</th><th>Remarks</th>${cfHeaders('sales')}<th>Added By</th><th></th></tr></thead><tbody>
   ${slRows.length===0 ? noMatchRow(13, d.sales.length) :
     slRows.map(r=>`<tr>
-      <td>${fd(r.date)}</td><td>${leadStatusSelect(r)}</td><td>${orderStatusSelect(r)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.customer)}</td><td>${esc(r.customerPO||'')}</td><td>${esc(r.item||'')}</td>
-      <td>${esc(r.qty||'')}</td><td>${r.unitPrice!=='' && r.unitPrice!=null ? '&#8377; '+fmt2(r.unitPrice) : ''}</td><td>${r.totalValue!=='' && r.totalValue!=null ? '&#8377; '+fmt2(r.totalValue) : ''}</td><td>${esc(r.remarks||'')}</td>${cfCells('sales', r)}${addedByCell(r)}
+      <td>${fd(r.date)}</td><td>${leadStatusSelect(r)}</td><td>${orderStatusSelect(r)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.customer)}</td><td>${esc(r.customerPO||'')}</td><td>${descCellHtml('sales:'+r.id+':item', r.item||'')}</td>
+      <td>${esc(r.qty||'')}</td><td>${r.unitPrice!=='' && r.unitPrice!=null ? '&#8377; '+fmt2(r.unitPrice) : ''}</td><td>${r.totalValue!=='' && r.totalValue!=null ? '&#8377; '+fmt2(r.totalValue) : ''}</td><td>${descCellHtml('sales:'+r.id+':remarks', r.remarks||'')}</td>${cfCells('sales', r)}${addedByCell(r)}
       <td>${actionCell(`<button type="button" class="icon-btn" onclick="showOrderTimeline('${r.id}')" title="Order timeline / history">&#128337;</button><button type="button" class="icon-btn" onclick="duplicateSalesOrder('${r.id}')" title="Duplicate this order">&#10697;</button>` + editBtn('sales', r.id), deleteBtn(`deleteSales('${r.id}')`))}</td>
     </tr>`).join('')}
   </tbody></table>
@@ -5756,7 +5851,7 @@ function leadsSectionHtml(d){
       <td>${fd(r.followUp)||'<span style="color:var(--muted); font-size:11px;">&mdash;</span>'}</td>
       <td>${leadReqSummary(r)}</td>
       <td>${leadConvertedSelect(r)}</td>
-      <td style="white-space:normal; max-width:220px;">${esc(r.reason||'')}</td>
+      <td style="white-space:normal; max-width:220px;">${descCellHtml('leads:'+r.id+':reason', r.reason||'')}</td>
       ${addedByCell(r)}
       <td>${actionCell(editBtn('leads', r.id), deleteBtn(`deleteLead('${r.id}')`))}</td>
     </tr>`).join('')}
@@ -6333,7 +6428,7 @@ function hrAttendanceSection(d){
       <td>${fd(r.date)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.employee)}</td>
       <td><span style="font-weight:600; color:${r.status==='Present'?'var(--success)':r.status==='Absent'?'#e6577a':'#e08a2e'};">${esc(r.status)}</span></td>
       <td>${esc(r.inTime||'')}</td><td>${esc(r.outTime||'')}</td>
-      <td>${esc(r.remarks||'')}</td>${cfCells('attendance', r)}${addedByCell(r)}
+      <td>${descCellHtml('attendance:'+r.id+':remarks', r.remarks||'')}</td>${cfCells('attendance', r)}${addedByCell(r)}
       <td>${actionCell(editBtn('attendance', r.id), deleteBtn(`deleteAttendance('${r.id}')`))}</td>
     </tr>`).join('')}
   </tbody></table>
@@ -6407,7 +6502,7 @@ function hrLeaveSection(d){
   <table><thead><tr><th>Employee</th><th>From</th><th>To</th><th>Days</th><th>Type</th><th>Reason</th><th>Status</th>${cfHeaders('leaves')}<th>Added By</th><th></th></tr></thead><tbody>
   ${rows.length===0 ? noMatchRow(10, d.leaves.length) :
     rows.map(r=>`<tr>
-      <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.employee)}</td><td>${fd(r.from)}</td><td>${fd(r.to)}</td><td>${esc(r.days)}</td><td>${esc(r.type)}</td><td>${esc(r.reason||'')}</td>
+      <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.employee)}</td><td>${fd(r.from)}</td><td>${fd(r.to)}</td><td>${esc(r.days)}</td><td>${esc(r.type)}</td><td>${descCellHtml('leaves:'+r.id+':reason', r.reason||'')}</td>
       <td>
         <select class="status-select ${r.status==='Approved'?'st-delivered':r.status==='Rejected'?'st-rejected':'st-transit'}" onchange="updateLeaveStatus('${r.id}', this.value)">
           <option value="Pending" ${(r.status||'Pending')==='Pending'?'selected':''}>Pending</option>
@@ -6622,12 +6717,12 @@ function renderAutomation(){
   <table><thead><tr><th>P.O Num</th><th>Date</th><th>Automation Value</th><th>Item Description</th><th>Qty</th><th>Type of Valve</th><th>Size of Valve</th><th>Status</th><th>Notes</th><th>Assigned To</th>${cfHeaders('automation')}<th>Added By</th><th></th></tr></thead><tbody>
   ${autoRows.length===0 ? noMatchRow(12, d.automation.length) :
     autoRows.map(r=>`<tr>
-      <td>${esc(r.poNumber)}</td><td>${fd(r.date)}</td><td>${esc(r.automationValue)}</td><td>${esc(r.item)}</td><td>${esc(r.qty)}</td><td>${esc(r.valveType)}</td><td>${esc(r.valveSize)}</td>
+      <td>${esc(r.poNumber)}</td><td>${fd(r.date)}</td><td>${esc(r.automationValue)}</td><td>${descCellHtml('automation:'+r.id+':item', r.item)}</td><td>${esc(r.qty)}</td><td>${esc(r.valveType)}</td><td>${esc(r.valveSize)}</td>
       <td><select class="status-select ${r.status==='Completed'?'status-completed':'status-inprogress'}" onchange="updateAutomationStatus('${r.id}', this.value); this.className='status-select '+(this.value==='Completed'?'status-completed':'status-inprogress');">
         <option value="In Progress" ${r.status==='In Progress'?'selected':''}>In Progress</option>
         <option value="Completed" ${r.status==='Completed'?'selected':''}>Completed</option>
       </select></td>
-      <td>${esc(r.notes)}</td><td>${esc(r.assignedTo)}</td>${cfCells('automation', r)}${addedByCell(r)}
+      <td>${descCellHtml('automation:'+r.id+':notes', r.notes)}</td><td>${esc(r.assignedTo)}</td>${cfCells('automation', r)}${addedByCell(r)}
       <td>${actionCell(editBtn('automation', r.id), deleteBtn(`deleteAutomation('${r.id}')`))}</td>
     </tr>`).join('')}
   </tbody></table>
@@ -6829,7 +6924,7 @@ function renderEnquiry(){
       <td>${fd(r.date)}</td><td>${esc(r.enum)}</td>
       <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.customer)}</td><td>${esc(r.region)}</td>
       <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.salesPerson)}</td>
-      <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.product)}</td>
+      <td style="font-family:'IBM Plex Sans',sans-serif;">${descCellHtml('enquiry:'+r.id+':product', r.product)}</td>
       <td>${enquiryBadge(r.response)}</td>
       <td>${enquiryBadge(r.quoting)}</td>
       <td>${fd(r.dueDate)}</td><td>${esc(r.brand)}</td><td>${esc(r.vendor)}</td>
@@ -6843,6 +6938,7 @@ function renderEnquiry(){
       <td>${actionCell(`<button type="button" class="icon-btn" onclick="quoteFromEnquiry('${r.id}')" title="Create a quotation pre-filled from this enquiry">&#128221;</button>` + (r.assignedTo? '' : pickBtn(r.id, 'pickEnquiry')) + editBtn('enquiry', r.id), deleteBtn(`deleteEnquiry('${r.id}')`))}</td>
     </tr>`).join('')}
   </tbody></table>
+  ${showMoreBar('enquiry', enqAll.length)}
   </div></div>`;
 }
 async function addEnquiry(e){
@@ -7018,7 +7114,7 @@ function renderAccounts(){
       return `<tr>
       <td>${fd(r.date)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.supplier)}</td><td>${esc(r.supplierInvoiceNo)}</td><td>${esc(r.gstin)}</td>
       <td>${esc(r.poNumber)}</td><td>${fd(r.poDate)}</td>
-      <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.commodity)}</td><td>${esc(r.hsnSac || [r.hsnCode, r.sacCode].filter(Boolean).join(' / '))}</td>
+      <td style="font-family:'IBM Plex Sans',sans-serif;">${descCellHtml('purchaseAccounts:'+r.id+':commodity', r.commodity)}</td><td>${esc(r.hsnSac || [r.hsnCode, r.sacCode].filter(Boolean).join(' / '))}</td>
       <td>${esc(r.qty)}</td><td>${esc(r.uom)}</td><td>${esc(r.unitPrice)}</td>
       <td>${esc(r.taxableValue)}</td><td>${esc(r.freight)}</td>
       <td>${esc(r.cgst)}${pct(r.cgstPct)}</td><td>${esc(r.sgst)}${pct(r.sgstPct)}</td><td>${esc(r.igst)}${pct(r.igstPct)}</td>
@@ -7029,7 +7125,7 @@ function renderAccounts(){
         <option value="Pending" ${(r.paymentStatus||'Pending')==='Pending'?'selected':''}>Pending</option>
         <option value="Received" ${r.paymentStatus==='Received'?'selected':''}>Received</option>
       </select>${due.overdue ? '<span class="badge badge-overdue">OVERDUE</span>' : ''}</div></td>
-      <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.remarks)}</td>
+      <td style="font-family:'IBM Plex Sans',sans-serif;">${descCellHtml('purchaseAccounts:'+r.id+':remarks', r.remarks)}</td>
       ${cfCells('purchaseAccounts', r)}${addedByCell(r)}
       <td>${actionCell(`<button class="icon-btn" onclick="openPurchaseDocPreview('${r.id}')">View / Print</button> ` + editBtn('purchaseAccounts', r.id), deleteBtn(`deletePurchaseAccount('${r.id}')`))}</td>
     </tr>`;}).join('')}
@@ -7068,13 +7164,15 @@ function renderAccounts(){
   const salesQueueList = Object.values(queueGroups).sort((a,b)=> String(b.poDate||'').localeCompare(String(a.poDate||'')));
   SALES_QUEUE_LIST = salesQueueList;
   const salesQueueCount = salesQueueList.length;
+  const salesQueueRows = limitRows('salesQueue', salesQueueList);
   const salesQueuePanel = `
   ${secHead('&#128257;', 'Queue')}
   <div class="panel"><div class="panel-head"><h3>Sales Queue &mdash; Customer P.O awaiting invoice${salesQueueCount?` <span style="color:var(--success);">(${salesQueueCount})</span>`:''}</h3></div>
   <div class="panel-body">
   ${salesQueueCount===0 ? '<div style="opacity:.6; padding:6px 2px;">Queue is empty. New Customer P.O entries from the Purchase tab appear here automatically.</div>' : `
   <table><thead><tr><th>P.O No</th><th>P.O Date</th><th>Customer</th><th>Items</th><th>Qty</th><th>Unit Price</th><th>Total Value</th><th>Assigned To</th><th></th></tr></thead><tbody>
-  ${salesQueueList.map((q, qi)=>{
+  ${salesQueueRows.map((q)=>{
+    const qi = salesQueueList.indexOf(q);
     const st = sq[q.key] || {};
     const itemsTxt = q.items.map(p=>esc(p.item||'')).filter(Boolean).join(', ');
     return `<tr>
@@ -7091,7 +7189,8 @@ function renderAccounts(){
         : `<button class="icon-btn" style="color:var(--success); font-weight:600;" onclick="pickSalesQueueIdx(${qi})">&#9995; Pick</button>`}</td>
     </tr>`;
   }).join('')}
-  </tbody></table>`}
+  </tbody></table>
+  ${showMoreBar('salesQueue', salesQueueList.length)}`}
   </div></div>`;
 
   const salesSection = `
@@ -7172,9 +7271,9 @@ function renderAccounts(){
       const uom = [...new Set(its.map(it=>it.uom).filter(Boolean))].join(', ');
       return `<tr>
       <td>${esc(r.invNo)}</td><td>${fd(r.date)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.customer)}</td>
-      <td style="font-family:'IBM Plex Sans',sans-serif; max-width:180px; white-space:normal;" title="${esc(r.billTo)}"><div class="cell-clamp">${esc(r.billTo)}</div></td><td>${esc(r.gstin)}</td>
+      <td style="font-family:'IBM Plex Sans',sans-serif; max-width:180px; white-space:normal;">${descCellHtml('salesAccounts:'+r.id+':billTo', r.billTo, 45)}</td><td>${esc(r.gstin)}</td>
       <td>${esc(r.dcNo)}</td><td>${fd(r.dcDate)}</td><td>${esc(r.poNo)}</td><td>${fd(r.poDate)}</td>
-      <td style="max-width:160px; white-space:normal;" title="${esc(r.placeOfSupply)}"><div class="cell-clamp">${esc(r.placeOfSupply)}</div></td><td>${esc(r.stateCode)}</td><td style="max-width:150px; white-space:normal;" title="${esc(saContactDisplay(r))}"><div class="cell-clamp">${esc(saContactDisplay(r))}</div></td>
+      <td style="max-width:160px; white-space:normal;">${descCellHtml('salesAccounts:'+r.id+':placeOfSupply', r.placeOfSupply, 45)}</td><td>${esc(r.stateCode)}</td><td style="max-width:150px; white-space:normal;">${descCellHtml('salesAccounts:'+r.id+':contact', saContactDisplay(r), 40)}</td>
       <td style="font-family:'IBM Plex Sans',sans-serif; max-width:260px; min-width:180px; white-space:normal; vertical-align:top;">${saDescCellHtml(r)}</td><td>${esc(hsn)}</td>
       <td>${totQty||esc(r.qty)}</td><td>${esc(uom||r.uom)}</td><td>${esc(rate)}</td>
       <td>${esc(r.taxable)}</td><td>${esc(r.freight)}</td><td>${esc(r.cgst)}${(parseFloat(r.cgstPct)||0)?` <span style="color:var(--muted); font-size:10px;">(${esc(r.cgstPct)}%)</span>`:''}</td><td>${esc(r.sgst)}${(parseFloat(r.sgstPct)||0)?` <span style="color:var(--muted); font-size:10px;">(${esc(r.sgstPct)}%)</span>`:''}</td><td>${esc(r.igst)}${(parseFloat(r.igstPct)||0)?` <span style="color:var(--muted); font-size:10px;">(${esc(r.igstPct)}%)</span>`:''}</td><td>${esc(r.cess)}</td><td>${esc(r.roundOff)}</td><td><b>${esc(r.invoiceValue)}</b></td>
@@ -7385,7 +7484,7 @@ function proformaSection(d){
       <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.customer)}</td>
       <td>${esc(r.gstin)}</td>
       <td>${esc(r.poNo)}</td>
-      <td style="max-width:260px; min-width:180px; white-space:normal;" title="${esc(desc)}"><div class="cell-clamp">${esc(desc)}</div></td>
+      <td style="max-width:260px; min-width:180px; white-space:normal;">${descCellHtml('proforma:'+r.id+':desc', desc, 55)}</td>
       <td>${totQty||''}</td>
       <td style="font-family:'IBM Plex Mono',monospace;">${esc(r.taxable)}</td>
       <td style="font-family:'IBM Plex Mono',monospace;"><b>${esc(r.invoiceValue)}</b></td>
@@ -9465,7 +9564,7 @@ const EDIT_SCHEMAS = {
     {key:'specs', label:'Specifications', type:'text'},
     {key:'cost', label:'Cost', type:'number'},
     {key:'category', label:'Category', type:'text'},
-    {key:'deadStock', label:'Dead Stock', type:'select', options:['No','Yes']},
+    {key:'deadStock', label:'Low Stock', type:'select', options:['No','Yes']},
     {key:'addedOn', label:'Stock Since (date)', type:'date'}
   ],
   vendorPO: [
@@ -9509,7 +9608,7 @@ const EDIT_SCHEMAS = {
     {key:'amountPaid', label:'Amount Paid', type:'number'},
     {key:'paidBy', label:'Paid By', type:'select', options:['Paid by us','Paid by vendor']},
     {key:'paidVendor', label:'Paying Vendor Name', type:'text'},
-    {key:'deadStock', label:'Dead Stock', type:'select', options:['No','Yes']}
+    {key:'deadStock', label:'Low Stock', type:'select', options:['No','Yes']}
   ],
   outward: [
     {key:'date', label:'Date', type:'date'},
@@ -11009,7 +11108,7 @@ function renderUsers(){
   <div class="panel"><div class="panel-head"><h3>All logins <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(click a user to view &amp; manage their access)</span></h3><div class="panel-head-actions">${importBtn('users')}<button class="icon-btn" onclick="restoreUsersFromBackup()" title="Restore the user list from the automatic backup">&#8634; Restore from backup${USERS_BACKUP_META ? ' ('+USERS_BACKUP_META.count+' users, '+new Date(USERS_BACKUP_META.savedAt).toLocaleDateString()+')' : ''}</button>${exportBtn('exportUsers')}</div></div>
   <div class="panel-body">
   <table><thead><tr><th>Photo</th><th>Name</th><th>Username</th><th>Role</th><th>Mobile</th><th>DOB</th><th>Address</th><th>Access</th><th>Security</th><th></th></tr></thead><tbody>
-  ${USERS.map(u=>{
+  ${limitRows('users', USERS).map(u=>{
     const roleT = roleTabsFor(u.role);
     const extras = Array.isArray(u.extraTabs) ? u.extraTabs.filter(t=>!roleT.includes(t) && !LOCKED_TABS.includes(t)) : [];
     const removed = Array.isArray(u.deniedTabs) ? u.deniedTabs.filter(t=>roleT.includes(t) && !LOCKED_TABS.includes(t)) : [];
@@ -11026,6 +11125,7 @@ function renderUsers(){
   </tr>${expandedAccessUser===u.username ? accessPanelRow(u) : ''}`;
   }).join('')}
   </tbody></table>
+  ${showMoreBar('users', USERS.length)}
   </div></div>
   ${roleManagerPanel()}
   ${customFieldsPanel()}
@@ -11063,7 +11163,7 @@ function filteredAuditEntries(){
 function auditLogPanel(){
   const entries = filteredAuditEntries();
   const total = (AUDIT && Array.isArray(AUDIT.list)) ? AUDIT.list.length : 0;
-  const shown = entries.slice(0, 200);
+  const shown = limitRows('auditLog', entries);
   const userOptions = [...new Set(((AUDIT && AUDIT.list) || []).map(e => e.user).filter(Boolean))];
   const actionOptions = ['LOGIN','LOGOUT','DATA CHANGE','USER ADMIN','NOTICE','AUDIT'];
   return `
@@ -11106,7 +11206,6 @@ function auditLogPanel(){
       </div>
     </div>
     <div style="color:var(--muted); font-size:11px; margin-bottom:8px;">Showing ${shown.length} of ${entries.length} matching entries (${total} total).</div>
-    <div style="max-height:420px; overflow:auto;">
     <table><thead><tr><th style="white-space:nowrap;">Date &amp; Time</th><th>User</th><th>Role</th><th>Location</th><th>Action</th><th>Details</th></tr></thead><tbody>
     ${shown.length === 0 ? `<tr><td colspan="6" style="text-align:center; color:var(--muted); padding:18px;">No audit entries yet. Logins, logouts and data changes will appear here automatically.</td></tr>` : shown.map(en => `<tr>
       <td style="white-space:nowrap; font-family:'IBM Plex Mono',monospace; font-size:11.5px;">${fmtAuditTime(en.ts)}</td>
@@ -11117,7 +11216,7 @@ function auditLogPanel(){
       <td style="font-size:12px;">${esc(en.details || '')}</td>
     </tr>`).join('')}
     </tbody></table>
-    </div>
+    ${showMoreBar('auditLog', entries.length)}
   </div></div>`;
 }
 function setAuditFilter(kind, value){
