@@ -4826,30 +4826,15 @@ function inwardAgeDays(r){
   if(!t) return null;
   return Math.max(0, Math.floor((Date.now() - t) / 86400000));
 }
-let inwardSection = 'inward';
-function switchInwardSection(s){ inwardSection = s; render(); }
 function renderInward(){
   const d = DATA[currentLocation];
   invStampDates(d);
-  const agingCount = d.inventory.filter(i => !(i.deadStock==='Yes' || (Number(i.qty)||0)===0) && (invAgeDays(i)||0) > 90).length;
-  const switcher = `
-  <div class="acct-switch" style="margin-bottom:14px;">
-    <button type="button" class="acct-switch-btn ${inwardSection==='inward'?'active':''}" onclick="switchInwardSection('inward')">&#128229; Inward</button>
-    <button type="button" class="acct-switch-btn ${inwardSection==='aging'?'active':''}" onclick="switchInwardSection('aging')">&#9203; Aging Stock${agingCount?` (${agingCount})`:''}</button>
-  </div>`;
-  if(inwardSection === 'aging'){
-    return `
-  ${tabHeader(currentLocation, 'Inward')}
-  ${switcher}
-  ${agingStockPanelHtml()}`;
-  }
   const poPrefix = inwardPoPrefix(currentLocation);
   const prevPaidVendors = [...new Set(d.inward.flatMap(r => [r.vendor, r.paidVendor]).filter(Boolean).map(v => String(v).trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
   const inwardAll = applyTableTools('inward', d.inward.slice().reverse());
   const inwardRows = limitRows('inward', inwardAll);
   return `
   ${tabHeader(currentLocation, 'Inward')}
-  ${switcher}
   ${secHead('&#10133;', 'New Entry')}
   <div class="panel"><div class="panel-head"><h3>Record inward receipt</h3></div>
   <div class="panel-body">
@@ -5115,11 +5100,14 @@ function renderInventory(){
   const d = DATA[currentLocation];
   invStampDates(d);
   const deadStock = d.inventory.filter(i => i.deadStock==='Yes' || (Number(i.qty)||0) === 0);
+  const agingStock = d.inventory
+    .filter(i => !(i.deadStock==='Yes' || (Number(i.qty)||0)===0) && (invAgeDays(i)||0) > 90);
   const invAll = applyTableTools('inventory', d.inventory);
   const invRows = limitRows('inventory', invAll);
   const switcher = `
   <div class="acct-switch" style="margin-bottom:14px;">
     <button type="button" class="acct-switch-btn ${invSection==='stock'?'active':''}" onclick="switchInvSection('stock')">&#128230; Stock</button>
+    <button type="button" class="acct-switch-btn ${invSection==='aging'?'active':''}" onclick="switchInvSection('aging')">&#9203; Aging Stock${agingStock.length?` (${agingStock.length})`:''}</button>
     <button type="button" class="acct-switch-btn ${invSection==='dead'?'active':''}" onclick="switchInvSection('dead')">&#9888;&#65039; Dead Stock${deadStock.length?` (${deadStock.length})`:''}</button>
   </div>`;
   const stockSection = `
@@ -5175,24 +5163,14 @@ function renderInventory(){
     </tr>`).join('')}
   </tbody></table>
   </div></div>`;
-  return `
-  ${tabHeader(currentLocation, 'Inventory')}
-  ${switcher}
-  ${invSection==='dead' ? deadSection : stockSection}`;
-}
-/* Aging Stock panel - shown in the INWARD tab */
-function agingStockPanelHtml(){
-  const d = DATA[currentLocation];
-  invStampDates(d);
-  const aging = d.inventory
-    .filter(i => !(i.deadStock==='Yes' || (Number(i.qty)||0)===0) && (invAgeDays(i)||0) > 90)
-    .sort((a,b)=>(invAgeDays(b)||0)-(invAgeDays(a)||0));
-  return `
-  <div class="panel"><div class="panel-head"><h3>&#9203; Aging Stock &mdash; ${locationLabel(currentLocation, 14)} <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(in stock for more than 90 days &mdash; oldest first)</span></h3><div class="panel-head-actions">${exportBtn('exportAgingStock')}</div></div>
+  const agingSorted = agingStock.slice().sort((a,b)=>(invAgeDays(b)||0)-(invAgeDays(a)||0));
+  const agingSection = `
+  ${secHead('&#9203;', 'Aging Stock')}
+  <div class="panel"><div class="panel-head"><h3>&#9203; Aging Stock &mdash; ${locationLabel(currentLocation, 14)} <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(in stock for more than 90 days &mdash; age calculated automatically from entry date; &gt;90 days flags yellow, &gt;1 year flags red)</span></h3><div class="panel-head-actions">${exportBtn('exportAgingStock')}</div></div>
   <div class="panel-body">
   <table><thead><tr><th>Item</th><th>Qty</th><th>Cost</th><th>Total Value</th><th>Category</th><th>Stock Since</th><th>Age</th><th></th></tr></thead><tbody>
-  ${aging.length===0 ? `<tr class="empty-row"><td colspan="8">No aging stock &mdash; nothing has been sitting for more than 90 days.</td></tr>` :
-    aging.map(i=>{
+  ${agingSorted.length===0 ? `<tr class="empty-row"><td colspan="8">No aging stock &mdash; nothing has been sitting for more than 90 days.</td></tr>` :
+    agingSorted.map(i=>{
       const days = invAgeDays(i);
       return `<tr>
       <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(i.name)}</td><td>${esc(i.qty)}</td><td>${esc(i.cost)}</td><td>${rowTotal(i.qty, i.cost)}</td><td>${esc(i.category)}</td>
@@ -5202,6 +5180,10 @@ function agingStockPanelHtml(){
     </tr>`;}).join('')}
   </tbody></table>
   </div></div>`;
+  return `
+  ${tabHeader(currentLocation, 'Inventory')}
+  ${switcher}
+  ${invSection==='dead' ? deadSection : (invSection==='aging' ? agingSection : stockSection)}`;
 }
 function exportAgingStock(){
   const d = DATA[currentLocation];
