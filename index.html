@@ -242,6 +242,7 @@ tbody tr:hover{background:rgba(31,68,145,0.04);}
 .badge-pending{color:#e0a955; border-color:#e0a955;}
 .badge-transit{color:var(--accent-2); border-color:var(--accent-2);}
 .badge-delivered{color:var(--success); border-color:var(--success);}
+.badge-cancelled{color:var(--muted); border-color:var(--muted);}
 
 .stat-row{display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:14px; margin-bottom:24px;}
 .stat-card{background:var(--panel); border:1px solid var(--border); padding:16px 18px; border-left:2px solid var(--accent); position:relative; overflow:hidden;}
@@ -379,6 +380,7 @@ select.status-select.st-delivered{color:var(--success); border-color:var(--succe
 select.status-select.st-rejected{color:#e6577a; border-color:#e6577a; font-weight:600;}
 select.status-select.st-executed{color:var(--success); border-color:var(--success); font-weight:600;}
 select.status-select.st-nonexecuted{color:var(--danger); border-color:var(--danger); font-weight:600;}
+select.status-select.st-cancelled{color:var(--muted); border-color:var(--muted); font-weight:600;}
 
 /* ---------- TABLE TOOLS (search / filter / sort) ---------- */
 .table-tools{display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:0 0 12px 0;}
@@ -2491,7 +2493,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.56';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.57';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -3228,7 +3230,7 @@ const IMPORT_SCHEMAS = {
     {key:'totalValue', header:'Total Value'},
     {key:'oaNumber', header:'O.A Number'},
     {key:'oaDodDate', header:'O.A / DOD Date', type:'date'},
-    {key:'status', header:'Status', options:['Non-Executed','Executed']}
+    {key:'status', header:'Status', options:['Non-Executed','Executed','Cancelled']}
   ],
   customerPO: [
     {key:'poNumber', header:'P.O Number'},
@@ -3241,7 +3243,7 @@ const IMPORT_SCHEMAS = {
     {key:'unitPrice', header:'Unit Price'},
     {key:'totalValue', header:'Total Value'},
     {key:'dod', header:'DOD', type:'date'},
-    {key:'status', header:'Status', options:['Non-Executed','Executed']}
+    {key:'status', header:'Status', options:['Non-Executed','Executed','Cancelled']}
   ],
   inward: [
     {key:'date', header:'Date', type:'date'},
@@ -4071,9 +4073,11 @@ function renderDashboard(){
   /* ---- 3. Orders ---- */
   {
     const cpo = d.customerPO || [];
-    const open = cpo.filter(r=>r.status!=='Executed').length;
+    const open = cpo.filter(r=>r.status!=='Executed' && r.status!=='Cancelled').length;
+    const executed = cpo.filter(r=>r.status==='Executed').length;
+    const cancelled = cpo.filter(r=>r.status==='Cancelled').length;
     tiles.push({show:can('po'), html: widget('kpi accent-purple','&#128196;','Orders',
-      `<div class="kpi-num">${cpo.length.toLocaleString('en-IN')}</div><div class="kpi-sub">${open} open &middot; ${cpo.length-open} executed</div>`)});
+      `<div class="kpi-num">${cpo.length.toLocaleString('en-IN')}</div><div class="kpi-sub">${open} open &middot; ${executed} executed${cancelled?` &middot; ${cancelled} cancelled`:''}</div>`)});
   }
   /* ---- 4. Monthly Sales ---- */
   {
@@ -4166,7 +4170,7 @@ function renderDashboard(){
       if(enq.length) ins.push({prio:30, ico:'&#127919;', text:`Enquiry win rate ${Math.round(acc/enq.length*100)}%`});
     }
     if(can('po')){
-      const open=(d.customerPO||[]).filter(r=>r.status!=='Executed').length;
+      const open=(d.customerPO||[]).filter(r=>r.status!=='Executed' && r.status!=='Cancelled').length;
       if(open) ins.push({prio:50, ico:'&#128196;', text:`${open} order${open>1?'s':''} open`});
     }
     if(can('logistics')){
@@ -4273,9 +4277,9 @@ function viewEnquiryFromDashboard(id){
 }
 
 /* ---------------- PURCHASE ORDER ---------------- */
-function poStatusClass(s){ return s==='Executed' ? 'st-executed' : 'st-nonexecuted'; }
+function poStatusClass(s){ return s==='Executed' ? 'st-executed' : (s==='Cancelled' ? 'st-cancelled' : 'st-nonexecuted'); }
 function poStatusBadge(s){
-  const cls = s==='Executed' ? 'badge-delivered' : 'badge-transit';
+  const cls = s==='Executed' ? 'badge-delivered' : (s==='Cancelled' ? 'badge-cancelled' : 'badge-transit');
   return `<span class="badge ${cls}">${esc(s || 'Non-Executed')}</span>`;
 }
 function allVendorNames(d){
@@ -4366,6 +4370,7 @@ function renderPO(){
         <select id="vpo-status">
           <option value="Non-Executed" selected>Non-Executed</option>
           <option value="Executed">Executed</option>
+          <option value="Cancelled">Cancelled</option>
         </select>
       </div>
     </div>
@@ -4386,8 +4391,9 @@ function renderPO(){
       <td>${esc(p.poNumber)}</td><td>${fd(p.poDate)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(p.vendor)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(p.customer)}</td><td>${esc(p.customerPO)}</td><td>${esc(p.sub)}</td><td>${esc(p.ref)}</td><td>${esc(p.item)}</td><td>${esc(p.qty)}</td><td>${esc(p.unitPrice)}</td><td>${rowTotal(p.qty, p.unitPrice) || esc(p.totalValue)}</td><td>${esc(p.oaNumber)}</td><td>${fd(p.oaDodDate)}</td>
       <td>
         <select class="status-select ${poStatusClass(p.status)}" onchange="updateVendorPOStatus('${p.id}', this.value)">
-          <option value="Non-Executed" ${p.status!=='Executed'?'selected':''}>Non-Executed</option>
+          <option value="Non-Executed" ${(!p.status||p.status==='Non-Executed')?'selected':''}>Non-Executed</option>
           <option value="Executed" ${p.status==='Executed'?'selected':''}>Executed</option>
+          <option value="Cancelled" ${p.status==='Cancelled'?'selected':''}>Cancelled</option>
         </select>
       </td>
       ${cfCells('vendorPO', p)}${addedByCell(p)}
@@ -4417,6 +4423,7 @@ function renderPO(){
         <select id="cpo-status">
           <option value="Non-Executed" selected>Non-Executed</option>
           <option value="Executed">Executed</option>
+          <option value="Cancelled">Cancelled</option>
         </select>
       </div>
     </div>
@@ -4437,8 +4444,9 @@ function renderPO(){
       <td>${esc(p.poNumber)}</td><td>${fd(p.poDate)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(p.customer)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(p.customerAddress)}</td><td>${esc(p.vendorPoNum)}</td><td>${esc(p.item)}</td><td>${esc(p.qty)}</td><td>${esc(p.unitPrice)}</td><td>${rowTotal(p.qty, p.unitPrice) || esc(p.totalValue)}</td><td>${fd(p.dod)}</td>
       <td>
         <select class="status-select ${poStatusClass(p.status)}" onchange="updateCustomerPOStatus('${p.id}', this.value)">
-          <option value="Non-Executed" ${p.status!=='Executed'?'selected':''}>Non-Executed</option>
+          <option value="Non-Executed" ${(!p.status||p.status==='Non-Executed')?'selected':''}>Non-Executed</option>
           <option value="Executed" ${p.status==='Executed'?'selected':''}>Executed</option>
+          <option value="Cancelled" ${p.status==='Cancelled'?'selected':''}>Cancelled</option>
         </select>
       </td>
       ${cfCells('customerPO', p)}${addedByCell(p)}
@@ -9491,7 +9499,7 @@ const EDIT_SCHEMAS = {
     {key:'unitPrice', label:'Unit Price', type:'number'},
     {key:'oaNumber', label:'O.A Number', type:'text'},
     {key:'oaDodDate', label:'O.A / DOD Date', type:'date'},
-    {key:'status', label:'Status', type:'select', options:['Non-Executed','Executed']}
+    {key:'status', label:'Status', type:'select', options:['Non-Executed','Executed','Cancelled']}
   ],
   customerPO: [
     {key:'poNumber', label:'P.O Number', type:'text'},
@@ -9503,7 +9511,7 @@ const EDIT_SCHEMAS = {
     {key:'qty', label:'Quantity', type:'number'},
     {key:'unitPrice', label:'Unit Price', type:'number'},
     {key:'dod', label:'DOD', type:'date'},
-    {key:'status', label:'Status', type:'select', options:['Non-Executed','Executed']}
+    {key:'status', label:'Status', type:'select', options:['Non-Executed','Executed','Cancelled']}
   ],
   inward: [
     {key:'date', label:'Date', type:'date'},
