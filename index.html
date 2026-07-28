@@ -2795,7 +2795,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.61';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.62';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -5540,7 +5540,7 @@ function renderInventory(){
       <td>${mv===null ? '<span style="color:var(--muted); font-size:11px;">never moved</span>' : mv + ' days ago'}</td>
       <td>${actionCell(editBtn('inventory', i.id), deleteBtn(`deleteInventory('${i.id}')`))}</td>
     </tr>`;}).join('')}
-  </tbody></table>
+  </tbody>${totalFootRow(9, 'Total Dead Stock Value (all items)', sumTotal(deadStockList,'qty','cost'))}</table>
   ${showMoreBar('inventoryDead', deadStockList.length)}
   </div></div>`;
   const agingSorted = agingStock.slice().sort((a,b)=>(invAgeDays(b)||0)-(invAgeDays(a)||0));
@@ -5559,7 +5559,7 @@ function renderInventory(){
       <td>${days} days ${ageChip(days)}</td>
       <td>${actionCell(editBtn('inventory', i.id), deleteBtn(`deleteInventory('${i.id}')`))}</td>
     </tr>`;}).join('')}
-  </tbody></table>
+  </tbody>${totalFootRow(8, 'Total Aging Stock Value (all items)', sumTotal(agingSorted,'qty','cost'))}</table>
   ${showMoreBar('inventoryAging', agingSorted.length)}
   </div></div>`;
   const sectionMap = { aging: agingSection, low: lowSection, dead: deadSection };
