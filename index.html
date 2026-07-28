@@ -917,6 +917,68 @@ function bulkKey(fn,id){ return fn+'|'+id; }
 /* Runs after every render: drop a checkbox into each row's action cell + a
    "select all shown" toggle into each table toolbar. Keys off the existing
    Delete buttons, so no render functions need editing. */
+/* Runs after every render: prepend an auto "S.No" column to each register
+   table inside #app. Numbers only real data rows; widens spanning rows
+   ("No records", totals) so columns stay aligned. Tables can opt out with
+   class "no-sno"; PO-terms tables already carry their own Sl.No. Preview /
+   print sheets live in #quote-preview (outside #app) and are untouched. */
+function injectSerialNumbers(){
+  var app = document.getElementById('app');
+  if(!app) return;
+  var tables = app.querySelectorAll('table');
+  for(var t=0; t<tables.length; t++){
+    var tbl = tables[t];
+    if(tbl.classList.contains('no-sno') || tbl.classList.contains('poc-doc-table')) continue;
+    if(tbl.dataset.snoDone === '1') continue;
+    var thead = null, tbody = null, tfoot = null, ch = tbl.children;
+    for(var c=0; c<ch.length; c++){
+      var tag = ch[c].tagName;
+      if(tag === 'THEAD' && !thead) thead = ch[c];
+      else if(tag === 'TBODY' && !tbody) tbody = ch[c];
+      else if(tag === 'TFOOT' && !tfoot) tfoot = ch[c];
+    }
+    if(!thead || !tbody) continue;
+    var headRow = null;
+    for(var h=0; h<thead.children.length; h++){ if(thead.children[h].tagName === 'TR'){ headRow = thead.children[h]; break; } }
+    if(!headRow) continue;
+    var headCells = headRow.children.length;
+    if(headCells < 3) continue;   /* skip tiny / non-register tables */
+    var th = document.createElement('th');
+    th.textContent = 'S.No';
+    th.className = 'sno-col';
+    th.style.cssText = 'width:44px; text-align:center;';
+    headRow.insertBefore(th, headRow.firstChild);
+    var n = 0, rows = tbody.children;
+    for(var r=0; r<rows.length; r++){
+      var tr = rows[r];
+      if(tr.tagName !== 'TR') continue;
+      var cells = tr.children;
+      var spanner = tr.classList.contains('empty-row') ||
+                    (cells.length === 1 && cells[0].hasAttribute('colspan'));
+      if(spanner){
+        var sc = cells[0];
+        if(sc){ var cs = parseInt(sc.getAttribute('colspan')||'1',10)||1; sc.setAttribute('colspan', String(cs+1)); }
+        continue;
+      }
+      n++;
+      var td = document.createElement('td');
+      td.textContent = String(n);
+      td.className = 'sno-cell';
+      td.style.cssText = "text-align:center; color:var(--muted); font-family:'IBM Plex Mono',monospace; font-size:11px;";
+      tr.insertBefore(td, tr.firstChild);
+    }
+    if(tfoot){
+      for(var fr=0; fr<tfoot.children.length; fr++){
+        var ftr = tfoot.children[fr];
+        if(ftr.tagName !== 'TR') continue;
+        var fc = ftr.children[0];
+        if(fc){ var fcs = parseInt(fc.getAttribute('colspan')||'1',10)||1; fc.setAttribute('colspan', String(fcs+1)); }
+      }
+    }
+    tbl.dataset.snoDone = '1';
+  }
+}
+
 function injectBulkCheckboxes(){
   if(!isAdmin()) return;
   ensureBulkBar();
@@ -2472,6 +2534,7 @@ function render(customHtml){
   if(session && locationChosen && currentTab==='quotation'){ setTimeout(()=>{ try{ updateQuoteTotals(); }catch(e){} }, 0); }
   if(session && locationChosen){ setTimeout(injectCustomFieldInputs, 0); }
   if(session && locationChosen){ setTimeout(injectBulkCheckboxes, 0); }
+  if(session && locationChosen){ setTimeout(injectSerialNumbers, 0); }
   cfPending = null;
 }
 
@@ -2732,7 +2795,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.59';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.61';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -3449,6 +3512,7 @@ function exportBtn(fnName, label){
 const IMPORT_SCHEMAS = {
   inventory: [
     {key:'name', header:'Item'},
+    {key:'addedOn', header:'Date', type:'date'},
     {key:'qty', header:'Qty'},
     {key:'specs', header:'Specifications'},
     {key:'cost', header:'Cost'},
@@ -5432,7 +5496,7 @@ function renderInventory(){
   <table><thead><tr><th>Item</th><th>Date</th><th>Qty</th><th>Specifications</th><th>Cost</th><th>Total Value</th><th>Category</th><th>Aging</th><th>Low Stock</th>${cfHeaders('inventory')}<th>Added By</th><th></th></tr></thead><tbody>
   ${invRows.length===0 ? noMatchRow(11, d.inventory.length) :
     invRows.map(i=>`<tr>
-      <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(i.name)}</td><td>${fd(invDate(i)) || '<span style="color:var(--muted); font-size:11px;">&mdash;</span>'}</td><td>${esc(i.qty)}${isLowStock(i) ? ' <span class="badge badge-overdue" title="At or below minimum quantity of ' + esc(i.minQty) + '">LOW</span>' : ''}</td><td style="white-space:normal; max-width:220px;">${descCellHtml('inventory:'+i.id+':specs', i.specs)}</td><td>${esc(i.cost)}</td><td>${rowTotal(i.qty, i.cost)}</td><td>${esc(i.category)}</td>
+      <td style="font-family:'IBM Plex Sans',sans-serif; max-width:340px; white-space:normal;">${descCellHtml('inventory:'+i.id+':name', i.name, 70)}</td><td>${fd(invDate(i)) || '<span style="color:var(--muted); font-size:11px;">&mdash;</span>'}</td><td>${esc(i.qty)}${isLowStock(i) ? ' <span class="badge badge-overdue" title="At or below minimum quantity of ' + esc(i.minQty) + '">LOW</span>' : ''}</td><td style="white-space:normal; max-width:220px;">${descCellHtml('inventory:'+i.id+':specs', i.specs)}</td><td>${esc(i.cost)}</td><td>${rowTotal(i.qty, i.cost)}</td><td>${esc(i.category)}</td>
       <td>${ageChip(invAgeDays(i)) || '<span style="color:var(--muted); font-size:11px;">&mdash;</span>'}</td>
       <td><select class="status-select" onchange="updateInventoryDeadStock('${i.id}', this.value)">
         <option value="No" ${(i.deadStock||'No')==='No'?'selected':''}>No</option>
@@ -5452,7 +5516,7 @@ function renderInventory(){
   <table><thead><tr><th>Item</th><th>Date</th><th>Qty</th><th>Specifications</th><th>Cost</th><th>Category</th><th>Added By</th><th></th></tr></thead><tbody>
   ${lowRows.length===0 ? `<tr class="empty-row"><td colspan="8">No low stock items &mdash; every item currently has quantity on hand.</td></tr>` :
     lowRows.map(i=>`<tr>
-      <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(i.name)}</td><td>${fd(invDate(i)) || '<span style="color:var(--muted); font-size:11px;">&mdash;</span>'}</td><td>${esc(i.qty)}</td><td style="white-space:normal; max-width:220px;">${descCellHtml('inventoryLow:'+i.id+':specs', i.specs)}</td><td>${esc(i.cost)}</td><td>${esc(i.category)}</td>${addedByCell(i)}
+      <td style="font-family:'IBM Plex Sans',sans-serif; max-width:340px; white-space:normal;">${descCellHtml('inventory:'+i.id+':name', i.name, 70)}</td><td>${fd(invDate(i)) || '<span style="color:var(--muted); font-size:11px;">&mdash;</span>'}</td><td>${esc(i.qty)}</td><td style="white-space:normal; max-width:220px;">${descCellHtml('inventoryLow:'+i.id+':specs', i.specs)}</td><td>${esc(i.cost)}</td><td>${esc(i.category)}</td>${addedByCell(i)}
       <td>${actionCell(editBtn('inventory', i.id), deleteBtn(`deleteInventory('${i.id}')`))}</td>
     </tr>`).join('')}
   </tbody></table>
@@ -5470,7 +5534,7 @@ function renderInventory(){
       const days = invAgeDays(i);
       const mv = lastOutwardDays(i);
       return `<tr>
-      <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(i.name)}</td><td>${esc(i.qty)}</td><td>${esc(i.cost)}</td><td>${rowTotal(i.qty, i.cost)}</td><td>${esc(i.category)}</td>
+      <td style="font-family:'IBM Plex Sans',sans-serif; max-width:340px; white-space:normal;">${descCellHtml('inventory:'+i.id+':name', i.name, 70)}</td><td>${esc(i.qty)}</td><td>${esc(i.cost)}</td><td>${rowTotal(i.qty, i.cost)}</td><td>${esc(i.category)}</td>
       <td>${esc(i.lastInwardOn || i.addedOn || '')}</td>
       <td>${days} days <span class="age-chip age-red">DEAD</span></td>
       <td>${mv===null ? '<span style="color:var(--muted); font-size:11px;">never moved</span>' : mv + ' days ago'}</td>
@@ -5490,7 +5554,7 @@ function renderInventory(){
     agingRows.map(i=>{
       const days = invAgeDays(i);
       return `<tr>
-      <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(i.name)}</td><td>${esc(i.qty)}</td><td>${esc(i.cost)}</td><td>${rowTotal(i.qty, i.cost)}</td><td>${esc(i.category)}</td>
+      <td style="font-family:'IBM Plex Sans',sans-serif; max-width:340px; white-space:normal;">${descCellHtml('inventory:'+i.id+':name', i.name, 70)}</td><td>${esc(i.qty)}</td><td>${esc(i.cost)}</td><td>${rowTotal(i.qty, i.cost)}</td><td>${esc(i.category)}</td>
       <td>${esc(i.lastInwardOn || i.addedOn || '')}</td>
       <td>${days} days ${ageChip(days)}</td>
       <td>${actionCell(editBtn('inventory', i.id), deleteBtn(`deleteInventory('${i.id}')`))}</td>
@@ -6586,7 +6650,7 @@ function hrAttendanceRegister(d){
     Hover a P to see In/Out times &nbsp;&middot;&nbsp; <span style="color:#e6577a;">Red day numbers are Sundays</span>
   </div>
   <div style="overflow-x:auto;">
-  <table style="border-collapse:collapse; font-size:12px;"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>
+  <table class="no-sno" style="border-collapse:collapse; font-size:12px;"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>
   </div>
   </div></div>`;
 }
