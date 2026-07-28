@@ -2732,7 +2732,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.57';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.58';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -7067,7 +7067,7 @@ function closePickAssemblyModal(){
   const el = document.getElementById('pick-assembly-modal-root');
   if(el) el.remove();
 }
-function paItemLineHtml(){
+function pickValveLineHtml(){
   return `<div class="out-line">
     <input type="text" class="pa-line-item" placeholder="Item description" style="flex:2 1 220px; min-width:180px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:'IBM Plex Sans',sans-serif; font-size:13px; border-radius:4px;">
     <input type="number" class="out-line-qty pa-line-qty" min="1" placeholder="Qty">
@@ -7079,15 +7079,15 @@ function paItemLineHtml(){
       <option value="">Size of Valve</option>
       ${VALVE_SIZES.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('')}
     </select>
-    <button type="button" class="icon-btn out-line-remove" onclick="removePaItemLine(this)" title="Remove this item">&#10005;</button>
+    <button type="button" class="icon-btn out-line-remove" onclick="removePickValveLine(this)" title="Remove this item">&#10005;</button>
   </div>`;
 }
-function addPaItemLine(){
-  const wrap = document.getElementById('pa-item-lines');
-  if(wrap) wrap.insertAdjacentHTML('beforeend', paItemLineHtml());
+function addPickValveLine(){
+  const wrap = document.getElementById('pick-valve-lines');
+  if(wrap) wrap.insertAdjacentHTML('beforeend', pickValveLineHtml());
 }
-function removePaItemLine(btn){
-  const wrap = document.getElementById('pa-item-lines');
+function removePickValveLine(btn){
+  const wrap = document.getElementById('pick-valve-lines');
   const line = btn.closest('.out-line');
   if(!wrap || !line) return;
   if(wrap.querySelectorAll('.out-line').length <= 1){
@@ -7113,8 +7113,8 @@ function renderPickAssemblyModal(r){
         <div class="field"><label>Notes</label><input type="text" id="pa-pick-notes" placeholder="Optional" value="Auto-created from pending assembly pick"></div>
       </div>
       <div class="field" style="margin-top:14px;"><label>Items</label>
-        <div id="pa-item-lines">${paItemLineHtml()}</div>
-        <button type="button" class="icon-btn" onclick="addPaItemLine()" style="margin-top:6px;">&#10133; Add another item</button>
+        <div id="pick-valve-lines">${pickValveLineHtml()}</div>
+        <button type="button" class="icon-btn" onclick="addPickValveLine()" style="margin-top:6px;">&#10133; Add another item</button>
       </div>
       </div>
       <div class="modal-actions">
@@ -7133,7 +7133,7 @@ async function confirmPickAssembly(){
     if(!r){ closePickAssemblyModal(); return; }
     const lineVal = (line, sel)=>{ const el = line.querySelector(sel); return el ? String(el.value||'').trim() : ''; };
     const fieldVal = (id)=>{ const el = document.getElementById(id); return el ? String(el.value||'').trim() : ''; };
-    const lines = [...document.querySelectorAll('#pa-item-lines .out-line')].map(line => ({
+    const lines = [...document.querySelectorAll('#pick-valve-lines .out-line')].map(line => ({
       item: lineVal(line, '.pa-line-item'),
       qty: lineVal(line, '.pa-line-qty'),
       valveType: lineVal(line, '.pa-line-valve-type'),
