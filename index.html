@@ -667,7 +667,13 @@ form input[readonly]{background:var(--panel-2); color:var(--muted); cursor:defau
 .modal-head h3{font-size:15px; letter-spacing:0.05em;}
 .modal-body{padding:20px;}
 .modal-actions{padding:16px 20px; border-top:1px solid var(--border); display:flex; gap:10px; justify-content:flex-end;}
-.action-cell{display:flex; gap:6px;}
+.action-cell{display:flex; gap:6px; align-items:center;}
+.bulk-cb{width:15px; height:15px; cursor:pointer; accent-color:var(--accent); flex-shrink:0;}
+.bulk-all{display:inline-flex; align-items:center; gap:5px; font-size:11px; color:var(--muted); font-family:'Oswald',sans-serif; letter-spacing:0.04em; text-transform:uppercase; cursor:pointer; margin-left:auto;}
+.bulk-all input{width:14px; height:14px; cursor:pointer; accent-color:var(--accent);}
+#bulk-bar{display:none; position:fixed; left:50%; bottom:22px; transform:translateX(-50%); z-index:900; gap:12px; align-items:center; background:var(--panel); border:1px solid var(--accent); border-radius:8px; padding:10px 16px; box-shadow:0 6px 24px rgba(0,0,0,0.25);}
+#bulk-bar #bulk-count{font-family:'Oswald',sans-serif; text-transform:uppercase; letter-spacing:0.04em; font-size:13px; color:var(--text);}
+@media print{ #bulk-bar{display:none !important;} .bulk-cb, .bulk-all{display:none !important;} }
 .clickable-row{cursor:pointer;}
 .clickable-row:hover{background:rgba(31,68,145,0.09);}
 
@@ -881,6 +887,216 @@ function pickBtn(id, fn){
 function actionCell(editHtml, deleteHtml){
   return `<div class="action-cell">${editHtml}${deleteHtml}</div>`;
 }
+
+/* ================= BULK DELETE (v11.53) =================
+   Admin can tick multiple rows in any data table and delete them together,
+   plus a central Data Cleanup panel (Users tab) to wipe a whole table /
+   date-range / text match at once. Both reuse the per-row delete functions so
+   side effects (Outward -> stock return, shared-HR sync, etc.) still happen.
+   saveLocation()/render() are suppressed during the loop and flushed once. */
+let _bulkSuppress = 0;
+const _bulkDirtyLocs = new Set();
+
+/* delete-fn name -> table (schema) key. Only these tables are bulk-deletable. */
+const BULK_DELETE_FNS = {
+  deleteVendorPO:'vendorPO', deleteCustomerPO:'customerPO', deletePoContractDoc:'poContractDocs',
+  deleteInward:'inward', deleteInventory:'inventory', deleteOutward:'outward',
+  deleteFutureShipment:'futureShipments', deleteLogistics:'logistics', deleteLead:'leads',
+  deleteSales:'sales', deleteEmployee:'employees', deleteAttendance:'attendance',
+  deleteLeave:'leaves', deleteSalary:'salaries', deleteAutomation:'automation',
+  deletePendingAssembly:'pendingAssembly', deleteEnquiry:'enquiry',
+  deleteProformaInvoice:'proformaInvoices', deletePurchaseAccount:'purchaseAccounts',
+  deleteSalesAccount:'salesAccounts', deleteQuotation:'quotations'
+};
+const CLEANUP_DELETE_FN = {};
+Object.keys(BULK_DELETE_FNS).forEach(function(fn){ CLEANUP_DELETE_FN[BULK_DELETE_FNS[fn]] = fn; });
+
+const bulkSel = new Map(); /* "fn|id" -> {fn,id} */
+function bulkKey(fn,id){ return fn+'|'+id; }
+
+/* Runs after every render: drop a checkbox into each row's action cell + a
+   "select all shown" toggle into each table toolbar. Keys off the existing
+   Delete buttons, so no render functions need editing. */
+function injectBulkCheckboxes(){
+  if(!isAdmin()) return;
+  ensureBulkBar();
+  var re = /^\s*(delete[A-Za-z]+)\(\s*'([\s\S]*?)'\s*\)/;
+  document.querySelectorAll('.action-cell').forEach(function(cell){
+    if(cell.querySelector('.bulk-cb')) return;
+    var btn = Array.prototype.slice.call(cell.querySelectorAll('button')).find(function(b){
+      var m = (b.getAttribute('onclick')||'').match(re);
+      return m && BULK_DELETE_FNS[m[1]];
+    });
+    if(!btn) return;
+    var m = (btn.getAttribute('onclick')||'').match(re);
+    var fn = m[1], id = m[2];
+    var cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.className = 'bulk-cb'; cb.title = 'Select for bulk delete';
+    cb.checked = bulkSel.has(bulkKey(fn,id));
+    cb.addEventListener('change', function(){
+      var k = bulkKey(fn,id);
+      if(cb.checked) bulkSel.set(k,{fn:fn,id:id}); else bulkSel.delete(k);
+      updateBulkBar();
+    });
+    cell.insertBefore(cb, cell.firstChild);
+  });
+  document.querySelectorAll('.table-tools').forEach(function(tools){
+    if(tools.querySelector('.bulk-all')) return;
+    var panel = tools.closest('.panel'); if(!panel) return;
+    if(!panel.querySelector('.bulk-cb')) return;
+    var wrap = document.createElement('label');
+    wrap.className = 'bulk-all';
+    wrap.innerHTML = '<input type="checkbox"> All shown';
+    var box = wrap.querySelector('input');
+    box.addEventListener('change', function(){
+      panel.querySelectorAll('.bulk-cb').forEach(function(cb){
+        if(cb.checked !== box.checked){ cb.checked = box.checked; cb.dispatchEvent(new Event('change')); }
+      });
+    });
+    tools.appendChild(wrap);
+  });
+  updateBulkBar();
+}
+
+function ensureBulkBar(){
+  if(document.getElementById('bulk-bar')) return;
+  var bar = document.createElement('div');
+  bar.id = 'bulk-bar';
+  bar.innerHTML =
+    '<span id="bulk-count">0 selected</span>' +
+    '<button type="button" class="btn" onclick="bulkDeleteSelected()">Delete Selected</button>' +
+    '<button type="button" class="btn btn-ghost" onclick="bulkClearSelection()">Clear</button>';
+  document.body.appendChild(bar);
+}
+function updateBulkBar(){
+  var bar = document.getElementById('bulk-bar'); if(!bar) return;
+  var c = bulkSel.size;
+  var label = document.getElementById('bulk-count');
+  if(label) label.textContent = c + ' selected';
+  bar.style.display = c>0 ? 'flex' : 'none';
+}
+function bulkClearSelection(){
+  bulkSel.clear();
+  document.querySelectorAll('.bulk-cb, .bulk-all input').forEach(function(cb){ cb.checked=false; });
+  updateBulkBar();
+}
+async function bulkDeleteSelected(){
+  if(!isAdmin() || bulkSel.size===0) return;
+  var items = Array.from(bulkSel.values());
+  if(!confirm('Permanently delete '+items.length+' selected record(s)? This cannot be undone.')) return;
+  await runBulkDeletes(items);
+  bulkClearSelection();
+  render();
+}
+
+/* Shared runner: call existing delete fns with save/render suppressed, then
+   flush one real save per touched location. */
+async function runBulkDeletes(items){
+  _bulkSuppress++;
+  try{
+    for(var i=0;i<items.length;i++){
+      var f = window[items[i].fn];
+      if(typeof f === 'function') await f(items[i].id);
+    }
+  } finally { _bulkSuppress--; }
+  var locs = Array.from(_bulkDirtyLocs);
+  for(var j=0;j<locs.length;j++){ await saveLocation(locs[j]); }
+  _bulkDirtyLocs.clear();
+}
+
+/* ---- Data Cleanup panel (Users tab, admin only) ---- */
+const CLEANUP_TABLES = [
+  ['inventory','Inventory'], ['inward','Inward'], ['outward','Outward'],
+  ['logistics','Logistics'], ['futureShipments','Future Shipments'],
+  ['vendorPO','Vendor OA / POs'], ['customerPO','Customer POs'],
+  ['poContractDocs','PO Contract Docs'], ['sales','Sales Orders'],
+  ['leads','Leads'], ['enquiry','Enquiries'], ['automation','Automation'],
+  ['pendingAssembly','Pending Assembly'], ['quotations','Quotations'],
+  ['proformaInvoices','Proforma Invoices'], ['purchaseAccounts','Purchase (Accounts)'],
+  ['salesAccounts','Sales (Accounts)'], ['employees','Employees (HR shared)'],
+  ['attendance','Attendance (HR shared)'], ['leaves','Leaves (HR shared)'],
+  ['salaries','Salaries (HR shared)']
+];
+function dataCleanupPanel(){
+  if(!isAdmin()) return '';
+  var opts = CLEANUP_TABLES.map(function(t){ return '<option value="'+t[0]+'">'+esc(t[1])+'</option>'; }).join('');
+  return `
+  ${secHead('&#9888;', 'Data Cleanup')}
+  <div class="panel">
+    <div class="panel-head"><h3>Bulk delete records &mdash; ${locationLabel(currentLocation)}</h3></div>
+    <div class="panel-body">
+    <p style="margin:0 0 12px 0; font-size:12px; color:var(--muted);">Deletes matching rows from the <b>currently selected company</b> (${esc(currentLocation)}). HR tables (employees, attendance, leaves, salaries) are shared, so those deletions affect both companies. Always Preview first &mdash; this cannot be undone.</p>
+    <div class="form-grid">
+      <div class="field"><label>Table</label><select id="cleanup-table">${opts}</select></div>
+      <div class="field"><label>Date from (optional)</label><input type="date" id="cleanup-from"></div>
+      <div class="field"><label>Date to (optional)</label><input type="date" id="cleanup-to"></div>
+      <div class="field"><label>Text contains (optional)</label><input type="text" id="cleanup-q" placeholder="e.g. customer / item / PO"></div>
+    </div>
+    <div style="display:flex; gap:10px; margin-top:6px; flex-wrap:wrap;">
+      <button type="button" class="btn btn-ghost" onclick="cleanupPreview()">Preview matches</button>
+      <button type="button" class="btn" style="background:var(--danger); border-color:var(--danger);" onclick="cleanupRun()">Delete matching&hellip;</button>
+    </div>
+    <div id="cleanup-result" style="margin-top:14px; font-size:12.5px;"></div>
+    </div>
+  </div>`;
+}
+function cleanupField(id){ var el = document.getElementById(id); return el ? el.value : ''; }
+function cleanupMatches(){
+  var d = DATA[currentLocation]; if(!d) return {rows:[], tbl:'', total:0};
+  var tbl = cleanupField('cleanup-table');
+  var arr = Array.isArray(d[tbl]) ? d[tbl] : [];
+  var from = cleanupField('cleanup-from'), to = cleanupField('cleanup-to');
+  var q = (cleanupField('cleanup-q')||'').trim().toLowerCase();
+  var fields = (typeof EDIT_SCHEMAS!=='undefined' && EDIT_SCHEMAS[tbl]) ? EDIT_SCHEMAS[tbl] : [];
+  var df = fields.find(function(f){ return f.type==='date'; });
+  var fromT = from ? Date.parse(from) : null;
+  var toT = to ? Date.parse(to) : null;
+  var rows = arr.filter(function(r){
+    if(df && (fromT!=null || toT!=null)){
+      var t = Date.parse(r[df.key]);
+      if(isNaN(t)) return false;
+      if(fromT!=null && t < fromT) return false;
+      if(toT!=null && t > toT + 86399999) return false;
+    }
+    if(q){
+      var hit = fields.some(function(f){ return String(r[f.key]==null?'':r[f.key]).toLowerCase().includes(q); })
+        || String(r.addedBy||'').toLowerCase().includes(q);
+      if(!hit) return false;
+    }
+    return true;
+  });
+  return {rows:rows, df:df, tbl:tbl, total:arr.length};
+}
+function cleanupPreview(){
+  var res = cleanupMatches();
+  var box = document.getElementById('cleanup-result'); if(!box) return;
+  if(!res.tbl){ box.innerHTML = ''; return; }
+  if(!res.rows.length){ box.innerHTML = '<span style="color:var(--muted);">No records match (0 of '+res.total+' in this table).</span>'; return; }
+  var fields = EDIT_SCHEMAS[res.tbl] || [];
+  var sample = res.rows.slice(0,5).map(function(r){
+    var bits = fields.slice(0,3).map(function(f){ return esc(String(r[f.key]==null?'':r[f.key])); }).filter(Boolean);
+    return '<li>'+ (bits.join(' &middot; ') || '(record)') +'</li>';
+  }).join('');
+  box.innerHTML = '<div style="color:var(--danger); font-weight:600;">'+res.rows.length+' of '+res.total+' record(s) match and will be deleted.</div>'
+    + '<ul style="margin:8px 0 0 18px;">'+sample+'</ul>'
+    + (res.rows.length>5 ? '<div style="color:var(--muted); margin-top:4px;">&hellip;and '+(res.rows.length-5)+' more.</div>' : '');
+}
+async function cleanupRun(){
+  if(!isAdmin()) return;
+  var res = cleanupMatches();
+  if(!res.tbl) return;
+  if(!res.rows.length){ alert('No matching records to delete.'); return; }
+  var fn = CLEANUP_DELETE_FN[res.tbl];
+  if(!fn){ alert('This table cannot be bulk-deleted.'); return; }
+  var typed = prompt('This will permanently delete '+res.rows.length+' record(s) from "'+res.tbl+'" in '+currentLocation+'.\n\nType DELETE to confirm:');
+  if(typed !== 'DELETE'){ return; }
+  var items = res.rows.map(function(r){ return {fn:fn, id:r.id}; }).filter(function(x){ return x.id!=null; });
+  await runBulkDeletes(items);
+  alert('Deleted '+items.length+' record(s).');
+  render();
+}
+/* ================= END BULK DELETE ================= */
+
 
 /* ---------------- TABLE TOOLS: search / filter / sort / show-more ----------------
    Works on every data table. Field definitions are reused from EDIT_SCHEMAS. */
@@ -1918,6 +2134,7 @@ function locationRecordCount(d){
   return n;
 }
 async function saveLocation(loc){
+  if(_bulkSuppress){ _bulkDirtyLocs.add(loc); return; }
   applyCfPending(loc);
   /* Last line of defence: if this session is somehow holding a completely
      empty dataset while the cloud copy has records, refuse to overwrite. */
@@ -2240,6 +2457,7 @@ function restoreScrollPositions(snap){
   });
 }
 function render(customHtml){
+  if(_bulkSuppress) return;
   const scrollSnap = captureScrollPositions();
   applyLocationBranding();
   const app = document.getElementById('app');
@@ -2253,6 +2471,7 @@ function render(customHtml){
   if(!session){ setTimeout(()=>{ const el=document.getElementById('totp-code'); if(el) el.focus(); }, 0); }
   if(session && locationChosen && currentTab==='quotation'){ setTimeout(()=>{ try{ updateQuoteTotals(); }catch(e){} }, 0); }
   if(session && locationChosen){ setTimeout(injectCustomFieldInputs, 0); }
+  if(session && locationChosen){ setTimeout(injectBulkCheckboxes, 0); }
   cfPending = null;
 }
 
@@ -5040,7 +5259,7 @@ async function addInward(e){
         existing.qty = String((parseFloat(existing.qty)||0) + qtyNum);
         if(l.price && !existing.cost) existing.cost = l.price;
         if(l.deadStock==='Yes') existing.deadStock = 'Yes';
-        existing.lastInwardOn = today();
+        existing.lastInwardOn = header.date || today();
       } else {
         d.inventory.push({
           id: uid(),
@@ -5050,8 +5269,8 @@ async function addInward(e){
           cost: l.price,
           category: l.itemType,
           deadStock: l.deadStock,
-          addedOn: today(),
-          lastInwardOn: today(),
+          addedOn: header.date || today(),
+          lastInwardOn: header.date || today(),
           addedBy: actorName()
         });
       }
@@ -5097,6 +5316,23 @@ function invAgeDays(i){
   if(!ts) ts = Date.parse(i.lastInwardOn || i.addedOn || '') || 0;
   if(!ts) return null;
   return Math.max(0, Math.floor((Date.now() - ts) / 86400000));
+}
+/* The date to display for a stock item: its most recent Inward receipt date
+   (matched by item name, same source invAgeDays uses), falling back to the
+   item's own lastInwardOn / Stock Since date. */
+function invDate(i){
+  const d = DATA[currentLocation] || {};
+  const nm = String(i.name||'').trim().toLowerCase();
+  let best = '', bestTs = 0;
+  if(nm){
+    (d.inward||[]).forEach(r=>{
+      if(String(r.item||'').trim().toLowerCase() === nm){
+        const t = Date.parse(r.date) || 0;
+        if(t > bestTs){ bestTs = t; best = r.date; }
+      }
+    });
+  }
+  return best || i.lastInwardOn || i.addedOn || '';
 }
 function ageChip(days){
   if(days === null || days === undefined) return '';
@@ -5193,10 +5429,10 @@ function renderInventory(){
   <div class="panel"><div class="panel-head"><h3>Stock &mdash; ${locationLabel(currentLocation, 14)}</h3><div class="panel-head-actions">${importBtn('inventory')}${exportBtn('exportInventory')}</div></div>
   <div class="panel-body">
   ${tableToolbar('inventory', d.inventory)}
-  <table><thead><tr><th>Item</th><th>Qty</th><th>Specifications</th><th>Cost</th><th>Total Value</th><th>Category</th><th>Aging</th><th>Low Stock</th>${cfHeaders('inventory')}<th>Added By</th><th></th></tr></thead><tbody>
-  ${invRows.length===0 ? noMatchRow(10, d.inventory.length) :
+  <table><thead><tr><th>Item</th><th>Date</th><th>Qty</th><th>Specifications</th><th>Cost</th><th>Total Value</th><th>Category</th><th>Aging</th><th>Low Stock</th>${cfHeaders('inventory')}<th>Added By</th><th></th></tr></thead><tbody>
+  ${invRows.length===0 ? noMatchRow(11, d.inventory.length) :
     invRows.map(i=>`<tr>
-      <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(i.name)}</td><td>${esc(i.qty)}${isLowStock(i) ? ' <span class="badge badge-overdue" title="At or below minimum quantity of ' + esc(i.minQty) + '">LOW</span>' : ''}</td><td>${esc(i.specs)}</td><td>${esc(i.cost)}</td><td>${rowTotal(i.qty, i.cost)}</td><td>${esc(i.category)}</td>
+      <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(i.name)}</td><td>${fd(invDate(i)) || '<span style="color:var(--muted); font-size:11px;">&mdash;</span>'}</td><td>${esc(i.qty)}${isLowStock(i) ? ' <span class="badge badge-overdue" title="At or below minimum quantity of ' + esc(i.minQty) + '">LOW</span>' : ''}</td><td style="white-space:normal; max-width:220px;">${descCellHtml('inventory:'+i.id+':specs', i.specs)}</td><td>${esc(i.cost)}</td><td>${rowTotal(i.qty, i.cost)}</td><td>${esc(i.category)}</td>
       <td>${ageChip(invAgeDays(i)) || '<span style="color:var(--muted); font-size:11px;">&mdash;</span>'}</td>
       <td><select class="status-select" onchange="updateInventoryDeadStock('${i.id}', this.value)">
         <option value="No" ${(i.deadStock||'No')==='No'?'selected':''}>No</option>
@@ -5205,7 +5441,7 @@ function renderInventory(){
       ${cfCells('inventory', i)}${addedByCell(i)}
       <td>${actionCell(editBtn('inventory', i.id), deleteBtn(`deleteInventory('${i.id}')`))}</td>
     </tr>`).join('')}
-  </tbody>${totalFootRow(10 + cfDefs('inventory').length, 'Total Stock Value (all matching items)', sumTotal(invAll,'qty','cost'))}</table>
+  </tbody>${totalFootRow(11 + cfDefs('inventory').length, 'Total Stock Value (all matching items)', sumTotal(invAll,'qty','cost'))}</table>
   ${showMoreBar('inventory', invAll.length)}
   </div></div>`;
   const lowRows = limitRows('inventoryLow', lowStockList);
@@ -5213,10 +5449,10 @@ function renderInventory(){
   ${secHead('&#128683;', 'Low Stock')}
   <div class="panel"><div class="panel-head"><h3>&#128683; Low Stock &mdash; ${locationLabel(currentLocation, 14)} <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(marked as low stock, or zero quantity on hand)</span></h3><div class="panel-head-actions">${exportBtn('exportLowStock')}</div></div>
   <div class="panel-body">
-  <table><thead><tr><th>Item</th><th>Qty</th><th>Specifications</th><th>Cost</th><th>Category</th><th>Added By</th><th></th></tr></thead><tbody>
-  ${lowRows.length===0 ? `<tr class="empty-row"><td colspan="7">No low stock items &mdash; every item currently has quantity on hand.</td></tr>` :
+  <table><thead><tr><th>Item</th><th>Date</th><th>Qty</th><th>Specifications</th><th>Cost</th><th>Category</th><th>Added By</th><th></th></tr></thead><tbody>
+  ${lowRows.length===0 ? `<tr class="empty-row"><td colspan="8">No low stock items &mdash; every item currently has quantity on hand.</td></tr>` :
     lowRows.map(i=>`<tr>
-      <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(i.name)}</td><td>${esc(i.qty)}</td><td>${esc(i.specs)}</td><td>${esc(i.cost)}</td><td>${esc(i.category)}</td>${addedByCell(i)}
+      <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(i.name)}</td><td>${fd(invDate(i)) || '<span style="color:var(--muted); font-size:11px;">&mdash;</span>'}</td><td>${esc(i.qty)}</td><td style="white-space:normal; max-width:220px;">${descCellHtml('inventoryLow:'+i.id+':specs', i.specs)}</td><td>${esc(i.cost)}</td><td>${esc(i.category)}</td>${addedByCell(i)}
       <td>${actionCell(editBtn('inventory', i.id), deleteBtn(`deleteInventory('${i.id}')`))}</td>
     </tr>`).join('')}
   </tbody></table>
@@ -5306,16 +5542,16 @@ async function updateInventoryDeadStock(id, value){
 }
 function exportInventory(){
   const d = DATA[currentLocation];
-  const headers = ['Item','Qty','Specifications','Cost','Total Value','Category','Low Stock','Added By'];
-  const rows = d.inventory.map(i=>[i.name, i.qty, i.specs, i.cost, ((parseFloat(i.qty)||0)*(parseFloat(i.cost)||0))||'', i.category, i.deadStock||'No', i.addedBy]);
+  const headers = ['Item','Date','Qty','Specifications','Cost','Total Value','Category','Low Stock','Added By'];
+  const rows = d.inventory.map(i=>[i.name, invDate(i), i.qty, i.specs, i.cost, ((parseFloat(i.qty)||0)*(parseFloat(i.cost)||0))||'', i.category, i.deadStock||'No', i.addedBy]);
   cfExportAppend('inventory', d.inventory, headers, rows);
   exportToExcel(currentLocation+'_Inventory', headers, rows);
 }
 function exportLowStock(){
   const d = DATA[currentLocation];
   const lowStockList = d.inventory.filter(isLowStockFlag);
-  const headers = ['Item','Qty','Specifications','Cost','Category','Added By'];
-  const rows = lowStockList.map(i=>[i.name, i.qty, i.specs, i.cost, i.category, i.addedBy]);
+  const headers = ['Item','Date','Qty','Specifications','Cost','Category','Added By'];
+  const rows = lowStockList.map(i=>[i.name, invDate(i), i.qty, i.specs, i.cost, i.category, i.addedBy]);
   exportToExcel(currentLocation+'_LowStock', headers, rows);
 }
 function exportDeadStock(){
@@ -6817,28 +7053,123 @@ async function addPendingAssembly(e){
   render();
   return false;
 }
-async function pickPendingAssembly(id){
+let pickAssemblyModalState = null;
+function pickPendingAssembly(id){
   const d = DATA[currentLocation];
   const r = d.pendingAssembly.find(x=>x.id===id);
   if(!r) return;
   if(r.assignedTo) return;
-  r.assignedTo = actorName();
-  d.automation.push({
-    id: uid(),
-    poNumber: r.poNumber,
-    date: today(),
-    automationValue: r.poValue,
-    item: r.customer,
-    qty: '',
-    valveType: '',
-    valveSize: '',
-    status: 'In Progress',
-    notes: 'Auto-created from pending assembly pick',
-    assignedTo: actorName(),
-    addedBy: actorName()
-  });
-  await saveLocation(currentLocation);
-  render();
+  pickAssemblyModalState = {id};
+  renderPickAssemblyModal(r);
+}
+function closePickAssemblyModal(){
+  pickAssemblyModalState = null;
+  const el = document.getElementById('pick-assembly-modal-root');
+  if(el) el.remove();
+}
+function paItemLineHtml(){
+  return `<div class="out-line">
+    <input type="text" class="pa-line-item" placeholder="Item description" style="flex:2 1 220px; min-width:180px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:'IBM Plex Sans',sans-serif; font-size:13px; border-radius:4px;">
+    <input type="number" class="out-line-qty pa-line-qty" min="1" placeholder="Qty">
+    <select class="out-line-item pa-line-valve-type" style="flex:1 1 160px; min-width:150px;">
+      <option value="">Type of Valve</option>
+      ${VALVE_TYPES.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('')}
+    </select>
+    <select class="out-line-item pa-line-valve-size" style="flex:1 1 120px; min-width:110px;">
+      <option value="">Size of Valve</option>
+      ${VALVE_SIZES.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('')}
+    </select>
+    <button type="button" class="icon-btn out-line-remove" onclick="removePaItemLine(this)" title="Remove this item">&#10005;</button>
+  </div>`;
+}
+function addPaItemLine(){
+  const wrap = document.getElementById('pa-item-lines');
+  if(wrap) wrap.insertAdjacentHTML('beforeend', paItemLineHtml());
+}
+function removePaItemLine(btn){
+  const wrap = document.getElementById('pa-item-lines');
+  const line = btn.closest('.out-line');
+  if(!wrap || !line) return;
+  if(wrap.querySelectorAll('.out-line').length <= 1){
+    line.querySelector('.pa-line-item').value = '';
+    line.querySelector('.pa-line-qty').value = '';
+    line.querySelector('.pa-line-valve-type').value = '';
+    line.querySelector('.pa-line-valve-size').value = '';
+    return;
+  }
+  line.remove();
+}
+function renderPickAssemblyModal(r){
+  const modalHtml = `
+  <div id="pick-assembly-modal-root" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-head"><h3>Assign to Automation</h3><button class="icon-btn" onclick="closePickAssemblyModal()">Close</button></div>
+      <div class="modal-body">
+      <p style="margin:0 0 12px; color:var(--muted); font-size:13px;">Picking this entry will assign it to you and move it into Automation. It will be removed from Pending Assembly. Enter each valve item below as a line item.</p>
+      <div class="form-grid">
+        <div class="field"><label>P.O Num</label><input type="text" id="pa-pick-po-num" value="${esc(r.poNumber)}"></div>
+        <div class="field"><label>Date</label><input type="date" id="pa-pick-date" value="${today()}" required></div>
+        <div class="field"><label>Automation Value</label><input type="number" step="0.01" id="pa-pick-value" value="${esc(r.poValue)}" placeholder="Optional"></div>
+        <div class="field"><label>Notes</label><input type="text" id="pa-pick-notes" placeholder="Optional" value="Auto-created from pending assembly pick"></div>
+      </div>
+      <div class="field" style="margin-top:14px;"><label>Items</label>
+        <div id="pa-item-lines">${paItemLineHtml()}</div>
+        <button type="button" class="icon-btn" onclick="addPaItemLine()" style="margin-top:6px;">&#10133; Add another item</button>
+      </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="closePickAssemblyModal()">Cancel</button>
+        <button class="btn" onclick="confirmPickAssembly()">Pick &amp; Move to Automation</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
+async function confirmPickAssembly(){
+  if(!pickAssemblyModalState) return;
+  try{
+    const d = DATA[currentLocation];
+    const r = d.pendingAssembly.find(x=>x.id===pickAssemblyModalState.id);
+    if(!r){ closePickAssemblyModal(); return; }
+    const lineVal = (line, sel)=>{ const el = line.querySelector(sel); return el ? String(el.value||'').trim() : ''; };
+    const fieldVal = (id)=>{ const el = document.getElementById(id); return el ? String(el.value||'').trim() : ''; };
+    const lines = [...document.querySelectorAll('#pa-item-lines .out-line')].map(line => ({
+      item: lineVal(line, '.pa-line-item'),
+      qty: lineVal(line, '.pa-line-qty'),
+      valveType: lineVal(line, '.pa-line-valve-type'),
+      valveSize: lineVal(line, '.pa-line-valve-size')
+    })).filter(l => l.item || l.qty || l.valveType || l.valveSize);
+    if(lines.length === 0){ alert('Enter at least one item (description, qty, valve type, or valve size).'); return; }
+    const me = actorName();
+    const poNumber = fieldVal('pa-pick-po-num');
+    const date = fieldVal('pa-pick-date') || today();
+    const automationValue = fieldVal('pa-pick-value');
+    const notes = fieldVal('pa-pick-notes');
+    for(const l of lines){
+      d.automation.push({
+        id: uid(),
+        poNumber,
+        date,
+        automationValue,
+        item: l.item,
+        qty: l.qty,
+        valveType: l.valveType,
+        valveSize: l.valveSize,
+        status: 'In Progress',
+        notes,
+        assignedTo: me,
+        addedBy: me
+      });
+    }
+    d.pendingAssembly = d.pendingAssembly.filter(x=>x.id!==r.id);
+    closePickAssemblyModal();
+    await saveLocation(currentLocation);
+    render();
+    alert(lines.length + ' item(s) moved to Automation.');
+  }catch(err){
+    console.error('confirmPickAssembly failed:', err);
+    alert('Could not move to Automation: ' + (err && err.message ? err.message : err) + '\n\n(Open F12 > Console for details.)');
+  }
 }
 function exportPendingAssembly(){
   const d = DATA[currentLocation];
@@ -11129,6 +11460,7 @@ function renderUsers(){
   </div></div>
   ${roleManagerPanel()}
   ${customFieldsPanel()}
+  ${dataCleanupPanel()}
   ${auditLogPanel()}`;
 }
 
