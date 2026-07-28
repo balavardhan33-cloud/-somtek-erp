@@ -2732,7 +2732,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.58';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.59';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -7780,6 +7780,8 @@ function proformaSection(d){
       <div class="field"><label>IGST <span style="color:var(--muted); font-weight:400;">(auto)</span></label><input type="number" step="0.01" id="pf-igst" placeholder="Auto" readonly tabindex="-1"></div>
       <div class="field"><label>Round Off</label><input type="number" step="0.01" id="pf-roundoff" placeholder="Optional" oninput="pfRecalc()"></div>
       <div class="field"><label>Total Value <span style="color:var(--muted); font-weight:400;">(auto)</span></label><input type="number" step="0.01" id="pf-invval" placeholder="Auto" readonly tabindex="-1"></div>
+      <div class="field"><label>Amount Received</label><input type="number" step="0.01" min="0" id="pf-received" placeholder="Optional"></div>
+      <div class="field"><label>Payment Date</label><input type="date" id="pf-paydate"></div>
       <div class="field"><label>Terms of Delivery &amp; Payment</label><input type="text" id="pf-terms" placeholder="e.g. 50% advance, balance before dispatch"></div>
       <div class="field"><label>Delivery Period</label><input type="text" id="pf-delivery" placeholder="e.g. 3-4 weeks"></div>
       <div class="field"><label>Mode Of Transport</label><input type="text" id="pf-transport" placeholder="Optional"></div>
@@ -7895,6 +7897,8 @@ async function addProformaInvoice(e){
     igstPct: gv('pf-igstpct'), igst: gv('pf-igst'),
     roundOff: gv('pf-roundoff'),
     invoiceValue: gv('pf-invval'),
+    amountReceived: gv('pf-received'),
+    paymentDate: gv('pf-paydate'),
     valueInWords: gv('pf-invval') ? numberToWordsINR(gv('pf-invval')) : '',
     termsOfDelivery: gv('pf-terms'),
     deliveryPeriod: gv('pf-delivery'),
@@ -7991,8 +7995,8 @@ function convertProformaToSales(id){
 let PROFORMA_CONVERT_ID = null;
 function exportProformaInvoices(){
   const d = DATA[currentLocation];
-  const headers = ['Proforma No','Date','Valid Until','Customer','Bill To','GST No.','PO No','PO Date','Place of Supply','State Code','Contact Person','Mobile','Description of Goods','HSN/SAC','Qty','Taxable Value','Freight','CGST %','CGST','SGST %','SGST','IGST %','IGST','Round Off','Total Value','Terms','Delivery Period','Notes','Status','Added By'];
-  const rows = (d.proformaInvoices||[]).map(r=>[r.invNo, r.date, r.validity, r.customer, r.billTo, r.gstin, r.poNo, r.poDate, r.placeOfSupply, r.stateCode, r.contactPerson, r.contactMobile, (r.description || saItems(r).map(it=>it.description).filter(Boolean).join('; ')), r.hsnSac, r.qty, r.taxable, r.freight, r.cgstPct, r.cgst, r.sgstPct, r.sgst, r.igstPct, r.igst, r.roundOff, r.invoiceValue, r.termsOfDelivery, r.deliveryPeriod, r.notes, (r.convertedInvNo ? 'Converted ('+r.convertedInvNo+')' : 'Open'), r.addedBy]);
+  const headers = ['Proforma No','Date','Valid Until','Customer','Bill To','GST No.','PO No','PO Date','Place of Supply','State Code','Contact Person','Mobile','Description of Goods','HSN/SAC','Qty','Taxable Value','Freight','CGST %','CGST','SGST %','SGST','IGST %','IGST','Round Off','Total Value','Amount Received','Payment Date','Terms','Delivery Period','Notes','Status','Added By'];
+  const rows = (d.proformaInvoices||[]).map(r=>[r.invNo, r.date, r.validity, r.customer, r.billTo, r.gstin, r.poNo, r.poDate, r.placeOfSupply, r.stateCode, r.contactPerson, r.contactMobile, (r.description || saItems(r).map(it=>it.description).filter(Boolean).join('; ')), r.hsnSac, r.qty, r.taxable, r.freight, r.cgstPct, r.cgst, r.sgstPct, r.sgst, r.igstPct, r.igst, r.roundOff, r.invoiceValue, r.amountReceived, r.paymentDate, r.termsOfDelivery, r.deliveryPeriod, r.notes, (r.convertedInvNo ? 'Converted ('+r.convertedInvNo+')' : 'Open'), r.addedBy]);
   exportToExcel(currentLocation+'_Proforma_Invoices', headers, rows);
 }
 
@@ -9082,6 +9086,28 @@ function printAllInvoiceCopies(id){
   document.body.classList.add('quote-open');
 }
 
+function posBlockHtml(r){
+  /* Mirrors the Bill To cell: bold name line + regular-weight address line. */
+  let name = String(r.customer || '').trim();
+  let addr = String(r.shipTo || '').trim() || String(r.billTo || '').trim();
+  if(name && addr){
+    const norm = c => c.toLowerCase().replace(/[^a-z0-9]/g,'');
+    const nName = norm(name);
+    let ni = 0, ai = 0;
+    while(ai < addr.length && ni < nName.length){
+      const c = addr[ai].toLowerCase();
+      if(/[a-z0-9]/.test(c)){ if(c === nName[ni]){ ni++; ai++; } else break; }
+      else ai++;
+    }
+    if(ni === nName.length){ addr = addr.slice(ai).replace(/^[\s,\u2013-]+/,'').trim(); }
+  }
+  if(!name){ name = addr; addr = ''; }
+  if(addr && addr === name) addr = '';
+  const nm = '<div style="font-weight:800; font-size:12px; margin-top:2px;">' + esc(dash(name)) + '</div>';
+  const ad = addr ? '<div style="font-weight:400; font-size:11px; line-height:1.5; margin-top:2px;">' + esc(addr) + '</div>' : '';
+  return nm + ad;
+}
+
 function invoiceDocumentHtml(r, heading, docTitle){
   /* Mirrors the official printed Tax Invoice: MSME strip, logo + centred title,
      company block, Bill To / Place of Supply grid with copy-label + INVOICE/DC/PO
@@ -9146,7 +9172,7 @@ function invoiceDocumentHtml(r, heading, docTitle){
         </td>
         <td rowspan="2" style="${cell} width:31%;">
           <div style="font-size:9.5px; font-weight:700;">Place of Supply:</div>
-          <div style="font-weight:800; font-size:11.5px; margin-top:2px; line-height:1.5;">${esc(dash(r.shipTo || r.customer || r.billTo))}</div>
+          ${posBlockHtml(r)}
           <div style="margin-top:8px;"><b>STATE: ${esc(dash(gstStateName(r)))}</b></div>
           <div><b>STATE CODE: ${esc(dash(r.stateCode))}</b></div>
           <div style="margin-top:14px;">Contact Person : ${esc(dash(saContactDisplay(r) || ''))}</div>
@@ -9167,7 +9193,7 @@ function invoiceDocumentHtml(r, heading, docTitle){
         </td>
         <td rowspan="3" style="${cell} width:31%;">
           <div style="font-size:9.5px; font-weight:700;">Place of Supply:</div>
-          <div style="font-weight:800; font-size:11.5px; margin-top:2px; line-height:1.5;">${esc(dash(r.shipTo || r.customer || r.billTo))}</div>
+          ${posBlockHtml(r)}
           <div style="margin-top:8px;"><b>STATE: ${esc(dash(gstStateName(r)))}</b></div>
           <div><b>STATE CODE: ${esc(dash(r.stateCode))}</b></div>
         </td>
@@ -10134,6 +10160,8 @@ const EDIT_SCHEMAS = {
     {key:'igst', label:'IGST', type:'number'},
     {key:'roundOff', label:'Round Off', type:'number'},
     {key:'invoiceValue', label:'Total Value', type:'number'},
+    {key:'amountReceived', label:'Amount Received', type:'number'},
+    {key:'paymentDate', label:'Payment Date', type:'date'},
     {key:'termsOfDelivery', label:'Terms of Delivery & Payment', type:'text'},
     {key:'deliveryPeriod', label:'Delivery Period', type:'text'},
     {key:'modeOfTransport', label:'Mode Of Transport', type:'text'},
