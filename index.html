@@ -550,9 +550,6 @@ form input[readonly]{background:var(--panel-2); color:var(--muted); cursor:defau
 .kpi-star{cursor:pointer; font-size:15px; line-height:1; opacity:0.3; margin-left:8px; user-select:none;}
 .kpi-star:hover{opacity:0.7;}
 .kpi-star.faved{opacity:1; color:#f0a500;}
-.ps-strip{position:fixed; left:14px; bottom:14px; z-index:650; background:#123d24; color:#b9f3cd; border:1px solid #2e8a56; padding:9px 14px; font-size:12px; font-family:'IBM Plex Mono',monospace; border-radius:6px; box-shadow:0 6px 18px rgba(0,0,0,0.3); display:flex; align-items:center; gap:12px;}
-.ps-strip button{background:#2e8a56; color:#fff; border:none; padding:5px 10px; cursor:pointer; font-size:11px; border-radius:4px;}
-.ps-strip.ps-err{background:#4a1518; color:#ffc4c6; border-color:#a33;}
 .age-chip{display:inline-block; padding:2px 8px; font-size:10px; font-weight:700; border-radius:3px; font-family:'IBM Plex Mono',monospace; letter-spacing:0.02em; white-space:nowrap;}
 .age-red{background:#fdecea; color:#c62828; border:1px solid #f2b8b5;}
 .age-yellow{background:#fff8e1; color:#8a6100; border:1px solid #eeda9a;}
@@ -1332,6 +1329,169 @@ let firebaseLoadError = null;
 const FS_TIMEOUT_MS = 8000;
 const FS_REST_BASE = 'https://firestore.googleapis.com/v1/projects/' + FIREBASE_CONFIG.projectId + '/databases/(default)/documents/' + APP_COLLECTION + '/';
 
+/* ============================================================
+   CLOUD AUTH (Phase A)
+   ------------------------------------------------------------
+   Signs the session in to Firebase Authentication using the REST
+   endpoints only - no SDK, so no WebChannel, so this keeps working
+   behind the corporate firewall like the rest of the app.
+
+   Nothing here is allowed to block an ERP login. If the Firebase
+   account does not exist yet, or the network is down, sign-in fails
+   quietly and the app behaves exactly as it did before. That is what
+   makes this file safe to deploy while the Firestore rules are still
+   open: deploy first, confirm the padlock in the top bar is locked
+   for every user, and only then tighten the rules.
+   ============================================================ */
+const AUTH_EMAIL_DOMAIN = 'somtek-erp.local';
+const AUTH_SIGNIN_URL  = 'https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=' + FIREBASE_CONFIG.apiKey;
+const AUTH_UPDATE_URL  = 'https://identitytoolkit.googleapis.com/v1/accounts:update?key=' + FIREBASE_CONFIG.apiKey;
+const AUTH_REFRESH_URL = 'https://securetoken.googleapis.com/v1/token?key=' + FIREBASE_CONFIG.apiKey;
+const AUTH_REFRESH_MARGIN_MS = 5 * 60 * 1000;   /* renew 5 min before expiry */
+
+let AUTH = { idToken:'', refreshToken:'', expiresAt:0, email:'', active:false, lastError:'' };
+
+/* ERP logins are usernames, not email addresses, so map them onto a fixed
+   internal domain. No real mailbox ever has to exist. */
+function authEmailFor(username){
+  return String(username||'').trim().toLowerCase().replace(/\s+/g,'') + '@' + AUTH_EMAIL_DOMAIN;
+}
+function authClear(){
+  AUTH = { idToken:'', refreshToken:'', expiresAt:0, email:'', active:false, lastError:'' };
+}
+/* Never throws - a failed cloud sign-in must not stop somebody working. */
+async function authSignIn(username, password){
+  if(!FIREBASE_CONFIG || !FIREBASE_CONFIG.apiKey || FIREBASE_CONFIG.apiKey === 'YOUR_API_KEY') return false;
+  const email = authEmailFor(username);
+  try{
+    const res = await withTimeout(fetch(AUTH_SIGNIN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email, password: password, returnSecureToken: true })
+    }), FS_TIMEOUT_MS, 'Cloud sign-in');
+    let j = {};
+    try{ j = await res.json(); }catch(e2){}
+    if(!res.ok || !j.idToken){
+      authClear();
+      AUTH.lastError = (j.error && j.error.message) || ('HTTP ' + res.status);
+      console.warn('Cloud auth: sign-in failed for ' + email + ' - ' + AUTH.lastError +
+        ' (app continues unauthenticated; create this account in Firebase Authentication to enable it)');
+      return false;
+    }
+    AUTH.idToken = j.idToken;
+    AUTH.refreshToken = j.refreshToken || '';
+    AUTH.expiresAt = Date.now() + ((parseInt(j.expiresIn, 10) || 3600) * 1000);
+    AUTH.email = email;
+    AUTH.active = true;
+    AUTH.lastError = '';
+    console.info('Cloud auth: active as ' + email);
+    return true;
+  }catch(e){
+    authClear();
+    AUTH.lastError = e.message || 'network error';
+    console.warn('Cloud auth: sign-in error - ' + AUTH.lastError);
+    return false;
+  }
+}
+/* Swaps the long-lived refresh token for a fresh ID token. */
+async function authRefresh(){
+  if(!AUTH.refreshToken) return '';
+  try{
+    const res = await withTimeout(fetch(AUTH_REFRESH_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'grant_type=refresh_token&refresh_token=' + encodeURIComponent(AUTH.refreshToken)
+    }), FS_TIMEOUT_MS, 'Cloud auth refresh');
+    let j = {};
+    try{ j = await res.json(); }catch(e2){}
+    if(!res.ok || !j.id_token){
+      AUTH.active = false;
+      AUTH.lastError = (j.error && j.error.message) || ('HTTP ' + res.status);
+      console.warn('Cloud auth: refresh failed - ' + AUTH.lastError);
+      return '';
+    }
+    AUTH.idToken = j.id_token;
+    AUTH.refreshToken = j.refresh_token || AUTH.refreshToken;
+    AUTH.expiresAt = Date.now() + ((parseInt(j.expires_in, 10) || 3600) * 1000);
+    AUTH.active = true;
+    AUTH.lastError = '';
+    return AUTH.idToken;
+  }catch(e){
+    AUTH.lastError = e.message || 'network error';
+    return '';
+  }
+}
+/* The token to send, renewed if it is close to expiring. Returns '' when cloud
+   auth is not in use, in which case callers send no Authorization header and
+   behave exactly as they did before this phase. */
+async function authToken(){
+  if(!AUTH.idToken) return '';
+  if(Date.now() > (AUTH.expiresAt - AUTH_REFRESH_MARGIN_MS)) return await authRefresh();
+  return AUTH.idToken;
+}
+/* Keeps the Firebase credential in step with the ERP one. Without this the two
+   drift apart on the next password change and the user is locked out of the
+   database while still able to log in to the UI. */
+async function authChangePassword(newPassword){
+  const tok = await authToken();
+  if(!tok) return false;
+  try{
+    const res = await withTimeout(fetch(AUTH_UPDATE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken: tok, password: newPassword, returnSecureToken: true })
+    }), FS_TIMEOUT_MS, 'Cloud password update');
+    let j = {};
+    try{ j = await res.json(); }catch(e2){}
+    if(!res.ok){
+      AUTH.lastError = (j.error && j.error.message) || ('HTTP ' + res.status);
+      console.warn('Cloud auth: password update failed - ' + AUTH.lastError);
+      return false;
+    }
+    if(j.idToken){
+      AUTH.idToken = j.idToken;
+      AUTH.refreshToken = j.refreshToken || AUTH.refreshToken;
+      AUTH.expiresAt = Date.now() + ((parseInt(j.expiresIn, 10) || 3600) * 1000);
+    }
+    return true;
+  }catch(e){
+    AUTH.lastError = e.message || 'network error';
+    return false;
+  }
+}
+/* Every Firestore call goes through here so the token is attached in exactly
+   one place. A 401/403 means the token went stale mid-session (they last an
+   hour), so refresh once and retry before giving up. */
+async function fsFetch(url, opts, label){
+  const send = (tok) => {
+    const o = Object.assign({}, opts || {});
+    o.headers = Object.assign({}, (opts && opts.headers) || {});
+    if(tok) o.headers['Authorization'] = 'Bearer ' + tok;
+    return fetch(url, o);
+  };
+  const tok = await authToken();
+  let res = await withTimeout(send(tok), FS_TIMEOUT_MS, label);
+  if((res.status === 401 || res.status === 403) && AUTH.refreshToken){
+    const fresh = await authRefresh();
+    if(fresh) res = await withTimeout(send(fresh), FS_TIMEOUT_MS, label);
+  }
+  return res;
+}
+/* Padlock in the top bar: locked = this session is authenticated to the
+   database. Phase B (tightening the rules) is only safe once every user
+   sees it locked. */
+function authStatusBadge(){
+  if(!session) return '';
+  const on = AUTH.active;
+  const title = on
+    ? 'Database sign-in active (' + AUTH.email + '). Safe to tighten Firestore rules.'
+    : 'Database sign-in OFF - requests are unauthenticated'
+      + (AUTH.lastError ? ' [' + AUTH.lastError + ']' : '')
+      + '. Add this user in Firebase Authentication to enable it.';
+  return '<div title="' + esc(title) + '" style="display:flex; align-items:center; font-size:15px; cursor:default; color:'
+    + (on ? 'var(--success)' : 'var(--muted)') + ';">' + (on ? '&#128274;' : '&#128275;') + '</div>';
+}
+
 function withTimeout(promise, ms, label){
   return Promise.race([
     promise,
@@ -1352,10 +1512,7 @@ async function initFirebase(){
 async function fsGet(docId){
   if(!firebaseReady) return null;
   try{
-    const res = await withTimeout(
-      fetch(FS_REST_BASE + docId, { method:'GET' }),
-      FS_TIMEOUT_MS, 'Reading '+docId
-    );
+    const res = await fsFetch(FS_REST_BASE + docId, { method:'GET' }, 'Reading '+docId);
     if(res.status === 404){ firebaseLoadError = null; fsGetLastStatus = 'missing'; return null; }
     if(!res.ok){
       let detail = '';
@@ -1380,14 +1537,11 @@ async function fsSet(docId, data){
   if(!firebaseReady) return false;
   try{
     const body = { fields: { data: { stringValue: JSON.stringify(data) } } };
-    const res = await withTimeout(
-      fetch(FS_REST_BASE + docId, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      }),
-      FS_TIMEOUT_MS, 'Saving '+docId
-    );
+    const res = await fsFetch(FS_REST_BASE + docId, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }, 'Saving '+docId);
     if(!res.ok){
       let detail = '';
       try{ const j = await res.json(); detail = (j.error && j.error.message) || ''; }catch(e2){}
@@ -1599,143 +1753,6 @@ async function restoreUsersFromBackup(){
     alert('Restore could not be saved to the database. Check the connection and try again.');
   }
   render();
-}
-
-/* ---------------- PRINT JOBS + PRINT STATION ---------------- */
-let PRINT_JOBS = { list: [], done: [] };   /* Firestore doc 'print_jobs' */
-let printStationTimer = null;
-let printStationBusy = false;
-
-async function loadPrintJobs(){
-  const doc = await fsGet('print_jobs');
-  PRINT_JOBS = (doc && Array.isArray(doc.list)) ? doc : { list: [], done: [] };
-  if(!Array.isArray(PRINT_JOBS.done)) PRINT_JOBS.done = [];
-}
-async function savePrintJobs(){
-  await fsSet('print_jobs', PRINT_JOBS);
-}
-function isPrintStation(){
-  try{ return localStorage.getItem('somtek_print_station') === 'on'; }catch(e){ return false; }
-}
-function togglePrintStation(){
-  if(!isAdmin()){ alert('Only an admin can turn the Print Station on or off.'); return; }
-  const on = !isPrintStation();
-  try{ localStorage.setItem('somtek_print_station', on ? 'on' : 'off'); }catch(e){}
-  closeSettingsMenu();
-  if(on){
-    alert('Print Station is ON for this device.\n\nQueued documents will now print here automatically (checked every 20 seconds).\n\nFor fully silent printing open the ERP with the Chrome kiosk-printing shortcut and set the office printer as the Windows default. Enable Print Station on ONE PC only, or documents will print twice.');
-    startPrintStation();
-  }else{
-    stopPrintStation();
-    alert('Print Station is OFF for this device.');
-  }
-  render();
-}
-let psPrintedCount = 0;
-function psStripUpdate(msg, isErr){
-  let el = document.getElementById('ps-strip');
-  if(!isPrintStation()){ if(el) el.remove(); return; }
-  if(!el){
-    document.body.insertAdjacentHTML('beforeend', '<div id="ps-strip" class="ps-strip"><span id="ps-strip-msg"></span><button onclick="psTestPrint()">Test Print</button></div>');
-    el = document.getElementById('ps-strip');
-  }
-  el.classList.toggle('ps-err', !!isErr);
-  const m = document.getElementById('ps-strip-msg');
-  if(m) m.innerHTML = msg;
-}
-async function psTestPrint(){
-  psStripUpdate('&#128424; Printing test page&hellip;');
-  await printJobInIframe({ title:'TEKFLOW Test Page', html:'<div class="quote-sheet" style="padding:40mm 20mm; font-family:sans-serif; text-align:center;"><h1>TEKFLOW PRINT STATION</h1><p>Test page printed at '+new Date().toLocaleString()+'</p><p>If you can read this on paper, automatic printing works.</p></div>' });
-  psStripUpdate('&#128424; Test page sent to the printer at '+new Date().toLocaleTimeString()+'. Did paper come out?');
-}
-function startPrintStation(){
-  stopPrintStation();
-  printStationTimer = setInterval(()=>{ processPrintJobs().catch(e=>{ console.error('print station', e); psStripUpdate('&#9888; Error: '+esc(e.message)+' &mdash; retrying in 20s', true); }); }, 20000);
-  psStripUpdate('&#128424; PRINT STATION ACTIVE &mdash; starting&hellip;');
-  processPrintJobs().catch(e=>{ console.error('print station', e); psStripUpdate('&#9888; Error: '+esc(e.message), true); });
-}
-function stopPrintStation(){
-  if(printStationTimer){ clearInterval(printStationTimer); printStationTimer = null; }
-  const el = document.getElementById('ps-strip');
-  if(el) el.remove();
-}
-function printJobHtmlDoc(job){
-  return '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
-    '<style>@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;600;700&family=Oswald:wght@500;600;700&display=swap");' +
-    '@page{size:A4; margin:10mm;} body{margin:0; background:#fff;} .quote-sheet{background:#fff; margin:0 auto;} .quote-actions{display:none !important;}</style>' +
-    '</head><body>' + job.html + '</body></html>';
-}
-function printJobInIframe(job){
-  return new Promise(resolve=>{
-    const frame = document.createElement('iframe');
-    frame.style.cssText = 'position:fixed; right:0; bottom:0; width:1px; height:1px; border:0; visibility:hidden;';
-    document.body.appendChild(frame);
-    const doc = frame.contentWindow.document;
-    doc.open(); doc.write(printJobHtmlDoc(job)); doc.close();
-    /* small wait for fonts/images to settle before printing */
-    setTimeout(()=>{
-      try{ frame.contentWindow.focus(); frame.contentWindow.print(); }catch(e){ console.error('iframe print failed', e); }
-      setTimeout(()=>{ frame.remove(); resolve(); }, 4000);
-    }, 1200);
-  });
-}
-async function processPrintJobs(){
-  if(!isPrintStation() || printStationBusy || !session) return;
-  printStationBusy = true;
-  try{
-    await loadPrintJobs();
-    const pending = (PRINT_JOBS.list||[]).slice();
-    psStripUpdate('&#128424; PRINT STATION ACTIVE &mdash; checked '+new Date().toLocaleTimeString()+' &mdash; '+pending.length+' waiting &mdash; '+psPrintedCount+' printed this session');
-    for(const job of pending){
-      psStripUpdate('&#128424; Printing: '+esc(job.title||'document')+'&hellip;');
-      await printJobInIframe(job);
-      psPrintedCount++;
-      /* mark done: drop the heavy html, keep a light log entry */
-      PRINT_JOBS.list = (PRINT_JOBS.list||[]).filter(j=>j.id!==job.id);
-      PRINT_JOBS.done = [{ title: job.title, by: job.by, at: job.at, printedAt: new Date().toISOString() }, ...(PRINT_JOBS.done||[])].slice(0, 20);
-      await savePrintJobs();
-      logAudit('DATA CHANGE', 'Printed at station: "'+(job.title||'document')+'"');
-    }
-    if(pending.length) psStripUpdate('&#128424; PRINT STATION ACTIVE &mdash; '+psPrintedCount+' printed this session &mdash; queue clear at '+new Date().toLocaleTimeString());
-  }finally{
-    printStationBusy = false;
-  }
-}
-async function sendToPrintStation(){
-  const preview = document.getElementById('quote-preview');
-  if(!preview){ alert('Open the document preview first.'); return; }
-  const clone = preview.cloneNode(true);
-  const actions = clone.querySelector('.quote-actions');
-  if(actions) actions.remove();
-  const jobHtml = clone.innerHTML;
-  if(jobHtml.length > 700000){ alert('This document is too large to queue. Print it directly from this device.'); return; }
-  await loadPrintJobs();
-  PRINT_JOBS.list = PRINT_JOBS.list || [];
-  if(PRINT_JOBS.list.length >= 15){ alert('The print queue is full (15 jobs waiting). Ask the Print Station PC to catch up, or print directly.'); return; }
-  PRINT_JOBS.list.push({ id: uid(), title: document.title || 'TEKFLOW document', html: jobHtml, by: actorName(), at: new Date().toISOString() });
-  const ok = await fsSet('print_jobs', PRINT_JOBS);
-  if(ok) alert('Sent to the Print Station. It will print automatically within about 20 seconds' + (isPrintStation() ? ' (this device IS the print station).' : '.'));
-  else alert('Could not queue the job - check the connection and try again.');
-}
-async function deletePrintJob(id){
-  await loadPrintJobs();
-  PRINT_JOBS.list = (PRINT_JOBS.list||[]).filter(j=>j.id!==id);
-  await savePrintJobs();
-  render();
-}
-function printJobsPanelHtml(){
-  const list = PRINT_JOBS.list || [];
-  const done = PRINT_JOBS.done || [];
-  return `
-  ${secHead('&#128424;', 'Print Jobs')}
-  <div class="panel"><div class="panel-head"><h3>&#128424; Print Jobs <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(Print Station on this device: <b>${isPrintStation()?'ON':'OFF'}</b> &mdash; toggle it in the &#9881; settings menu on the printer PC)</span></h3></div>
-  <div class="panel-body">
-    ${list.length===0 ? '<p style="font-size:12.5px; color:var(--muted); margin:0;">No documents waiting to print.</p>' : `
-    <table><thead><tr><th>Document</th><th>Sent By</th><th>Sent At</th><th></th></tr></thead><tbody>
-    ${list.map(j=>`<tr><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(j.title)}</td><td>${esc(j.by)}</td><td>${esc(j.at?new Date(j.at).toLocaleString():'')}</td><td>${deleteBtn(`deletePrintJob('${j.id}')`)}</td></tr>`).join('')}
-    </tbody></table>`}
-    ${done.length ? `<div style="margin-top:14px; font-size:11px; color:var(--muted);">Recently printed: ${esc(done.slice(0,6).map(x=>x.title).join(' | '))}</div>` : ''}
-  </div></div>`;
 }
 
 /* ---------------- SCHEDULED REPORTS (admin) ---------------- */
@@ -2262,49 +2279,9 @@ async function loadHrShared(){
     console.warn('HR shared: created merged HR document for both companies.');
   }
   /* on read error keep the previous in-memory copy */
-  if(SHARED_HR){ HR_SNAP = JSON.stringify(SHARED_HR); applySharedHrEverywhere(); await mergeEsslPunches(); }
+  if(SHARED_HR){ HR_SNAP = JSON.stringify(SHARED_HR); applySharedHrEverywhere(); }
 }
 
-/* ---- eSSL biometric attendance merge ----
-   The office PC runs essl_sync.py, which groups fingerprint punches per
-   employee per day and writes them to the 'essl_punches' document. This
-   merges those days into shared HR attendance: first punch = In, last
-   punch = Out, status Present. Employees are matched by their eSSL Code
-   (HR tab) or, failing that, their Employee code. Unknown codes still get
-   a row ("Unmapped - CODE") so no punch is ever lost - fill in the eSSL
-   Code on the employee record and the row relabels on the next merge. */
-async function mergeEsslPunches(){
-  if(!SHARED_HR || !firebaseReady) return;
-  let doc = null;
-  try{ doc = await fsGet('essl_punches'); }catch(e){ return; }
-  if(!doc || !Array.isArray(doc.days)) return;
-  SHARED_HR.attendance = Array.isArray(SHARED_HR.attendance) ? SHARED_HR.attendance : [];
-  const emps = Array.isArray(SHARED_HR.employees) ? SHARED_HR.employees : [];
-  let changed = false;
-  doc.days.forEach(p=>{
-    if(!p || !p.code || !p.date) return;
-    const codeU = String(p.code).trim().toUpperCase();
-    const emp = emps.find(e=> e && (String(e.esslCode||'').trim().toUpperCase()===codeU || String(e.code||'').trim().toUpperCase()===codeU));
-    const name = emp ? emp.name : ('Unmapped - '+codeU);
-    const eid = 'essl_'+codeU+'_'+p.date;
-    const inT = p.in || '';
-    const outT = (p.out && p.out !== p.in) ? p.out : '';
-    const r = SHARED_HR.attendance.find(x=>x && x.id===eid);
-    if(!r){
-      SHARED_HR.attendance.push({ id:eid, date:p.date, employee:name, status:'Present', remarks:'eSSL', inTime:inT, outTime:outT, addedBy:'eSSL Sync' });
-      changed = true;
-    }else if(r.addedBy==='eSSL Sync' && (r.inTime!==inT || r.outTime!==outT || r.employee!==name)){
-      r.inTime = inT; r.outTime = outT; r.employee = name;
-      changed = true;
-    }
-  });
-  if(changed){
-    HR_SNAP = JSON.stringify(SHARED_HR);
-    applySharedHrEverywhere();
-    await fsSet('hr_shared', SHARED_HR);
-    try{ if(session && !isUserTyping() && !hasUnsavedFormInput()) render(); }catch(e){}
-  }
-}
 async function syncHrSharedIfChanged(loc){
   if(!DATA[loc]) return;
   const cur = pickHr(DATA[loc]);
@@ -2321,7 +2298,6 @@ async function loadAll(){
   await loadNotice();
   await loadNotifications();
   await loadReportSchedules();
-  await loadPrintJobs();
   await loadAudit();
   for(const loc of LOCATIONS){ await loadLocation(loc); }
   await loadHrShared();
@@ -2798,7 +2774,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.66';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.69';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -2908,8 +2884,6 @@ function toggleSettingsMenu(ev){
     <div class="settings-item" onclick="toggleTheme()"><span class="si-ico">${dark ? '&#9728;' : '&#127769;'}</span> Switch to ${dark ? 'Light' : 'Dark'} Theme</div>
     <div class="settings-row"><div class="sr-lbl">Theme Color</div>${ACCENT_PRESETS.map(p=>`<span class="accent-swatch ${accent===p.c?'active':''}" style="background:${p.c};" title="${p.name}" onclick="setAccentColor('${p.c}')"></span>`).join('')}</div>
     <div class="settings-row"><div class="sr-lbl">Font Size</div><span class="fontsize-btn ${fs==='small'?'active':''}" onclick="setFontSize('small')">Small</span><span class="fontsize-btn ${fs==='normal'?'active':''}" onclick="setFontSize('normal')">Normal</span><span class="fontsize-btn ${fs==='large'?'active':''}" onclick="setFontSize('large')">Large</span></div>
-    ${isAdmin() ? `<div class="settings-item" onclick="togglePrintStation()"><span class="si-ico">&#128424;</span> Print Station: ${isPrintStation() ? 'ON (this device prints)' : 'OFF'}</div>
-` : ''}
     <div class="settings-item" onclick="closeSettingsMenu(); manualRefresh();"><span class="si-ico">&#8634;</span> Refresh Data</div>
     <div class="settings-foot">${APP_VERSION_LABEL} &middot; ${esc(session ? session.username : '')}</div>`;
   host.appendChild(menu);
@@ -3128,10 +3102,16 @@ async function submitChangePassword(){
   if(p1 === cur){ cpError('New password must be different from the current password.'); return; }
   if(p1 !== p2){ cpError('New passwords do not match.'); return; }
   me.password = p1;
+  /* Mirror it to the cloud credential so the two cannot drift apart. */
+  const cloudWasActive = AUTH.active;
+  const cloudOk = await authChangePassword(p1);
   await saveUsers();
   logAudit('USER ADMIN', 'Password changed by "'+me.username+'" (change password)');
   closeChangePassword();
-  alert('Password changed successfully. Use the new password at your next sign in.');
+  alert('Password changed successfully. Use the new password at your next sign in.'
+    + ((cloudWasActive && !cloudOk)
+        ? '\n\nNote: the database sign-in password could not be updated automatically. Ask the administrator to change it in the Firebase console so the two stay in step.'
+        : ''));
 }
 
 /* ---------------- LOGIN ---------------- */
@@ -3282,6 +3262,9 @@ async function handleLogin(e){
   /* password OK -> Google Authenticator step */
   loginError = '';
   pendingLoginUser = found.username;
+  /* Sign in to the database with the same credentials. Non-blocking:
+     if this fails the ERP login still proceeds unauthenticated. */
+  await authSignIn(found.username, p);
   if(!found.totpSecret){
     pendingTotpSecret = generateTotpSecret();   /* first login: register the app once */
     loginStage = 'totp-setup';
@@ -3320,12 +3303,12 @@ async function chooseLocation(loc){
   render();
   /* generate any scheduled reports that fell due (admins only) */
   setTimeout(()=>{ checkDueReports().catch(e=>console.error('report check failed', e)); }, 1500);
-  if(isPrintStation()) startPrintStation();
 }
 
 async function handleLogout(){
   if(session) logAudit('LOGOUT', 'Signed out');
   session = null;
+  authClear();
   locationChosen = false;
   unsubscribeAll();
   clearSessionLocal();
@@ -3437,6 +3420,7 @@ function topbarUserBadge(){
   return `<div class="topbar-user">
     ${avatar}
     <div class="info"><div class="u-name">${esc(session.name)}</div><div class="u-role">${esc(session.role)} &middot; ${esc(session.username)}</div></div>
+    ${authStatusBadge()}
     <div class="notif-bell" onclick="toggleNotifMenu(event)" title="Notifications">&#128276;${unreadNotifCount() ? `<span class="notif-badge" id="notif-badge">${unreadNotifCount()}</span>` : ''}</div>
     <div class="settings-gear" onclick="toggleSettingsMenu(event)" title="Settings">&#9881;</div>
     <div class="logout-link" onclick="handleLogout()" title="Sign out" style="display:flex; align-items:center;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg></div>
@@ -3602,7 +3586,6 @@ const IMPORT_SCHEMAS = {
   ],
   employees: [
     {key:'code', header:'Code'},
-    {key:'esslCode', header:'eSSL Code'},
     {key:'name', header:'Name'},
     {key:'designation', header:'Designation'},
     {key:'mobile', header:'Mobile'},
@@ -5107,7 +5090,6 @@ function openPocDocPreview(id){
   overlay.innerHTML = `
     <div class="quote-actions">
       <button type="button" class="btn" onclick="printPocDoc()">&#128424; Print / Save as PDF</button>
-      <button type="button" class="btn" onclick="sendToPrintStation()" title="Queue this document to print automatically on the office printer PC">&#128444; Send to Printer</button>
       <button type="button" class="btn quote-close-btn" onclick="closeQuotePreview()">&#10005; Close</button>
     </div>
     ${pocDocumentHtml(r)}`;
@@ -6499,7 +6481,6 @@ function hrEmployeesSection(d){
   <form onsubmit="return addEmployee(event)">
     <div class="form-grid">
       <div class="field"><label>Employee code</label><input type="text" id="hr-emp-code" value="${nextEmpCode(d)}" readonly style="background:var(--panel-2);"></div>
-      <div class="field"><label>eSSL Code</label><input type="text" id="hr-emp-essl" placeholder="Biometric code e.g. S006"></div>
       <div class="field"><label>Name</label><input type="text" id="hr-emp-name" required></div>
       <div class="field"><label>Designation</label><input type="text" id="hr-emp-desig" placeholder="Optional"></div>
       <div class="field"><label>Mobile</label><input type="text" id="hr-emp-mobile" placeholder="Optional"></div>
@@ -6516,10 +6497,10 @@ function hrEmployeesSection(d){
   <div class="panel"><div class="panel-head"><h3>Employee register</h3><div class="panel-head-actions">${importBtn('employees')}${exportBtn('exportEmployees')}</div></div>
   <div class="panel-body">
   ${tableToolbar('employees', d.employees)}
-  <table><thead><tr><th>Code</th><th>eSSL</th><th>Name</th><th>Designation</th><th>Mobile</th><th>Email</th><th>DOB</th><th>Join Date</th><th>Status</th>${cfHeaders('employees')}<th>Added By</th><th></th></tr></thead><tbody>
-  ${rows.length===0 ? noMatchRow(11, d.employees.length) :
+  <table><thead><tr><th>Code</th><th>Name</th><th>Designation</th><th>Mobile</th><th>Email</th><th>DOB</th><th>Join Date</th><th>Status</th>${cfHeaders('employees')}<th>Added By</th><th></th></tr></thead><tbody>
+  ${rows.length===0 ? noMatchRow(10, d.employees.length) :
     rows.map(r=>`<tr>
-      <td>${esc(r.code)}</td><td>${esc(r.esslCode||'')}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.name)}</td><td>${esc(r.designation||'')}</td><td>${esc(r.mobile||'')}</td><td>${esc(r.email||'')}</td><td>${fd(r.dob)}</td><td>${fd(r.joinDate)}</td>
+      <td>${esc(r.code)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.name)}</td><td>${esc(r.designation||'')}</td><td>${esc(r.mobile||'')}</td><td>${esc(r.email||'')}</td><td>${fd(r.dob)}</td><td>${fd(r.joinDate)}</td>
       <td>
         <select class="status-select ${(r.status||'Active')==='Active'?'st-delivered':'st-rejected'}" onchange="updateEmployeeStatus('${r.id}', this.value)">
           <option value="Active" ${(r.status||'Active')==='Active'?'selected':''}>Active</option>
@@ -6539,7 +6520,6 @@ async function addEmployee(e){
   d.employees.push({
     id: uid(),
     code: document.getElementById('hr-emp-code').value,
-    esslCode: document.getElementById('hr-emp-essl').value.trim().toUpperCase(),
     name: document.getElementById('hr-emp-name').value.trim(),
     designation: document.getElementById('hr-emp-desig').value.trim(),
     mobile: document.getElementById('hr-emp-mobile').value.trim(),
@@ -6569,8 +6549,8 @@ async function deleteEmployee(id){
 }
 function exportEmployees(){
   const d = DATA[currentLocation];
-  const headers = ['Code','eSSL Code','Name','Designation','Mobile','Email','DOB','Join Date','Monthly Salary','Address','Status','Added By'];
-  const rows = (d.employees||[]).map(r=>[r.code, r.esslCode||'', r.name, r.designation||'', r.mobile||'', r.email||'', r.dob||'', r.joinDate||'', r.salary||'', r.address||'', r.status||'Active', r.addedBy]);
+  const headers = ['Code','Name','Designation','Mobile','Email','DOB','Join Date','Monthly Salary','Address','Status','Added By'];
+  const rows = (d.employees||[]).map(r=>[r.code, r.name, r.designation||'', r.mobile||'', r.email||'', r.dob||'', r.joinDate||'', r.salary||'', r.address||'', r.status||'Active', r.addedBy]);
   cfExportAppend('employees', d.employees||[], headers, rows);
   exportToExcel(currentLocation+'_Employees', headers, rows);
 }
@@ -9206,7 +9186,6 @@ function printAllInvoiceCopies(id){
   overlay.innerHTML = `
     <div class="quote-actions">
       <button type="button" class="btn" onclick="printInvoice()">&#128424; Print / Save as PDF</button>
-      <button type="button" class="btn" onclick="sendToPrintStation()" title="Queue this document to print automatically on the office printer PC">&#128444; Send to Printer</button>
       <button type="button" class="btn quote-close-btn" onclick="closeQuotePreview()">&#10005; Close</button>
     </div>
     ${sheets}`;
@@ -9465,7 +9444,6 @@ function openSalesDocPreview(id, type, heading){
   overlay.innerHTML = `
     <div class="quote-actions">
       <button type="button" class="btn" onclick="printInvoice()">&#128424; Print / Save as PDF</button>
-      <button type="button" class="btn" onclick="sendToPrintStation()" title="Queue this document to print automatically on the office printer PC">&#128444; Send to Printer</button>
       <button type="button" class="btn quote-close-btn" onclick="closeQuotePreview()">&#10005; Close</button>
     </div>
     ${salesDocHtml(r, previewDocType, previewInvoiceHeading)}`;
@@ -10135,7 +10113,6 @@ const EDIT_SCHEMAS = {
   ],
   employees: [
     {key:'code', label:'Employee code', type:'text'},
-    {key:'esslCode', label:'eSSL Code', type:'text'},
     {key:'name', label:'Name', type:'text'},
     {key:'designation', label:'Designation', type:'text'},
     {key:'mobile', label:'Mobile', type:'text'},
@@ -11153,7 +11130,6 @@ function openQuotePreview(id){
   overlay.innerHTML = `
     <div class="quote-actions">
       <button type="button" class="btn" onclick="printQuote()">&#128424; Print / Save as PDF</button>
-      <button type="button" class="btn" onclick="sendToPrintStation()" title="Queue this document to print automatically on the office printer PC">&#128444; Send to Printer</button>
       <button type="button" class="btn quote-close-btn" onclick="closeQuotePreview()">&#10005; Close</button>
     </div>
     ${quoteDocumentHtml(q)}`;
@@ -11645,7 +11621,6 @@ function renderUsers(){
   ${importantNoticePanelHtml()}
   ${sendNotificationPanelHtml()}
   ${reportSchedulesPanelHtml()}
-  ${printJobsPanelHtml()}
   ${secHead('&#10133;', 'New Entry')}
   <div class="panel"><div class="panel-head"><h3>Add user login</h3></div>
   <div class="panel-body">
