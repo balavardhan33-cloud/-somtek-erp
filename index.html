@@ -127,11 +127,12 @@ h1,h2,h3,.stencil{font-family:'Oswald', sans-serif; text-transform:uppercase; le
 .login-sub{color:var(--text); font-size:14.5px; font-weight:500; margin-bottom:32px; letter-spacing:0.03em; text-align:center;}
 .field{margin-bottom:16px;}
 .field label{display:block; font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--muted); margin-bottom:6px; font-family:'Oswald',sans-serif;}
-.field input, .field select{
+.field input, .field select, .field textarea{
   width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text);
   padding:11px 12px; font-size:14px; font-family:'IBM Plex Mono', monospace;
 }
-.field input:focus, .field select:focus{outline:none; border-color:var(--accent-2);}
+.field textarea{resize:vertical; line-height:1.55;}
+.field input:focus, .field select:focus, .field textarea:focus{outline:none; border-color:var(--accent-2);}
 .field input[readonly]{background:var(--panel-2); color:var(--muted); cursor:not-allowed;}
 .btn{
   background:var(--accent); color:#ffffff; border:none; padding:12px 20px; font-family:'Oswald',sans-serif;
@@ -243,6 +244,7 @@ tbody tr:hover{background:rgba(31,68,145,0.04);}
 .badge-transit{color:var(--accent-2); border-color:var(--accent-2);}
 .badge-delivered{color:var(--success); border-color:var(--success);}
 .badge-cancelled{color:var(--muted); border-color:var(--muted);}
+.badge-partial{color:#d98324; border-color:#d98324;}
 
 .stat-row{display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:14px; margin-bottom:24px;}
 .stat-card{background:var(--panel); border:1px solid var(--border); padding:16px 18px; border-left:2px solid var(--accent); position:relative; overflow:hidden;}
@@ -381,6 +383,7 @@ select.status-select.st-rejected{color:#e6577a; border-color:#e6577a; font-weigh
 select.status-select.st-executed{color:var(--success); border-color:var(--success); font-weight:600;}
 select.status-select.st-nonexecuted{color:var(--danger); border-color:var(--danger); font-weight:600;}
 select.status-select.st-cancelled{color:var(--muted); border-color:var(--muted); font-weight:600;}
+select.status-select.st-partial{color:#d98324; border-color:#d98324; font-weight:600;}
 
 /* ---------- TABLE TOOLS (search / filter / sort) ---------- */
 .table-tools{display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:0 0 12px 0;}
@@ -2795,7 +2798,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.62';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.66';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -3533,7 +3536,7 @@ const IMPORT_SCHEMAS = {
     {key:'totalValue', header:'Total Value'},
     {key:'oaNumber', header:'O.A Number'},
     {key:'oaDodDate', header:'O.A / DOD Date', type:'date'},
-    {key:'status', header:'Status', options:['Non-Executed','Executed','Cancelled']}
+    {key:'status', header:'Status', options:['Non-Executed','Part Shipment','Executed','Cancelled']}
   ],
   customerPO: [
     {key:'poNumber', header:'P.O Number'},
@@ -3546,7 +3549,7 @@ const IMPORT_SCHEMAS = {
     {key:'unitPrice', header:'Unit Price'},
     {key:'totalValue', header:'Total Value'},
     {key:'dod', header:'DOD', type:'date'},
-    {key:'status', header:'Status', options:['Non-Executed','Executed','Cancelled']}
+    {key:'status', header:'Status', options:['Non-Executed','Part Shipment','Executed','Cancelled']}
   ],
   inward: [
     {key:'date', header:'Date', type:'date'},
@@ -4582,9 +4585,9 @@ function viewEnquiryFromDashboard(id){
 }
 
 /* ---------------- PURCHASE ORDER ---------------- */
-function poStatusClass(s){ return s==='Executed' ? 'st-executed' : (s==='Cancelled' ? 'st-cancelled' : 'st-nonexecuted'); }
+function poStatusClass(s){ return s==='Executed' ? 'st-executed' : (s==='Cancelled' ? 'st-cancelled' : (s==='Part Shipment' ? 'st-partial' : 'st-nonexecuted')); }
 function poStatusBadge(s){
-  const cls = s==='Executed' ? 'badge-delivered' : (s==='Cancelled' ? 'badge-cancelled' : 'badge-transit');
+  const cls = s==='Executed' ? 'badge-delivered' : (s==='Cancelled' ? 'badge-cancelled' : (s==='Part Shipment' ? 'badge-partial' : 'badge-transit'));
   return `<span class="badge ${cls}">${esc(s || 'Non-Executed')}</span>`;
 }
 function allVendorNames(d){
@@ -4674,6 +4677,7 @@ function renderPO(){
       <div class="field"><label>Status</label>
         <select id="vpo-status">
           <option value="Non-Executed" selected>Non-Executed</option>
+          <option value="Part Shipment">Part Shipment</option>
           <option value="Executed">Executed</option>
           <option value="Cancelled">Cancelled</option>
         </select>
@@ -4697,6 +4701,7 @@ function renderPO(){
       <td>
         <select class="status-select ${poStatusClass(p.status)}" onchange="updateVendorPOStatus('${p.id}', this.value)">
           <option value="Non-Executed" ${(!p.status||p.status==='Non-Executed')?'selected':''}>Non-Executed</option>
+          <option value="Part Shipment" ${p.status==='Part Shipment'?'selected':''}>Part Shipment</option>
           <option value="Executed" ${p.status==='Executed'?'selected':''}>Executed</option>
           <option value="Cancelled" ${p.status==='Cancelled'?'selected':''}>Cancelled</option>
         </select>
@@ -4727,6 +4732,7 @@ function renderPO(){
       <div class="field"><label>Status</label>
         <select id="cpo-status">
           <option value="Non-Executed" selected>Non-Executed</option>
+          <option value="Part Shipment">Part Shipment</option>
           <option value="Executed">Executed</option>
           <option value="Cancelled">Cancelled</option>
         </select>
@@ -4750,6 +4756,7 @@ function renderPO(){
       <td>
         <select class="status-select ${poStatusClass(p.status)}" onchange="updateCustomerPOStatus('${p.id}', this.value)">
           <option value="Non-Executed" ${(!p.status||p.status==='Non-Executed')?'selected':''}>Non-Executed</option>
+          <option value="Part Shipment" ${p.status==='Part Shipment'?'selected':''}>Part Shipment</option>
           <option value="Executed" ${p.status==='Executed'?'selected':''}>Executed</option>
           <option value="Cancelled" ${p.status==='Cancelled'?'selected':''}>Cancelled</option>
         </select>
@@ -7274,12 +7281,47 @@ function enquiryActionBadge(a){
 }
 
 /* ---------------- ENQUIRY DATA SHEET ---------------- */
+/* ---- Enquiry sections: Pending vs Submitted ---- */
+let enqSection = 'pending';
+function switchEnqSection(s){
+  enqSection = s;
+  getTableUI('enquiry').limit = TABLE_PAGE_SIZE;   /* start each section at page 1 */
+  render();
+}
+/* Only an explicit "Yes" counts as submitted; "No" and blank both stay Pending. */
+function isEnquirySubmitted(r){
+  return String((r && r.submitted) || '').trim().toLowerCase() === 'yes';
+}
+/* High -> Medium -> Low, anything unset last. Accepts the stored H/M/L codes
+   as well as full words, in case records were imported spelled out. */
+const ENQ_PRIORITY_RANK = {H:0, HIGH:0, M:1, MED:1, MEDIUM:1, L:2, LOW:2};
+function enqPriorityRank(v){
+  const k = String(v==null?'':v).trim().toUpperCase();
+  const r = ENQ_PRIORITY_RANK[k];
+  return r===undefined ? 3 : r;
+}
+/* Applied only while the toolbar is on "Sort: Default", so an explicit sort
+   chosen by the user still wins. Array.sort is stable, so records keep their
+   newest-first order within each priority band. */
+function sortEnquiriesByPriority(rows){
+  if(getTableUI('enquiry').sortKey) return rows;
+  return rows.slice().sort((a,b)=>enqPriorityRank(a.priority)-enqPriorityRank(b.priority));
+}
 function renderEnquiry(){
   const d = DATA[currentLocation];
-  const enqAll = applyTableTools('enquiry', d.enquiry.slice().reverse());
+  const submittedAll = (d.enquiry||[]).filter(isEnquirySubmitted);
+  const pendingAll = (d.enquiry||[]).filter(r => !isEnquirySubmitted(r));
+  const sectionList = enqSection === 'submitted' ? submittedAll : pendingAll;
+  const enqAll = sortEnquiriesByPriority(applyTableTools('enquiry', sectionList.slice().reverse()));
   const enqRows = limitRows('enquiry', enqAll);
+  const enqSwitcher = `
+  <div class="acct-switch" style="margin-bottom:14px;">
+    <button type="button" class="acct-switch-btn ${enqSection==='pending'?'active':''}" onclick="switchEnqSection('pending')">&#8987; Pending${pendingAll.length?` (${pendingAll.length})`:''}</button>
+    <button type="button" class="acct-switch-btn ${enqSection==='submitted'?'active':''}" onclick="switchEnqSection('submitted')">&#9989; Submitted${submittedAll.length?` (${submittedAll.length})`:''}</button>
+  </div>`;
   return `
   ${tabHeader(currentLocation, 'Enquiry Data Sheet')}
+  ${enqSwitcher}
   ${secHead('&#10133;', 'New Entry')}
   <div class="panel"><div class="panel-head"><h3>New enquiry</h3></div>
   <div class="panel-body">
@@ -7306,7 +7348,7 @@ function renderEnquiry(){
   </form>
   </div></div>
   ${secHead('&#128203;', 'Records')}
-  <div class="panel"><div class="panel-head"><h3>Enquiry log &mdash; ${locationLabel(currentLocation, 14)}</h3><div class="panel-head-actions">${importBtn('enquiry')}${exportBtn('exportEnquiry')}</div></div>
+  <div class="panel"><div class="panel-head"><h3>${enqSection==='submitted' ? 'Submitted' : 'Pending'} enquiries &mdash; ${locationLabel(currentLocation, 14)}${getTableUI('enquiry').sortKey ? '' : ` <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(High &rarr; Medium &rarr; Low priority)</span>`}</h3><div class="panel-head-actions">${importBtn('enquiry')}${exportBtn('exportEnquiry')}</div></div>
   <div class="panel-body table-scroll">
   ${tableToolbar('enquiry', d.enquiry)}
   <table><thead><tr>
@@ -7314,7 +7356,7 @@ function renderEnquiry(){
     <th>Response</th><th>Quoting</th><th>Due Date</th><th>Brand</th><th>Vendor</th><th>Submitted</th>
     <th>Cust. Quotation No.</th><th>Cust. Response</th><th>Action</th><th>Priority</th><th>Assigned To</th>${cfHeaders('enquiry')}<th>Added By</th><th></th>
   </tr></thead><tbody>
-  ${enqRows.length===0 ? noMatchRow(19, d.enquiry.length) :
+  ${enqRows.length===0 ? noMatchRow(19, sectionList.length) :
     enqRows.map(r=>`<tr>
       <td>${fd(r.date)}</td><td>${esc(r.enum)}</td>
       <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.customer)}</td><td>${esc(r.region)}</td>
@@ -7360,6 +7402,8 @@ async function addEnquiry(e){
     assignedTo: '',
     addedBy: actorName()
   });
+  /* Show the section the new entry landed in, so it never looks lost. */
+  enqSection = document.getElementById('eq-submitted').value === 'Yes' ? 'submitted' : 'pending';
   await saveLocation(currentLocation);
   render();
   return false;
@@ -7768,6 +7812,15 @@ function readPfItemLines(){
     };
   }).filter(it=>it.description || it.qty || it.rate);
 }
+/* 0-100% choices for the Proforma "Payment %" (advance) selector. */
+function pfPctOptions(sel){
+  const cur = String(sel==null ? '' : sel);
+  let out = '';
+  for(let p=0; p<=100; p++){
+    out += '<option value="' + p + '"' + (cur===String(p) ? ' selected' : '') + '>' + p + '%</option>';
+  }
+  return out;
+}
 function pfRecalc(){
   const r2 = n => Math.round(n*100)/100;
   let taxable = 0;
@@ -7795,6 +7848,18 @@ function pfRecalc(){
   if(taxEl) taxEl.value = taxable ? taxable.toFixed(2) : '';
   const totEl = document.getElementById('pf-invval');
   if(totEl) totEl.value = total ? total.toFixed(2) : '';
+  /* Advance / part-payment expected from the customer. Blank until a
+     percentage is chosen; 0% is a real choice and shows 0.00. */
+  const pctEl = document.getElementById('pf-recvpct');
+  const recvEl = document.getElementById('pf-toreceive');
+  if(recvEl){
+    const raw = pctEl ? String(pctEl.value||'').trim() : '';
+    if(raw === ''){ recvEl.value = ''; }
+    else {
+      const p = parseFloat(raw)||0;
+      recvEl.value = total ? r2(total*p/100).toFixed(2) : '';
+    }
+  }
 }
 function nextProformaNumber(d){
   const n = (d.proformaInvoices||[]).length + 1;
@@ -7835,6 +7900,8 @@ function proformaSection(d){
     <div style="margin:10px 0 14px 0;"><button type="button" class="btn btn-ghost" onclick="addPfItemLine()">+ Add another item</button></div>
     <div class="form-grid">
       <div class="field"><label>Taxable Value <span style="color:var(--muted); font-weight:400;">(auto)</span></label><input type="number" step="0.01" id="pf-taxable" placeholder="Auto" readonly tabindex="-1"></div>
+      <div class="field"><label>Payment % <span style="color:var(--muted); font-weight:400;">(of Total Value)</span></label><select id="pf-recvpct" onchange="pfRecalc()"><option value="">-</option>${pfPctOptions()}</select></div>
+      <div class="field"><label>Amount to be Received <span style="color:var(--muted); font-weight:400;">(auto)</span></label><input type="number" step="0.01" id="pf-toreceive" placeholder="Auto" readonly tabindex="-1"></div>
       <div class="field"><label>Freight Charges</label><input type="number" step="0.01" min="0" id="pf-freight" placeholder="Optional" oninput="pfRecalc()"></div>
       <div class="field"><label>CGST %</label><select id="pf-cgstpct" onchange="pfRecalc()"><option value="">-</option>${SA_GST_PCTS.map(p=>`<option value="${p}">${p}%</option>`).join('')}</select></div>
       <div class="field"><label>CGST <span style="color:var(--muted); font-weight:400;">(auto)</span></label><input type="number" step="0.01" id="pf-cgst" placeholder="Auto" readonly tabindex="-1"></div>
@@ -7963,6 +8030,8 @@ async function addProformaInvoice(e){
     invoiceValue: gv('pf-invval'),
     amountReceived: gv('pf-received'),
     paymentDate: gv('pf-paydate'),
+    receivePct: gv('pf-recvpct'),
+    amountToReceive: gv('pf-toreceive'),
     valueInWords: gv('pf-invval') ? numberToWordsINR(gv('pf-invval')) : '',
     termsOfDelivery: gv('pf-terms'),
     deliveryPeriod: gv('pf-delivery'),
@@ -8059,8 +8128,8 @@ function convertProformaToSales(id){
 let PROFORMA_CONVERT_ID = null;
 function exportProformaInvoices(){
   const d = DATA[currentLocation];
-  const headers = ['Proforma No','Date','Valid Until','Customer','Bill To','GST No.','PO No','PO Date','Place of Supply','State Code','Contact Person','Mobile','Description of Goods','HSN/SAC','Qty','Taxable Value','Freight','CGST %','CGST','SGST %','SGST','IGST %','IGST','Round Off','Total Value','Amount Received','Payment Date','Terms','Delivery Period','Notes','Status','Added By'];
-  const rows = (d.proformaInvoices||[]).map(r=>[r.invNo, r.date, r.validity, r.customer, r.billTo, r.gstin, r.poNo, r.poDate, r.placeOfSupply, r.stateCode, r.contactPerson, r.contactMobile, (r.description || saItems(r).map(it=>it.description).filter(Boolean).join('; ')), r.hsnSac, r.qty, r.taxable, r.freight, r.cgstPct, r.cgst, r.sgstPct, r.sgst, r.igstPct, r.igst, r.roundOff, r.invoiceValue, r.amountReceived, r.paymentDate, r.termsOfDelivery, r.deliveryPeriod, r.notes, (r.convertedInvNo ? 'Converted ('+r.convertedInvNo+')' : 'Open'), r.addedBy]);
+  const headers = ['Proforma No','Date','Valid Until','Customer','Bill To','GST No.','PO No','PO Date','Place of Supply','State Code','Contact Person','Mobile','Description of Goods','HSN/SAC','Qty','Taxable Value','Freight','CGST %','CGST','SGST %','SGST','IGST %','IGST','Round Off','Total Value','Payment %','Amount to be Received','Amount Received','Payment Date','Terms','Delivery Period','Notes','Status','Added By'];
+  const rows = (d.proformaInvoices||[]).map(r=>[r.invNo, r.date, r.validity, r.customer, r.billTo, r.gstin, r.poNo, r.poDate, r.placeOfSupply, r.stateCode, r.contactPerson, r.contactMobile, (r.description || saItems(r).map(it=>it.description).filter(Boolean).join('; ')), r.hsnSac, r.qty, r.taxable, r.freight, r.cgstPct, r.cgst, r.sgstPct, r.sgst, r.igstPct, r.igst, r.roundOff, r.invoiceValue, r.receivePct, r.amountToReceive, r.amountReceived, r.paymentDate, r.termsOfDelivery, r.deliveryPeriod, r.notes, (r.convertedInvNo ? 'Converted ('+r.convertedInvNo+')' : 'Open'), r.addedBy]);
   exportToExcel(currentLocation+'_Proforma_Invoices', headers, rows);
 }
 
@@ -8779,6 +8848,7 @@ function salesDocTopHtml(r, title){
     <tr>
       <td rowspan="2" style="${cellBody} width:64%;">
         <div style="font-size:14px; font-weight:800;">${esc(ci.name)}</div>
+        ${ci.regOff ? `<div style="font-size:9.5px;">Reg. Off : ${esc(ci.regOff)}</div>` : ''}
         <div style="font-size:9.5px;">${esc(ci.address)}</div>
         <div style="font-size:12px; font-weight:800; margin-top:4px;">GSTIN : ${esc(dash(ci.gstin))}</div>
       </td>
@@ -8879,7 +8949,6 @@ function packingListHtml(r){
         </td>
       </tr>
     </table>
-    ${salesDocRegOffHtml()}
   </div>`;
 }
 /* ---- DELIVERY CHALLAN ---- */
@@ -8929,7 +8998,6 @@ function deliveryChallanHtml(r){
         </td>
       </tr>
     </table>
-    ${salesDocRegOffHtml()}
   </div>`;
 }
 /* ---- Details required per document; missing ones are asked for before generating ---- */
@@ -9221,6 +9289,7 @@ function invoiceDocumentHtml(r, heading, docTitle){
       <div style="font-size:15px; font-weight:800; letter-spacing:0.03em;">${esc(ci.name)}</div>
       ${(ci.mail || ci.phones) ? `<div style="font-size:9px;">Mail.ID: ${esc(ci.mail)}, Contact No's: ${esc(ci.phones)}</div>` : ''}
       <div style="font-size:10px; font-weight:700; margin-top:1px;">GSTIN No. ${esc(dash(ci.gstin))} &nbsp;&nbsp;&nbsp; PAN No. ${esc(dash(ci.pan))}</div>
+      ${ci.regOff ? `<div style="font-size:8.5px; margin-top:1px;">Reg. Off : ${esc(ci.regOff)}</div>` : ''}
       <div style="font-size:8.5px; margin-top:1px;">OFFICE / GODOWN ADDRESS: ${esc(ci.godown)}</div>
       <div style="font-size:8.5px; font-weight:700; margin-top:1px;">All the correspondence should be made with Head Office only.</div>
     </div>
@@ -10001,7 +10070,7 @@ const EDIT_SCHEMAS = {
     {key:'unitPrice', label:'Unit Price', type:'number'},
     {key:'oaNumber', label:'O.A Number', type:'text'},
     {key:'oaDodDate', label:'O.A / DOD Date', type:'date'},
-    {key:'status', label:'Status', type:'select', options:['Non-Executed','Executed','Cancelled']}
+    {key:'status', label:'Status', type:'select', options:['Non-Executed','Part Shipment','Executed','Cancelled']}
   ],
   customerPO: [
     {key:'poNumber', label:'P.O Number', type:'text'},
@@ -10013,7 +10082,7 @@ const EDIT_SCHEMAS = {
     {key:'qty', label:'Quantity', type:'number'},
     {key:'unitPrice', label:'Unit Price', type:'number'},
     {key:'dod', label:'DOD', type:'date'},
-    {key:'status', label:'Status', type:'select', options:['Non-Executed','Executed','Cancelled']}
+    {key:'status', label:'Status', type:'select', options:['Non-Executed','Part Shipment','Executed','Cancelled']}
   ],
   inward: [
     {key:'date', label:'Date', type:'date'},
@@ -10226,6 +10295,8 @@ const EDIT_SCHEMAS = {
     {key:'invoiceValue', label:'Total Value', type:'number'},
     {key:'amountReceived', label:'Amount Received', type:'number'},
     {key:'paymentDate', label:'Payment Date', type:'date'},
+    {key:'receivePct', label:'Payment %', type:'number'},
+    {key:'amountToReceive', label:'Amount to be Received', type:'number'},
     {key:'termsOfDelivery', label:'Terms of Delivery & Payment', type:'text'},
     {key:'deliveryPeriod', label:'Delivery Period', type:'text'},
     {key:'modeOfTransport', label:'Mode Of Transport', type:'text'},
@@ -10641,6 +10712,55 @@ function removeQuoteItemCard(btn){
   }
   updateQuoteTotals();
 }
+/* Sales people offered as the quotation POC. Prefers users whose role is a
+   sales role; falls back to anyone who can open the Sales tab so the list is
+   never empty on setups that have no dedicated sales role yet. */
+function salesPocUsers(){
+  const all = Array.isArray(USERS) ? USERS : [];
+  let list = all.filter(u => String(u.role||'').toLowerCase().indexOf('sales') !== -1);
+  if(!list.length) list = all.filter(u => u.role !== 'admin' && userAllowedTabs(u).indexOf('sales') !== -1);
+  if(!list.length) list = all.filter(u => userAllowedTabs(u).indexOf('sales') !== -1);
+  const nameOf = u => String(u.name || u.username || '').trim();
+  return list.filter(u => nameOf(u))
+             .sort((a,b) => nameOf(a).localeCompare(nameOf(b)));
+}
+/* Mobile number recorded against a sales person, matched by display name. */
+function salesPocPhone(name){
+  const key = String(name||'').trim().toLowerCase();
+  if(!key) return '';
+  const u = salesPocUsers().find(x => String(x.name || x.username || '').trim().toLowerCase() === key);
+  return u ? String(u.mobile || '').trim() : '';
+}
+/* Fires as the POC is picked/typed: pulls that person's number across. */
+function quoteSalesPocPick(){
+  const nameEl = document.getElementById('q-salespoc');
+  const phEl = document.getElementById('q-salesphone');
+  if(!nameEl || !phEl) return;
+  const ph = salesPocPhone(nameEl.value);
+  if(ph) phEl.value = ph;
+  else if(!String(nameEl.value||'').trim()) phEl.value = '';
+}
+/* Regions already used on past quotations, for the autocomplete list. */
+function quoteRegionOptions(d){
+  const seen = {};
+  (d.quotations||[]).forEach(q=>{ const v = String(q.salesRegion||'').trim(); if(v) seen[v] = true; });
+  return Object.keys(seen).sort().map(v=>`<option value="${esc(v)}">`).join('');
+}
+/* Sales region / POC line printed on the quotation. Older quotations only
+   have the single combined salesRegionPoc field, so fall back to it. */
+function quoteSalesPocLine(q){
+  const region = String(q.salesRegion||'').trim();
+  const poc = String(q.salesPoc||'').trim();
+  const ph = String(q.salesPocPhone||'').trim();
+  if(!region && !poc){
+    const legacy = String(q.salesRegionPoc||'').trim();
+    return legacy ? `<div style="margin-top:12px;"><b>Sales Region &amp; POC:</b> ${esc(legacy)}</div>` : '';
+  }
+  const bits = [];
+  if(region) bits.push(esc(region));
+  if(poc) bits.push(esc(poc) + (ph ? ' &mdash; Ph. ' + esc(ph) : ''));
+  return `<div style="margin-top:12px;"><b>Sales Region &amp; POC:</b> ${bits.join(', ')}</div>`;
+}
 function readQuoteForm(){
   const gv = id => { const el=document.getElementById(id); return el ? (el.value||'').trim() : ''; };
   const items = [...document.querySelectorAll('#q-item-cards .quote-item-card')].map(card=>{
@@ -10663,7 +10783,12 @@ function readQuoteForm(){
     items: items,
     accessoriesCV: acc('q-cv-', QUOTE_CV_ACC),
     accessoriesOnOff: acc('q-oo-', QUOTE_ONOFF_ACC),
-    salesRegionPoc: gv('q-salesregion'),
+    salesRegion: gv('q-salesregion'),
+    salesPoc: gv('q-salespoc'),
+    salesPocPhone: gv('q-salesphone'),
+    salesRegionPoc: [gv('q-salesregion'), gv('q-salespoc')].filter(Boolean).join(' - '),
+    otherAccessories: gv('q-otheracc'),
+    notes: gv('q-notes'),
     signName: gv('q-signname'),
     techContactName: gv('q-techname'),
     techContactPhone: gv('q-techphone')
@@ -10771,9 +10896,21 @@ function renderQuotation(){
     <div class="form-grid">
       ${QUOTE_ONOFF_ACC.map(f=>`<div class="field"><label>${esc(f.label)}</label><input type="text" id="q-oo-${f.key}" value="${esc(oo[f.key]||'')}" placeholder="-"></div>`).join('')}
     </div>
+    <div class="access-title" style="margin-top:14px;">Other Accessories</div>
+    <div class="form-grid">
+      <div class="field" style="grid-column:1/-1;"><label>Other accessories / supply</label><textarea id="q-otheracc" rows="3" placeholder="One per line &mdash; printed on the quotation">${esc(q.otherAccessories||'')}</textarea></div>
+    </div>
+    <div class="access-title" style="margin-top:14px;">Notes</div>
+    <div class="form-grid">
+      <div class="field" style="grid-column:1/-1;"><label>Notes / remarks</label><textarea id="q-notes" rows="3" placeholder="Printed below the terms &amp; conditions">${esc(q.notes||'')}</textarea></div>
+    </div>
     <div class="access-title" style="margin-top:14px;">Terms &amp; signature (standard T&amp;C printed automatically)</div>
     <div class="form-grid">
-      <div class="field"><label>Sales Region &amp; POC</label><input type="text" id="q-salesregion" value="${esc(q.salesRegionPoc||'')}" placeholder="e.g. South - Mr. Ramesh"></div>
+      <div class="field"><label>Sales Region</label><input type="text" id="q-salesregion" list="dl-quote-regions" autocomplete="off" value="${esc(q.salesRegion||'')}" placeholder="e.g. North Karnataka"></div>
+      <div class="field"><label>Sales POC</label><input type="text" id="q-salespoc" list="dl-sales-poc" autocomplete="off" value="${esc(q.salesPoc||'')}" placeholder="Pick a sales person" oninput="quoteSalesPocPick()" onchange="quoteSalesPocPick()"></div>
+      <div class="field"><label>POC Contact Number <span style="color:var(--muted); font-weight:400;">(auto)</span></label><input type="text" id="q-salesphone" value="${esc(q.salesPocPhone||'')}" placeholder="Fills in from the sales person"></div>
+      <datalist id="dl-quote-regions">${quoteRegionOptions(d)}</datalist>
+      <datalist id="dl-sales-poc">${salesPocUsers().map(u=>`<option value="${esc(u.name||u.username)}">`).join('')}</datalist>
       <div class="field"><label>Signed By</label><input type="text" id="q-signname" value="${esc(q.signName||'Anantha Narayanan Kartha')}"></div>
       <div class="field"><label>Techno-commercial Contact</label><input type="text" id="q-techname" value="${esc(q.techContactName||'Mr. Shiva Prasad')}"></div>
       <div class="field"><label>Contact Phone</label><input type="text" id="q-techphone" value="${esc(q.techContactPhone||'+91 9000787699')}"></div>
@@ -10805,8 +10942,6 @@ function renderQuotation(){
       </td>${addedByCell(r)}
       <td><div class="action-cell">
         <button class="icon-btn" onclick="openQuotePreview('${r.id}')">View / Print</button>
-        <button class="icon-btn" onclick="whatsappQuote('${r.id}')" title="Share via WhatsApp" style="color:#25D366; border-color:#25D366;">&#128172; WhatsApp</button>
-        <button class="icon-btn" onclick="exportQuotationExcel('${r.id}')">Excel</button>
         <button class="icon-btn" onclick="loadQuoteForEdit('${r.id}')">Edit</button>
         ${deleteBtn(`deleteQuotation('${r.id}')`)}
       </div></td>
@@ -10978,6 +11113,7 @@ function quoteDocumentHtml(q){
     <div style="margin-top:6px; font-style:italic; font-size:11px;"><b>Total in words:</b> ${esc(numberToWordsINR(t.totalPrice))} (GST 18% extra)</div>
     ${accFilled(QUOTE_CV_ACC, q.accessoriesCV) ? accTable('Accessories/ Supply for Control Valve:', QUOTE_CV_ACC, q.accessoriesCV) : ''}
     ${accFilled(QUOTE_ONOFF_ACC, q.accessoriesOnOff) ? accTable('Accessories/ Supply for On/Off:', QUOTE_ONOFF_ACC, q.accessoriesOnOff) : ''}
+    ${q.otherAccessories ? `<div style="margin-top:12px;"><div style="font-weight:700; margin-bottom:4px;">Other Accessories:</div><div style="white-space:pre-line;">${esc(q.otherAccessories)}</div></div>` : ''}
     <!-- PAGE 2 : Terms & Conditions -->
     <div class="quote-page-break"></div>
     <div style="margin-top:26px;">
@@ -10988,7 +11124,8 @@ function quoteDocumentHtml(q){
       <div style="font-weight:700; margin-bottom:8px;">The terms and conditions of sale are:</div>
       ${quoteTermsLines(q).map(l=>`<div style="margin:3px 0;">${esc(l)}</div>`).join('')}
       <div style="margin-top:16px;">We trust our offer is in line with your requirement. Should you feel any Techno/ Commercial clarifications are to be discussed, please do write / call us for the same.</div>
-      ${q.salesRegionPoc ? `<div style="margin-top:12px;"><b>Sales Region &amp; POC:</b> ${esc(q.salesRegionPoc)}</div>` : ''}
+      ${quoteSalesPocLine(q)}
+      ${q.notes ? `<div style="margin-top:12px; white-space:pre-line;"><b>Notes:</b> ${esc(q.notes)}</div>` : ''}
       <div style="margin-top:30px; display:flex; justify-content:space-between; max-width:600px;">
         <div>
           <div style="font-weight:700;">BEST REGARDS,</div>
@@ -11017,7 +11154,6 @@ function openQuotePreview(id){
     <div class="quote-actions">
       <button type="button" class="btn" onclick="printQuote()">&#128424; Print / Save as PDF</button>
       <button type="button" class="btn" onclick="sendToPrintStation()" title="Queue this document to print automatically on the office printer PC">&#128444; Send to Printer</button>
-      <button type="button" class="btn" onclick="exportQuotationExcel('${esc(q.id)}')">&#8595; Download Excel</button>
       <button type="button" class="btn quote-close-btn" onclick="closeQuotePreview()">&#10005; Close</button>
     </div>
     ${quoteDocumentHtml(q)}`;
@@ -11122,8 +11258,8 @@ function exportQuotationExcel(id){
 }
 function exportQuotationLog(){
   const d = DATA[currentLocation];
-  const headers = ['Quote #','Quote Date','Rev. No','Customer','RFQ Type','RFQ Ref','RFQ Date','Kind Attn','P.O Received','Items','Total Qty','Total Price INR','Delivery Schedule','Sales Region & POC','Added By'];
-  const rows = (d.quotations||[]).map(q=>[q.quoteNumber, q.quoteDate||q.date, q.revNo||'R0', q.customer, q.rfqType, q.rfqRef, q.rfqDate, q.kindAttn, q.poReceived||'No', (q.items||[]).length, q.totalQty, q.totalPrice!=null?q.totalPrice:q.grandTotal, (q.items||[]).map(it=>it.delivery).filter(Boolean).join('; ') || q.deliverySchedule || '', q.salesRegionPoc||'', q.addedBy]);
+  const headers = ['Quote #','Quote Date','Rev. No','Customer','RFQ Type','RFQ Ref','RFQ Date','Kind Attn','P.O Received','Items','Total Qty','Total Price INR','Delivery Schedule','Sales Region','Sales POC','POC Contact','Other Accessories','Notes','Added By'];
+  const rows = (d.quotations||[]).map(q=>[q.quoteNumber, q.quoteDate||q.date, q.revNo||'R0', q.customer, q.rfqType, q.rfqRef, q.rfqDate, q.kindAttn, q.poReceived||'No', (q.items||[]).length, q.totalQty, q.totalPrice!=null?q.totalPrice:q.grandTotal, (q.items||[]).map(it=>it.delivery).filter(Boolean).join('; ') || q.deliverySchedule || '', q.salesRegion||'', q.salesPoc||'', q.salesPocPhone||'', q.otherAccessories||'', q.notes||'', q.addedBy]);
   exportToExcel(currentLocation+'_Quotations', headers, rows);
 }
 
