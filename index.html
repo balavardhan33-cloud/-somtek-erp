@@ -2814,7 +2814,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.72';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.73';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -5199,6 +5199,7 @@ function renderInward(){
   </form>
   <p style="margin:10px 0 0 0; font-size:11.5px; color:var(--muted);">All items above are saved under the same vendor / PO in one go &mdash; you can repeat the same Item Type / Category on any number of lines. Stock is automatically added to the Inventory tab (matched by item name).</p>
   </div></div>
+  ${barcodeStationHtml('in')}
   ${secHead('&#128203;', 'Records')}
   <div class="panel"><div class="panel-head"><h3>Inward log</h3><div class="panel-head-actions">${importBtn('inward')}${exportBtn('exportInward')}</div></div>
   <div class="panel-body">
@@ -5234,6 +5235,286 @@ function inPaidByDisplay(r){
   if(!r.paidBy) return '';
   return r.paidBy === 'Paid by vendor' ? 'Vendor' + (r.paidVendor ? ': ' + r.paidVendor : '') : 'Us';
 }
+
+/* ---------------- BARCODE STATION ---------------- */
+/* Code 39: each character is 9 elements (bar,space,bar,... starting with a
+   bar); 1 = wide, 0 = narrow. Chosen over a CDN barcode library so there is
+   no external dependency, and over Code 128 because it is self-checking and
+   read by every handheld scanner without configuration. */
+const CODE39 = {
+  '0':'000110100','1':'100100001','2':'001100001','3':'101100000','4':'000110001',
+  '5':'100110000','6':'001110000','7':'000100101','8':'100100100','9':'001100100',
+  'A':'100001001','B':'001001001','C':'101001000','D':'000011001','E':'100011000',
+  'F':'001011000','G':'000001101','H':'100001100','I':'001001100','J':'000011100',
+  'K':'100000011','L':'001000011','M':'101000010','N':'000010011','O':'100010010',
+  'P':'001010010','Q':'000000111','R':'100000110','S':'001000110','T':'000010110',
+  'U':'110000001','V':'011000001','W':'111000000','X':'010010001','Y':'110010000',
+  'Z':'011010000','-':'010000101','.':'110000100',' ':'011000100','$':'010101000',
+  '/':'010100010','+':'010001010','%':'000101010','*':'010010100'
+};
+/* Renders text as a Code 39 barcode in SVG. Returns '' if the text contains a
+   character Code 39 cannot represent, rather than drawing a barcode that
+   would scan back as something else. */
+function code39Svg(text, opts){
+  opts = opts || {};
+  const narrow = opts.narrow || 2;          /* px per narrow element */
+  const wide = narrow * 3;                  /* 3:1 is the standard ratio */
+  const height = opts.height || 46;
+  const raw = String(text == null ? '' : text).trim().toUpperCase();
+  if(!raw) return '';
+  const chars = ('*' + raw + '*').split('');
+  for(const c of chars){ if(!CODE39[c]) return ''; }
+  let x = 0, bars = '';
+  chars.forEach((c, ci) => {
+    const pat = CODE39[c];
+    for(let k = 0; k < 9; k++){
+      const w = pat[k] === '1' ? wide : narrow;
+      if(k % 2 === 0){ bars += '<rect x="' + x + '" y="0" width="' + w + '" height="' + height + '"/>'; }
+      x += w;
+    }
+    if(ci < chars.length - 1) x += narrow;   /* inter-character gap */
+  });
+  const showText = opts.text === false ? '' :
+    '<text x="' + (x/2) + '" y="' + (height + 13) +
+    '" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" ' +
+    'letter-spacing="1.5" fill="currentColor">' + esc(raw) + '</text>';
+  const totalH = opts.text === false ? height : height + 17;
+  return '<svg viewBox="0 0 ' + x + ' ' + totalH + '" width="' + x + '" height="' + totalH +
+         '" xmlns="http://www.w3.org/2000/svg" style="max-width:100%; height:auto;">' +
+         '<g fill="currentColor">' + bars + '</g>' + showText + '</svg>';
+}
+/* SOMTEK -> SOM, EVISSAT -> EVI. Keeps codes short and obviously per-company. */
+/* Next free code for this location, used when a new item is created. */
+function nextItemCode(d){
+  const prefix = itemCodePrefix(currentLocation);
+  const re = new RegExp('^' + prefix + '-(\\d+)$');
+  let max = 0;
+  ((d && d.inventory) || []).forEach(i => {
+    const m = re.exec(String(i.itemCode || '').trim().toUpperCase());
+    if(m) max = Math.max(max, parseInt(m[1], 10) || 0);
+  });
+  return prefix + '-' + String(max + 1).padStart(4, '0');
+}
+function itemCodePrefix(loc){
+  return String(loc || '').replace(/[^A-Za-z]/g, '').toUpperCase().slice(0, 3) || 'ITM';
+}
+/* Fills in a code for every item that has none. Existing codes are never
+   reassigned, so printed labels stay valid. */
+async function assignItemCodes(){
+  const d = DATA[currentLocation];
+  const prefix = itemCodePrefix(currentLocation);
+  const inv = d.inventory || [];
+  const re = new RegExp('^' + prefix + '-(\\d+)$');
+  let max = 0;
+  inv.forEach(i => {
+    const m = re.exec(String(i.itemCode || '').trim().toUpperCase());
+    if(m) max = Math.max(max, parseInt(m[1], 10) || 0);
+  });
+  const missing = inv.filter(i => !String(i.itemCode || '').trim());
+  if(!missing.length){ alert('Every item already has a code.'); return; }
+  if(!confirm('Assign a barcode code to ' + missing.length + ' item(s) that do not have one?\n\nItems that already have a code are left untouched, so labels already printed stay valid.')) return;
+  missing.forEach(i => { i.itemCode = prefix + '-' + String(++max).padStart(4, '0'); });
+  await saveLocation(currentLocation);
+  logAudit('INVENTORY', 'Assigned barcode codes to ' + missing.length + ' item(s)');
+  render();
+}
+/* Deliberately forgiving, because this field is typed by hand as well as
+   scanned: case, spaces, dashes and underscores are all ignored. Falls back
+   to the internal id and then the exact item name. */
+function findItemByCode(raw){
+  const d = DATA[currentLocation] || {};
+  const str = String(raw == null ? '' : raw).trim();
+  if(!str) return null;
+  const norm = v => String(v == null ? '' : v).trim().toUpperCase().replace(/[\s\-_]/g, '');
+  const key = norm(str);
+  const inv = d.inventory || [];
+  return inv.find(i => String(i.itemCode || '').trim() && norm(i.itemCode) === key)
+      || inv.find(i => String(i.id) === str)
+      || inv.find(i => String(i.name || '').trim().toLowerCase() === str.toLowerCase())
+      || null;
+}
+let BC_FOUND = null;      /* id of the item currently on screen */
+function bcMsgHtml(txt, kind){
+  const col = kind === 'ok' ? 'var(--success)' : (kind === 'err' ? 'var(--danger)' : 'var(--muted)');
+  return '<div style="padding:12px 14px; border:1px solid ' + col + '; color:' + col +
+         '; font-size:13px; font-family:\'IBM Plex Mono\',monospace;">' + txt + '</div>';
+}
+function bcDetailsHtml(i, mode){
+  const qty = parseFloat(i.qty) || 0;
+  const cost = parseFloat(i.cost) || 0;
+  const days = invAgeDays(i);
+  const row = (k, v) => '<div style="display:flex; gap:10px; padding:3px 0;">' +
+    '<div style="min-width:110px; color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:0.06em;">' + k + '</div>' +
+    '<div style="font-size:13px;">' + v + '</div></div>';
+  const outOfStock = mode === 'out' && qty <= 0;
+  return '<div style="border:1px solid var(--border); padding:14px;">' +
+    '<div style="font-weight:800; font-size:14px; margin-bottom:8px;">' + esc(i.name || '-') + '</div>' +
+    row('Code', '<b>' + esc(i.itemCode || '(none)') + '</b>') +
+    row('Category', esc(i.category || '-')) +
+    row('Specifications', esc(i.specs || '-')) +
+    row('In stock', '<b style="color:' + (qty > 0 ? 'var(--success)' : 'var(--danger)') + ';">' + esc(i.qty || '0') + '</b>') +
+    row('Cost', cost ? money(cost) : '-') +
+    row('Stock value', (qty && cost) ? money(qty * cost) : '-') +
+    row('Age', days === null ? '<span style="color:var(--muted);">not known</span>' : (days + ' days ' + ageChip(days))) +
+    '<div style="display:flex; gap:8px; align-items:flex-end; margin-top:12px; flex-wrap:wrap;">' +
+      '<div><label style="display:block; font-size:11px; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted); margin-bottom:4px;">Quantity</label>' +
+      '<input type="number" id="bc-qty" min="1" step="any" style="width:120px; padding:9px 10px; background:var(--bg); border:1px solid var(--border); color:var(--text); font-family:\'IBM Plex Mono\',monospace;" placeholder="Qty"' + (outOfStock ? ' disabled' : '') + '></div>' +
+      (outOfStock
+        ? '<div style="color:var(--danger); font-size:12px; padding-bottom:10px;">No stock on hand &mdash; cannot dispatch this item.</div>'
+        : '<button type="button" class="btn" onclick="bcAddLine(\'' + mode + '\')">' +
+          (mode === 'out' ? '&#128666; Add to dispatch' : '&#10133; Add to receipt') + '</button>') +
+    '</div></div>';
+}
+/* Runs on scan or on Enter. Never calls render(): a full re-render would wipe
+   lines the user has already entered on the form below. */
+function bcScan(mode){
+  const el = document.getElementById('bc-input');
+  const box = document.getElementById('bc-result');
+  if(!el || !box) return;
+  const raw = String(el.value || '').trim();
+  if(!raw){ box.innerHTML = ''; BC_FOUND = null; return; }
+  const it = findItemByCode(raw);
+  if(!it){
+    BC_FOUND = null;
+    box.innerHTML = bcMsgHtml('No item matches <b>' + esc(raw) + '</b>. Check the code, or use Assign codes below if this item has never been given one.', 'err');
+  }else{
+    BC_FOUND = it.id;
+    box.innerHTML = bcDetailsHtml(it, mode);
+  }
+  el.value = '';
+  el.focus();          /* ready for the next scan straight away */
+}
+function bcKey(e, mode){
+  if(e && e.key === 'Enter'){ e.preventDefault(); bcScan(mode); return false; }
+  return true;
+}
+/* Reuses the first blank line on the form if there is one, so scanning does
+   not leave an empty row above the scanned items. */
+function bcTargetLine(wrap, sel, addFn){
+  const lines = [...wrap.querySelectorAll(sel)];
+  const blank = lines.find(l => {
+    const f = l.querySelector(sel === '.in-line' ? '.in-line-item' : '.out-line-item');
+    return f && !String(f.value || '').trim();
+  });
+  if(blank) return blank;
+  addFn();
+  const after = [...wrap.querySelectorAll(sel)];
+  return after[after.length - 1] || null;
+}
+function bcAddLine(mode){
+  const d = DATA[currentLocation];
+  const it = (d.inventory || []).find(x => x.id === BC_FOUND);
+  const box = document.getElementById('bc-result');
+  if(!it){ if(box) box.innerHTML = bcMsgHtml('Scan an item first.', 'err'); return; }
+  const qtyEl = document.getElementById('bc-qty');
+  const qty = qtyEl ? String(qtyEl.value || '').trim() : '';
+  if(mode === 'out'){
+    const wrap = document.getElementById('out-item-lines');
+    if(!wrap){ if(box) box.innerHTML = bcMsgHtml('The dispatch form is not open on this screen.', 'err'); return; }
+    if((parseFloat(it.qty) || 0) <= 0){ if(box) box.innerHTML = bcMsgHtml('No stock on hand for this item.', 'err'); return; }
+    const line = bcTargetLine(wrap, '.out-line', addOutItemLine);
+    if(!line) return;
+    const sel = line.querySelector('.out-line-item');
+    sel.value = it.id;
+    if(sel.value !== it.id){   /* item is not in the dropdown (zero stock) */
+      if(box) box.innerHTML = bcMsgHtml('This item is not available for dispatch.', 'err');
+      return;
+    }
+    if(qty) line.querySelector('.out-line-qty').value = qty;
+    if(typeof outLineItemChanged === 'function') outLineItemChanged(sel);
+  }else{
+    const wrap = document.getElementById('in-item-lines');
+    if(!wrap){ if(box) box.innerHTML = bcMsgHtml('The receipt form is not open on this screen.', 'err'); return; }
+    const line = bcTargetLine(wrap, '.in-line', addInItemLine);
+    if(!line) return;
+    line.querySelector('.in-line-item').value = it.name || '';
+    const typeEl = line.querySelector('.in-line-type');
+    if(typeEl && it.category) typeEl.value = it.category;
+    if(qty) line.querySelector('.in-line-qty').value = qty;
+    const priceEl = line.querySelector('.in-line-price');
+    if(priceEl && it.cost && !String(priceEl.value || '').trim()) priceEl.value = it.cost;
+    if(typeof updateInLinesTotal === 'function') updateInLinesTotal();
+  }
+  if(box) box.innerHTML = bcMsgHtml('<b>' + esc(it.name || '') + '</b>' + (qty ? ' &times; ' + esc(qty) : '') +
+    ' added to the form below. Scan the next item.', 'ok');
+  const el = document.getElementById('bc-input');
+  if(el) el.focus();
+}
+/* Label sheet for printing. Opens in its own window so the ERP page is not
+   disturbed; if the browser blocks the popup we say so rather than failing
+   silently. */
+function bcPrintLabels(){
+  const d = DATA[currentLocation];
+  const list = (d.inventory || []).filter(i => String(i.itemCode || '').trim());
+  if(!list.length){ alert('No items have a code yet. Use "Assign codes" first.'); return; }
+  const cards = list.map(i => {
+    const svg = code39Svg(i.itemCode, {narrow:2, height:44});
+    return '<div class="lbl">' +
+      '<div class="nm">' + esc(String(i.name || '').slice(0, 60)) + '</div>' +
+      '<div class="bc">' + (svg || '<span style="font-size:10px;">code not printable</span>') + '</div>' +
+      '<div class="ct">' + esc(i.category || '') + '</div></div>';
+  }).join('');
+  const w = window.open('', '_blank');
+  if(!w){ alert('Your browser blocked the print window. Allow pop-ups for this site and try again.'); return; }
+  w.document.write('<!DOCTYPE html><html><head><title>Barcode labels &mdash; ' + esc(currentLocation) + '</title>' +
+    '<style>body{font-family:Arial,Helvetica,sans-serif; margin:10mm;}' +
+    'h1{font-size:14px; margin:0 0 8mm 0;}' +
+    '.sheet{display:flex; flex-wrap:wrap; gap:4mm;}' +
+    '.lbl{border:1px solid #999; padding:3mm; width:62mm; box-sizing:border-box; text-align:center; page-break-inside:avoid;}' +
+    '.nm{font-size:9px; font-weight:bold; height:24px; overflow:hidden; line-height:12px; margin-bottom:2mm;}' +
+    '.ct{font-size:8px; color:#555; margin-top:1mm;}' +
+    '.bc{color:#000;} .bc svg{max-width:100%;}' +
+    '@media print{ h1{display:none;} }</style></head><body>' +
+    '<h1>' + esc(currentLocation) + ' &mdash; ' + list.length + ' labels</h1>' +
+    '<div class="sheet">' + cards + '</div></body></html>');
+  w.document.close();
+  w.focus();
+  setTimeout(() => { try{ w.print(); }catch(e){} }, 350);
+}
+/* The panel itself. mode is 'in' (Inward) or 'out' (Outward). */
+function barcodeStationHtml(mode){
+  const d = DATA[currentLocation];
+  const inv = d.inventory || [];
+  const coded = inv.filter(i => String(i.itemCode || '').trim());
+  const missing = inv.length - coded.length;
+  const preview = coded.slice(0, 12).map(i => {
+    const svg = code39Svg(i.itemCode, {narrow:1.6, height:38});
+    return '<div style="border:1px solid var(--border); padding:10px; text-align:center; width:180px;">' +
+      '<div style="font-size:10px; font-weight:700; height:26px; overflow:hidden; line-height:13px; margin-bottom:6px;">' + esc(String(i.name || '').slice(0, 46)) + '</div>' +
+      '<div style="color:var(--text);">' + (svg || '<span style="font-size:10px; color:var(--muted);">code not printable</span>') + '</div></div>';
+  }).join('');
+  return `
+  ${secHead('&#9646;&#9647;&#9646;', 'Barcode Station')}
+  <div class="panel"><div class="panel-head"><h3>Scan or type a code</h3></div>
+  <div class="panel-body">
+    <div class="form-grid">
+      <div class="field" style="grid-column:1/-1;">
+        <label>Item code <span style="color:var(--muted); font-weight:400;">(scan with the handheld, or type it and press Enter)</span></label>
+        <input type="text" id="bc-input" autocomplete="off" placeholder="e.g. ${esc(itemCodePrefix(currentLocation))}-0001"
+               onkeydown="return bcKey(event, '${mode}')">
+      </div>
+    </div>
+    <div style="display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap;">
+      <button type="button" class="btn" onclick="bcScan('${mode}')">&#128269; Look up</button>
+    </div>
+    <div id="bc-result"></div>
+    <p class="hint">The scanned item is added as a line on the <b>New Entry</b> form above &mdash; nothing is saved until you submit that form, so the usual stock checks still apply.</p>
+  </div></div>
+
+  <div class="panel"><div class="panel-head"><h3>Barcode generator</h3>
+    <div class="panel-head-actions">
+      ${isAdmin() ? `<button type="button" class="icon-btn" onclick="assignItemCodes()">&#127991; Assign codes${missing ? ' ('+missing+')' : ''}</button>` : ''}
+      <button type="button" class="icon-btn" onclick="bcPrintLabels()">&#128424; Print labels</button>
+    </div></div>
+  <div class="panel-body">
+    ${coded.length === 0
+      ? `<p class="hint">No item has a code yet.${isAdmin() ? ' Click <b>Assign codes</b> to give every inventory item one (${esc(itemCodePrefix(currentLocation))}-0001, -0002 and so on).' : ' Ask an administrator to assign codes.'}</p>`
+      : `<p class="hint">${coded.length} item${coded.length===1?'':'s'} coded${missing ? `, ${missing} still without a code` : ''}. <b>Print labels</b> produces a sheet for all coded items; a sample is shown below.</p>
+         <div style="display:flex; flex-wrap:wrap; gap:10px;">${preview}</div>
+         ${coded.length > 12 ? `<p class="hint">Showing 12 of ${coded.length} &mdash; the printed sheet includes them all.</p>` : ''}`}
+  </div></div>`;
+}
+
 function inItemLineHtml(){
   return `<div class="out-line in-line">
     <input type="text" class="out-line-item in-line-item" placeholder="Item name" oninput="updateInLinesTotal()">
@@ -5640,6 +5921,7 @@ async function addInventory(e){
     cost: document.getElementById('inv-cost').value.trim(),
     category: document.getElementById('inv-cat').value.trim(),
     deadStock: document.getElementById('inv-deadstock').value || 'No',
+    itemCode: nextItemCode(DATA[currentLocation]),
     addedOn: today(),
     addedBy: actorName()
   });
@@ -5654,8 +5936,8 @@ async function updateInventoryDeadStock(id, value){
 }
 function exportInventory(){
   const d = DATA[currentLocation];
-  const headers = ['Item','Date','Qty','Specifications','Cost','Total Value','Category','Low Stock','Added By'];
-  const rows = d.inventory.map(i=>[i.name, invDate(i), i.qty, i.specs, i.cost, ((parseFloat(i.qty)||0)*(parseFloat(i.cost)||0))||'', i.category, i.deadStock||'No', i.addedBy]);
+  const headers = ['Item','Code','Date','Qty','Specifications','Cost','Total Value','Category','Low Stock','Added By'];
+  const rows = d.inventory.map(i=>[i.name, i.itemCode||'', invDate(i), i.qty, i.specs, i.cost, ((parseFloat(i.qty)||0)*(parseFloat(i.cost)||0))||'', i.category, i.deadStock||'No', i.addedBy]);
   cfExportAppend('inventory', d.inventory, headers, rows);
   exportToExcel(currentLocation+'_Inventory', headers, rows);
 }
@@ -5713,6 +5995,7 @@ function renderOutward(){
   </form>
   <p style="margin:10px 0 0 0; font-size:11.5px; color:var(--muted);">All items above are saved under the same customer / P.O in one go &mdash; add as many items as needed, including multiple items of the same category (even the same item on two lines). Each quantity is automatically deducted from the Inventory tab; you cannot dispatch more than the available stock.</p>
   </div></div>`}
+  ${readOnly ? '' : barcodeStationHtml('out')}
   ${secHead('&#128203;', 'Records')}
   <div class="panel"><div class="panel-head"><h3>Outward log</h3><div class="panel-head-actions">${importBtn('outward')}${exportBtn('exportOutward')}</div></div>
   <div class="panel-body">
@@ -10092,7 +10375,8 @@ const EDIT_SCHEMAS = {
     {key:'cost', label:'Cost', type:'number'},
     {key:'category', label:'Category', type:'text'},
     {key:'deadStock', label:'Low Stock', type:'select', options:['No','Yes']},
-    {key:'addedOn', label:'Stock Since (date)', type:'date'}
+    {key:'addedOn', label:'Stock Since (date)', type:'date'},
+    {key:'itemCode', label:'Barcode Code', type:'text'}
   ],
   vendorPO: [
     {key:'poNumber', label:'P.O Number', type:'text'},
