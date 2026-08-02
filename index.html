@@ -553,6 +553,7 @@ form input[readonly]{background:var(--panel-2); color:var(--muted); cursor:defau
 .age-chip{display:inline-block; padding:2px 8px; font-size:10px; font-weight:700; border-radius:3px; font-family:'IBM Plex Mono',monospace; letter-spacing:0.02em; white-space:nowrap;}
 .age-red{background:#fdecea; color:#c62828; border:1px solid #f2b8b5;}
 .age-yellow{background:#fff8e1; color:#8a6100; border:1px solid #eeda9a;}
+.age-dark{background:#7f1d1d; color:#fee2e2; border:1px solid #991b1b;}
 .topbar-user .role-icon{
   width:30px; height:30px; border-radius:50%; flex-shrink:0; display:flex; align-items:center; justify-content:center;
   font-size:15px; background:var(--panel-2); border:1px solid var(--border);
@@ -1851,7 +1852,7 @@ function reportSheetFor(section, loc, d){
   if(section === 'inventory'){
     const rows = (d.inventory||[]).map(i=>{
       const days = invAgeDays(i);
-      const flag = isLowStockFlag(i) ? 'LOW STOCK' : (isDeadStockNow(i) ? 'DEAD STOCK' : (days>365?'>1 yr':(days>90?'>90 days':'')));
+      const flag = isLowStockFlag(i) ? 'LOW STOCK' : (isDeadStockNow(i) ? 'DEAD STOCK' : ageLabel(days));
       return [i.name, i.qty, i.cost, ((parseFloat(i.qty)||0)*(parseFloat(i.cost)||0))||'', i.category||'', i.lastInwardOn||i.addedOn||'', days==null?'':days, flag];
     });
     return { name: loc+' Inventory', headers: ['Item','Qty','Cost','Total Value','Category','Stock Since','Age (days)','Flag'], rows: rows };
@@ -2774,7 +2775,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.69';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.70';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -5387,11 +5388,22 @@ function invDate(i){
   }
   return best || i.lastInwardOn || i.addedOn || '';
 }
+/* Plain-text age band, with no upper limit: past two years it keeps
+   counting in whole years, so a five-year-old item reads ">5 yrs"
+   instead of the flat ">1 yr" everything used to collapse into.
+   Returns '' for anything 90 days or younger. Shared by the on-screen
+   chip, the Excel exports and the Reports flag so they cannot drift. */
+function ageLabel(days){
+  if(days === null || days === undefined || days <= 90) return '';
+  if(days <= 365) return '>90 days';
+  if(days <= 730) return '>1 yr';
+  return '>' + Math.floor(days / 365) + ' yrs';
+}
 function ageChip(days){
-  if(days === null || days === undefined) return '';
-  if(days > 365) return '<span class="age-chip age-red">&gt;1 yr</span>';
-  if(days > 90) return '<span class="age-chip age-yellow">&gt;90 days</span>';
-  return '';
+  const label = ageLabel(days);
+  if(!label) return '';
+  const cls = days > 730 ? 'age-dark' : (days > 365 ? 'age-red' : 'age-yellow');
+  return '<span class="age-chip ' + cls + '">' + esc(label) + '</span>';
 }
 /* Days since the item's most recent OUTWARD (sale/dispatch) movement,
    matched by item name. Returns null if the item has never moved out. */
@@ -5525,7 +5537,7 @@ function renderInventory(){
       return `<tr>
       <td style="font-family:'IBM Plex Sans',sans-serif; max-width:340px; white-space:normal;">${descCellHtml('inventory:'+i.id+':name', i.name, 70)}</td><td>${esc(i.qty)}</td><td>${esc(i.cost)}</td><td>${rowTotal(i.qty, i.cost)}</td><td>${esc(i.category)}</td>
       <td>${esc(i.lastInwardOn || i.addedOn || '')}</td>
-      <td>${days} days <span class="age-chip age-red">DEAD</span></td>
+      <td>${days} days ${ageChip(days)} <span class="age-chip age-red">DEAD</span></td>
       <td>${mv===null ? '<span style="color:var(--muted); font-size:11px;">never moved</span>' : mv + ' days ago'}</td>
       <td>${actionCell(editBtn('inventory', i.id), deleteBtn(`deleteInventory('${i.id}')`))}</td>
     </tr>`;}).join('')}
@@ -5565,7 +5577,7 @@ function exportAgingStock(){
   const headers = ['Item','Qty','Cost','Total Value','Category','Stock Since','Age (days)','Flag'];
   const rows = aging.map(i=>{
     const days = invAgeDays(i);
-    return [i.name, i.qty, i.cost, ((parseFloat(i.qty)||0)*(parseFloat(i.cost)||0))||'', i.category, i.lastInwardOn||i.addedOn||'', days, days>365?'>1 yr':'>90 days'];
+    return [i.name, i.qty, i.cost, ((parseFloat(i.qty)||0)*(parseFloat(i.cost)||0))||'', i.category, i.lastInwardOn||i.addedOn||'', days, ageLabel(days)];
   });
   exportToExcel(currentLocation+'_Aging_Stock', headers, rows);
 }
@@ -5611,11 +5623,11 @@ function exportDeadStock(){
   const d = DATA[currentLocation];
   const deadStockList = d.inventory.filter(isDeadStockNow)
     .sort((a,b)=>(invAgeDays(b)||0)-(invAgeDays(a)||0));
-  const headers = ['Item','Qty','Cost','Total Value','Category','Stock Since','Age (days)','Last Movement'];
+  const headers = ['Item','Qty','Cost','Total Value','Category','Stock Since','Age (days)','Age Band','Last Movement'];
   const rows = deadStockList.map(i=>{
     const days = invAgeDays(i);
     const mv = lastOutwardDays(i);
-    return [i.name, i.qty, i.cost, ((parseFloat(i.qty)||0)*(parseFloat(i.cost)||0))||'', i.category, i.lastInwardOn||i.addedOn||'', days, mv===null?'never moved':(mv+' days ago')];
+    return [i.name, i.qty, i.cost, ((parseFloat(i.qty)||0)*(parseFloat(i.cost)||0))||'', i.category, i.lastInwardOn||i.addedOn||'', days, ageLabel(days), mv===null?'never moved':(mv+' days ago')];
   });
   exportToExcel(currentLocation+'_DeadStock', headers, rows);
 }
