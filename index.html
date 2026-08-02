@@ -1834,7 +1834,7 @@ function reportSheetFor(section, loc, d){
       ['Inventory Value', money(invValue)],
       ['Aging Stock (>90 days, <2 yrs)', inv.filter(i=>!isLowStockFlag(i) && !isDeadStockNow(i) && (invAgeDays(i)||0)>90).length],
       ['Low Stock Items', inv.filter(isLowStockFlag).length],
-      ['Dead Stock Items (2 yrs+, not moving)', inv.filter(isDeadStockNow).length],
+      ['Dead Stock Items (2 yrs+)', inv.filter(isDeadStockNow).length],
       ['Pending Enquiries', (d.enquiry||[]).filter(r=>(r.action||'Pending')==='Pending').length]
     ];
     return { name: loc+' Summary', headers: ['Metric','Value'], rows: rows };
@@ -2775,7 +2775,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.70';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.71';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -5426,17 +5426,23 @@ function lastOutwardDays(i){
 function isLowStockFlag(i){
   return i.deadStock === 'Yes' || (Number(i.qty)||0) === 0;
 }
-/* True Dead Stock: still holding quantity, in stock for more than 2 years
-   (730 days, counted automatically from the entry/inward date), and has
-   not moved out (no outward/sale) in that same 2-year window. */
+/* Dead Stock: quantity still on hand, and in stock for more than 2 years
+   (730 days, counted from the most recent inward receipt of that item, or
+   failing that its own Stock Since date).
+
+   Age alone decides it. A recent dispatch no longer excludes an old item,
+   and the manual Low Stock flag no longer hides it - both used to remove
+   rows silently. Whether anything has actually moved out is still shown in
+   the Last Movement column, so that judgement stays visible on screen
+   instead of being buried in the filter.
+
+   Zero-quantity items are excluded: nothing is on hand, so they hold no
+   value here. They continue to appear under Low Stock. */
 const DEAD_STOCK_DAYS = 730;
 function isDeadStockNow(i){
-  if(isLowStockFlag(i)) return false;
+  if((Number(i.qty)||0) <= 0) return false;
   const age = invAgeDays(i);
-  if(age === null || age <= DEAD_STOCK_DAYS) return false;
-  const moved = lastOutwardDays(i);
-  if(moved !== null && moved <= DEAD_STOCK_DAYS) return false;
-  return true;
+  return age !== null && age > DEAD_STOCK_DAYS;
 }
 function invStampDates(d){
   /* Legacy items have no date - stamp them once so aging starts counting. */
@@ -5530,7 +5536,7 @@ function renderInventory(){
   <div class="panel"><div class="panel-head"><h3>&#9888;&#65039; Dead Stock &mdash; ${locationLabel(currentLocation, 14)} <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(in stock for more than 2 years and not moving &mdash; no outward/sale in that time, calculated automatically from entry &amp; dispatch dates)</span></h3><div class="panel-head-actions">${exportBtn('exportDeadStock')}</div></div>
   <div class="panel-body">
   <table><thead><tr><th>Item</th><th>Qty</th><th>Cost</th><th>Total Value</th><th>Category</th><th>Stock Since</th><th>Age</th><th>Last Movement</th><th></th></tr></thead><tbody>
-  ${deadRows.length===0 ? `<tr class="empty-row"><td colspan="9">No dead stock &mdash; nothing has been sitting unmoved for more than 2 years.</td></tr>` :
+  ${deadRows.length===0 ? `<tr class="empty-row"><td colspan="9">No dead stock &mdash; nothing on hand has been in stock for more than 2 years.</td></tr>` :
     deadRows.map(i=>{
       const days = invAgeDays(i);
       const mv = lastOutwardDays(i);
