@@ -842,9 +842,48 @@ function descCellHtml(key, text, limit){
 }
 /* Convert a YYYY-MM-DD (or any date-ish) string into DD-MM-YYYY for display purposes.
    Leaves non-date / empty values untouched so it is safe to wrap around any field. */
+/* Reads every date format that actually turns up in this data, not just ISO.
+   Spreadsheet imports leave text dates verbatim, so records carry things like
+   "19.07.2022" - Date.parse returns NaN for those, which is why such items had
+   no age and never reached Aging or Dead Stock.
+
+   Handles: 2022-07-19 (ISO), 19.07.2022, 19-07-2022, 19/07/2022.
+   The separated forms are read DAY-FIRST: that is the Indian convention and
+   matches every import seen here. A 4-digit leading group means ISO instead.
+   Returns a timestamp, or NaN when the value genuinely is not a date. */
+function dparse(v){
+  if(v == null) return NaN;
+  if(v instanceof Date) return v.getTime();
+  const str = String(v).trim();
+  if(!str) return NaN;
+  /* Full ISO timestamps keep their time-of-day - hand them straight over. */
+  if(str.indexOf('T') !== -1) return Date.parse(str);
+  const m = /^(\d{1,4})[.\-\/](\d{1,2})[.\-\/](\d{1,4})$/.exec(str);
+  if(m){
+    let y, mo, d;
+    if(m[1].length === 4){ y = +m[1]; mo = +m[2]; d = +m[3]; }
+    else { d = +m[1]; mo = +m[2]; y = +m[3]; }
+    if(y < 100) y += 2000;
+    if(mo < 1 || mo > 12 || d < 1 || d > 31) return NaN;
+    const dt = new Date(y, mo - 1, d);
+    /* Rejects impossible dates - 31.02.2022 would otherwise roll into March. */
+    if(dt.getFullYear() === y && dt.getMonth() === mo - 1 && dt.getDate() === d) return dt.getTime();
+    return NaN;
+  }
+  return Date.parse(str);
+}
+/* Any readable date normalised to YYYY-MM-DD. Unreadable values come back
+   unchanged so nothing is silently blanked on screen. */
+function toIsoDate(v){
+  const t = dparse(v);
+  if(isNaN(t)) return String(v == null ? '' : v).trim();
+  const d = new Date(t);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0')
+         + '-' + String(d.getDate()).padStart(2, '0');
+}
 function fd(s){
   if(s==null) return '';
-  const str = String(s).trim();
+  const str = toIsoDate(s);
   if(!str) return '';
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(str);
   if(!m) return str;
@@ -1112,11 +1151,11 @@ function cleanupMatches(){
   var q = (cleanupField('cleanup-q')||'').trim().toLowerCase();
   var fields = (typeof EDIT_SCHEMAS!=='undefined' && EDIT_SCHEMAS[tbl]) ? EDIT_SCHEMAS[tbl] : [];
   var df = fields.find(function(f){ return f.type==='date'; });
-  var fromT = from ? Date.parse(from) : null;
-  var toT = to ? Date.parse(to) : null;
+  var fromT = from ? dparse(from) : null;
+  var toT = to ? dparse(to) : null;
   var rows = arr.filter(function(r){
     if(df && (fromT!=null || toT!=null)){
-      var t = Date.parse(r[df.key]);
+      var t = dparse(r[df.key]);
       if(isNaN(t)) return false;
       if(fromT!=null && t < fromT) return false;
       if(toT!=null && t > toT + 86399999) return false;
@@ -1200,8 +1239,8 @@ function applyTableTools(name, rows){
     const df = fields.find(x=>x.type==='date');
     if(df){
       out = out.slice().sort((a,b)=>{
-        const ta = Date.parse(a[df.key]) || 0;
-        const tb = Date.parse(b[df.key]) || 0;
+        const ta = dparse(a[df.key]) || 0;
+        const tb = dparse(b[df.key]) || 0;
         return tb - ta;
       });
     }
@@ -2775,7 +2814,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.71';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.72';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -3766,7 +3805,9 @@ function excelCellToDateStr(val){
     const p = XLSX.SSF.parse_date_code(val);
     if(p){ return `${p.y}-${String(p.m).padStart(2,'0')}-${String(p.d).padStart(2,'0')}`; }
   }
-  return String(val).trim();
+  /* Text dates such as "19.07.2022" are normalised here so what gets
+     stored is clean ISO rather than something only dparse can read. */
+  return toIsoDate(String(val).trim());
 }
 
 function normalizeToOption(val, options){
@@ -5117,7 +5158,7 @@ function printPocDoc(){
 function inwardPoPrefix(loc){ return loc==='SOMTEK' ? 'SOM' : 'ET'; }
 /* Age of an inward RECEIPT, from its receipt date. */
 function inwardAgeDays(r){
-  const t = Date.parse(r.date);
+  const t = dparse(r.date);
   if(!t) return null;
   return Math.max(0, Math.floor((Date.now() - t) / 86400000));
 }
@@ -5362,12 +5403,12 @@ function invAgeDays(i){
   if(nm){
     (d.inward||[]).forEach(r=>{
       if(String(r.item||'').trim().toLowerCase() === nm){
-        const t = Date.parse(r.date) || 0;
+        const t = dparse(r.date) || 0;
         if(t > ts) ts = t;
       }
     });
   }
-  if(!ts) ts = Date.parse(i.lastInwardOn || i.addedOn || '') || 0;
+  if(!ts) ts = dparse(i.lastInwardOn || i.addedOn || '') || 0;
   if(!ts) return null;
   return Math.max(0, Math.floor((Date.now() - ts) / 86400000));
 }
@@ -5381,7 +5422,7 @@ function invDate(i){
   if(nm){
     (d.inward||[]).forEach(r=>{
       if(String(r.item||'').trim().toLowerCase() === nm){
-        const t = Date.parse(r.date) || 0;
+        const t = dparse(r.date) || 0;
         if(t > bestTs){ bestTs = t; best = r.date; }
       }
     });
@@ -5414,7 +5455,7 @@ function lastOutwardDays(i){
   if(nm){
     (d.outward||[]).forEach(r=>{
       if(String(r.item||'').trim().toLowerCase() === nm){
-        const t = Date.parse(r.date) || 0;
+        const t = dparse(r.date) || 0;
         if(t > ts) ts = t;
       }
     });
@@ -8363,7 +8404,7 @@ function printPurchaseDoc(){
 function purchaseDueInfo(r){
   const days = parseInt(r.creditDays);
   if(!r.date || isNaN(days)) return {dueDate:'', overdue:false};
-  const due = new Date(r.date + 'T00:00:00');
+  const due = new Date(dparse(r.date));
   if(isNaN(due.getTime())) return {dueDate:'', overdue:false};
   due.setDate(due.getDate() + days);
   const dueStr = due.getFullYear() + '-' + String(due.getMonth()+1).padStart(2,'0') + '-' + String(due.getDate()).padStart(2,'0');
@@ -8374,7 +8415,7 @@ function purchaseDueInfo(r){
 function salesDueInfo(r){
   const days = parseInt(r.creditDays);
   if(!r.date || isNaN(days)) return {dueDate:'', overdue:false};
-  const due = new Date(r.date + 'T00:00:00');
+  const due = new Date(dparse(r.date));
   if(isNaN(due.getTime())) return {dueDate:'', overdue:false};
   due.setDate(due.getDate() + days);
   const dueStr = due.getFullYear() + '-' + String(due.getMonth()+1).padStart(2,'0') + '-' + String(due.getDate()).padStart(2,'0');
