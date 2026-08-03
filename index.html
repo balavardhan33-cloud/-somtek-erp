@@ -912,6 +912,12 @@ function nextOaNumber(d){
   return 'OA-' + n;
 }
 function isAdmin(){ return !!(session && session.role === 'admin'); }
+function isOperationsRole(){
+  if(!session) return false;
+  const role = String(session.role || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+  return role === 'operation' || role === 'operations';
+}
+function canMoveAutomationToFutureShipments(){ return isAdmin() || isOperationsRole(); }
 function canSeeTab(tabId){ return isAdmin() || sessionAllowedTabs().includes(tabId); }
 function deleteBtn(onclickCall){
   if(!isAdmin()) return '';
@@ -3611,7 +3617,9 @@ const IMPORT_SCHEMAS = {
     {key:'eway', header:'E-way Bill No.'},
     {key:'dc', header:'D.C. Number'},
     {key:'amountPaid', header:'Amount Paid'},
-    {key:'status', header:'Status', options:['In Transit','Delivered']}
+    {key:'status', header:'Status', options:['In Transit','Delivered']},
+    {key:'deliveredDate', header:'Delivered Date', type:'date'},
+    {key:'remarks', header:'Remarks'}
   ],
   futureShipments: [
     {key:'poNumber', header:'P.O Num'},
@@ -6165,6 +6173,8 @@ function renderLogistics(){
           <option value="Delivered">Delivered</option>
         </select>
       </div>
+      <div class="field"><label>Delivered Date</label><input type="date" id="lg-delivered-date"></div>
+      <div class="field"><label>Remarks</label><input type="text" id="lg-remarks" placeholder="Optional"></div>
       <button type="submit" class="btn">Add Shipment</button>
     </div>
   </form>
@@ -6173,8 +6183,8 @@ function renderLogistics(){
   <div class="panel"><div class="panel-head"><h3>Shipment tracker</h3><div class="panel-head-actions">${importBtn('logistics')}${exportBtn('exportLogistics')}</div></div>
   <div class="panel-body">
   ${tableToolbar('logistics', d.logistics)}
-  <table><thead><tr><th>L.R. Number</th><th>Date</th><th>Transporter</th><th>Customer Name</th><th>Customer P.O</th><th>Payment Mode</th><th>Customer Invoice No.</th><th>E-way Bill No.</th><th>D.C. Number</th><th>Amount Paid</th><th>Status</th>${cfHeaders('logistics')}<th>Added By</th><th></th></tr></thead><tbody>
-  ${logisticsRows.length===0 ? noMatchRow(13, d.logistics.length) :
+  <table><thead><tr><th>L.R. Number</th><th>Date</th><th>Transporter</th><th>Customer Name</th><th>Customer P.O</th><th>Payment Mode</th><th>Customer Invoice No.</th><th>E-way Bill No.</th><th>D.C. Number</th><th>Amount Paid</th><th>Status</th><th>Delivered Date</th><th>Remarks</th>${cfHeaders('logistics')}<th>Added By</th><th></th></tr></thead><tbody>
+  ${logisticsRows.length===0 ? noMatchRow(15, d.logistics.length) :
     logisticsRows.map(r=>`<tr>
       <td>${esc(r.lr)}</td><td>${fd(r.date)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.transporter)}</td>
       <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.customer)}</td><td>${esc(r.customerPO||'')}</td><td>${esc(r.paymentMode||'')}</td><td>${esc(r.invoiceNum)}</td><td>${esc(r.eway)}</td><td>${esc(r.dc)}</td><td>${esc(r.amountPaid)}</td>
@@ -6184,6 +6194,7 @@ function renderLogistics(){
           <option value="Delivered" ${r.status==='Delivered'?'selected':''}>Delivered</option>
         </select>
       </td>
+      <td>${fd(r.deliveredDate)}</td><td>${descCellHtml('logistics:'+r.id+':remarks', r.remarks||'')}</td>
       ${cfCells('logistics', r)}${addedByCell(r)}
       <td>${actionCell(editBtn('logistics', r.id), deleteBtn(`deleteLogistics('${r.id}')`))}</td>
     </tr>`).join('')}
@@ -6239,6 +6250,8 @@ async function addLogistics(e){
     dc: document.getElementById('lg-dc').value.trim(),
     amountPaid: document.getElementById('lg-amount-paid').value.trim(),
     status: document.getElementById('lg-status').value,
+    deliveredDate: document.getElementById('lg-delivered-date').value,
+    remarks: document.getElementById('lg-remarks').value.trim(),
     addedBy: actorName()
   });
   await saveLocation(currentLocation);
@@ -6386,8 +6399,8 @@ async function deleteFutureShipment(id){
 }
 function exportLogistics(){
   const d = DATA[currentLocation];
-  const headers = ['L.R. Number','Date','Transporter','Customer Name','Customer P.O','Payment Mode','Customer Invoice No.','E-way Bill No.','D.C. Number','Amount Paid','Status','Added By'];
-  const rows = d.logistics.map(r=>[r.lr, r.date, r.transporter, r.customer, r.customerPO||'', r.paymentMode||'', r.invoiceNum, r.eway, r.dc, r.amountPaid, r.status, r.addedBy]);
+  const headers = ['L.R. Number','Date','Transporter','Customer Name','Customer P.O','Payment Mode','Customer Invoice No.','E-way Bill No.','D.C. Number','Amount Paid','Status','Delivered Date','Remarks','Added By'];
+  const rows = d.logistics.map(r=>[r.lr, r.date, r.transporter, r.customer, r.customerPO||'', r.paymentMode||'', r.invoiceNum, r.eway, r.dc, r.amountPaid, r.status, r.deliveredDate||'', r.remarks||'', r.addedBy]);
   cfExportAppend('logistics', d.logistics, headers, rows);
   exportToExcel(currentLocation+'_Logistics', headers, rows);
 }
@@ -7308,7 +7321,8 @@ function renderAutomation(){
   const d = DATA[currentLocation];
   const autoAll = applyTableTools('automation', d.automation.slice().reverse());
   const autoRows = limitRows('automation', autoAll);
-  const paAll = applyTableTools('pendingAssembly', d.pendingAssembly.slice().reverse());
+  const paVisible = d.pendingAssembly.filter(r => !(String(r.assignedTo||'').trim()));
+  const paAll = applyTableTools('pendingAssembly', paVisible.slice().reverse());
   const paRows = limitRows('pendingAssembly', paAll);
   return `
   ${tabHeader(currentLocation, 'Automation')}
@@ -7352,7 +7366,7 @@ function renderAutomation(){
         <option value="Completed" ${r.status==='Completed'?'selected':''}>Completed</option>
       </select></td>
       <td>${descCellHtml('automation:'+r.id+':notes', r.notes)}</td><td>${esc(r.assignedTo)}</td>${cfCells('automation', r)}${addedByCell(r)}
-      <td>${actionCell(editBtn('automation', r.id), deleteBtn(`deleteAutomation('${r.id}')`))}</td>
+      <td>${actionCell((r.status==='Completed' && canMoveAutomationToFutureShipments() && !r.movedToFutureShipmentId ? `<button class="icon-btn" onclick="moveAutomationToFutureShipments('${r.id}')">Move to Future Shipments</button>` : (r.movedToFutureShipmentId ? '<span class="chip-tag">Moved</span>' : '')) + editBtn('automation', r.id), deleteBtn(`deleteAutomation('${r.id}')`))}</td>
     </tr>`).join('')}
   </tbody></table>
   ${showMoreBar('automation', autoAll.length)}
@@ -7377,9 +7391,9 @@ function renderAutomation(){
   ${secHead('&#128203;', 'Pending Assembly &mdash; Records')}
   <div class="panel"><div class="panel-head"><h3>Pending assembly</h3><div class="panel-head-actions">${importBtn('pendingAssembly')}${exportBtn('exportPendingAssembly')}</div></div>
   <div class="panel-body">
-  ${tableToolbar('pendingAssembly', d.pendingAssembly)}
+  ${tableToolbar('pendingAssembly', paVisible)}
   <table><thead><tr><th>P.O Num</th><th>Date</th><th>Customer Name</th><th>P.O Value</th><th>Submission Date</th><th>Assigned To</th>${cfHeaders('pendingAssembly')}<th>Added By</th><th></th></tr></thead><tbody>
-  ${paRows.length===0 ? noMatchRow(8, d.pendingAssembly.length) :
+  ${paRows.length===0 ? noMatchRow(8, paVisible.length) :
     paRows.map(r=>`<tr>
       <td>${esc(r.poNumber)}</td><td>${fd(r.date)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.customer)}</td><td>${esc(r.poValue)}</td><td>${fd(r.submissionDate)}</td><td>${esc(r.assignedTo)}</td>${cfCells('pendingAssembly', r)}${addedByCell(r)}
       <td>${actionCell((r.assignedTo? '' : pickBtn(r.id)) + editBtn('pendingAssembly', r.id), deleteBtn(`deletePendingAssembly('${r.id}')`))}</td>
@@ -7413,6 +7427,40 @@ async function updateAutomationStatus(id, status){
   const d = DATA[currentLocation];
   const r = d.automation.find(x=>x.id===id);
   if(r){ r.status = status; await saveLocation(currentLocation); render(); }
+}
+async function moveAutomationToFutureShipments(id){
+  if(!canMoveAutomationToFutureShipments()){
+    alert('Only Admin and Operation roles can move completed records to Future Shipments.');
+    return;
+  }
+  const d = DATA[currentLocation];
+  const r = d.automation.find(x=>x.id===id);
+  if(!r || r.status !== 'Completed') return;
+  if(r.movedToFutureShipmentId){
+    alert('This automation record has already been moved to Future Shipments.');
+    return;
+  }
+  if(!Array.isArray(d.futureShipments)) d.futureShipments = [];
+  const shipmentId = uid();
+  d.futureShipments.push({
+    id: shipmentId,
+    poNumber: r.poNumber || '',
+    date: today(),
+    customer: '',
+    item: r.item || '',
+    qty: r.qty || '',
+    mode: '',
+    transporter: '',
+    remarks: ['Moved from completed Automation job', r.notes || '', r.valveType || '', r.valveSize || ''].filter(Boolean).join(' - '),
+    assignedTo: '',
+    addedBy: actorName(),
+    sourceAutomationId: r.id
+  });
+  r.movedToFutureShipmentId = shipmentId;
+  r.movedToFutureShipmentAt = new Date().toISOString();
+  r.movedToFutureShipmentBy = actorName();
+  await saveLocation(currentLocation);
+  render();
 }
 function exportAutomation(){
   const d = DATA[currentLocation];
@@ -7452,7 +7500,7 @@ function pickPendingAssembly(id){
   const r = d.pendingAssembly.find(x=>x.id===id);
   if(!r) return;
   if(r.assignedTo) return;
-  pickAssemblyModalState = {id};
+  pickAssemblyModalState = { id, location: currentLocation };
   renderPickAssemblyModal(r);
 }
 function closePickAssemblyModal(){
@@ -7521,8 +7569,15 @@ function renderPickAssemblyModal(r){
 async function confirmPickAssembly(){
   if(!pickAssemblyModalState) return;
   try{
-    const d = DATA[currentLocation];
-    const r = d.pendingAssembly.find(x=>x.id===pickAssemblyModalState.id);
+    const pickedId = pickAssemblyModalState.id;
+    const pickedLocation = pickAssemblyModalState.location || currentLocation;
+    const d = DATA[pickedLocation];
+    if(!d || !Array.isArray(d.pendingAssembly)){
+      closePickAssemblyModal();
+      alert('Pending Assembly data is unavailable. Refresh and try again.');
+      return;
+    }
+    const r = d.pendingAssembly.find(x=>x.id===pickedId);
     if(!r){ closePickAssemblyModal(); return; }
     const lineVal = (line, sel)=>{ const el = line.querySelector(sel); return el ? String(el.value||'').trim() : ''; };
     const fieldVal = (id)=>{ const el = document.getElementById(id); return el ? String(el.value||'').trim() : ''; };
@@ -7554,10 +7609,11 @@ async function confirmPickAssembly(){
         addedBy: me
       });
     }
-    d.pendingAssembly = d.pendingAssembly.filter(x=>x.id!==r.id);
+    // Remove the picked record from Pending Assembly before saving.
+    d.pendingAssembly = d.pendingAssembly.filter(x=>x.id!==pickedId);
     closePickAssemblyModal();
-    await saveLocation(currentLocation);
-    render();
+    await saveLocation(pickedLocation);
+    if(currentLocation === pickedLocation) render();
     alert(lines.length + ' item(s) moved to Automation.');
   }catch(err){
     console.error('confirmPickAssembly failed:', err);
@@ -10441,7 +10497,9 @@ const EDIT_SCHEMAS = {
     {key:'eway', label:'E-way Bill No.', type:'text'},
     {key:'dc', label:'D.C. Number', type:'text'},
     {key:'amountPaid', label:'Amount Paid', type:'number'},
-    {key:'status', label:'Status', type:'select', options:['In Transit','Delivered']}
+    {key:'status', label:'Status', type:'select', options:['In Transit','Delivered']},
+    {key:'deliveredDate', label:'Delivered Date', type:'date'},
+    {key:'remarks', label:'Remarks', type:'text'}
   ],
   futureShipments: [
     {key:'poNumber', label:'P.O Num', type:'text'},
