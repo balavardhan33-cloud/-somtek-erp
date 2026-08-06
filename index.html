@@ -2484,6 +2484,17 @@ async function boot(){
     if(!Array.isArray(USERS) || USERS.length===0) USERS = DEFAULT_USERS;
     LOCATIONS.forEach(loc => { if(!DATA[loc]) DATA[loc] = emptyLocationData(); });
   }
+  /* PHASE B FIX: If Firestore rules are tightened, the pre-login boot read is denied
+     (permission error) because no user is signed in yet. That is expected, not a real
+     fault - the user is about to sign in, which triggers a fresh authenticated loadAll()
+     in handleLogin(). So clear the alarming banner and make sure the login screen can
+     render with a usable fallback user list. */
+  if(firebaseLoadError && /permission|insufficient|PERMISSION_DENIED|HTTP 40[13]/i.test(firebaseLoadError)){
+    console.info('Boot read blocked by tightened rules - showing login; data loads after sign-in.');
+    firebaseLoadError = null;
+    if(!Array.isArray(USERS) || USERS.length===0) USERS = DEFAULT_USERS;
+    LOCATIONS.forEach(loc => { if(!DATA[loc]) DATA[loc] = emptyLocationData(); });
+  }
   const savedSession = readSessionLocal();
   if(savedSession){
     const u = USERS.find(u=>u.username===savedSession.username);
@@ -2820,7 +2831,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.73';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.74';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -3289,6 +3300,22 @@ async function handleLogin(e){
   loginNotice = '';
   const u = document.getElementById('login-user').value.trim();
   const p = document.getElementById('login-pass').value;
+  /* PHASE B FIX: When Firestore rules are tightened (allow ... if request.auth != null),
+     the boot-time read of the user list is rejected because nobody is signed in yet.
+     So before validating credentials against USERS, sign in to Firebase Authentication
+     with the typed username/password. On success we now hold a token, so re-run loadAll()
+     to pull the real user list and location data that the pre-login boot could not read.
+     If Firebase sign-in fails (e.g. account not created, or rules still open), we simply
+     continue with whatever USERS we already have - behaviour is unchanged from before. */
+  const cloudSignedIn = await authSignIn(u, p);
+  if(cloudSignedIn){
+    try{
+      await withTimeout(loadAll(), FS_TIMEOUT_MS + 3000, 'Loading data after sign-in');
+      firebaseLoadError = null;
+    }catch(err){
+      console.warn('Post-login data reload failed: ' + (err && err.message));
+    }
+  }
   const found = USERS.find(x=>x.username===u);
   if(found && found.blocked){
     loginError = blockedMsg();
@@ -3308,9 +3335,6 @@ async function handleLogin(e){
   /* password OK -> Google Authenticator step */
   loginError = '';
   pendingLoginUser = found.username;
-  /* Sign in to the database with the same credentials. Non-blocking:
-     if this fails the ERP login still proceeds unauthenticated. */
-  await authSignIn(found.username, p);
   if(!found.totpSecret){
     pendingTotpSecret = generateTotpSecret();   /* first login: register the app once */
     loginStage = 'totp-setup';
