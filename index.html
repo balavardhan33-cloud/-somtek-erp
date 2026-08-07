@@ -2831,7 +2831,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.74';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.75';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -4715,60 +4715,30 @@ function renderPO(){
   const pocEdit = pocEditId ? (d.poContractDocs||[]).find(x=>x && x.id===pocEditId) : null;
   const customerNames = uniqueCustomerNames(d);
 
+  /* Split into Internal V.PO and External V.PO, each with its own New Entry form
+     and records table. Existing records (no poType) stay in a separate "Both" view. */
+  const vpoInternal = vpoAll.filter(p=>p.poType==='internal');
+  const vpoExternal = vpoAll.filter(p=>p.poType==='external');
+  const vpoUntagged = vpoAll.filter(p=>!p.poType);
   const vendorSection = `
   <div class="subsection-title">Vendor P.O</div>
-  ${secHead('&#10133;', 'New Entry')}
-  <div class="panel"><div class="panel-head"><h3>New vendor purchase order</h3></div>
-  <div class="panel-body">
-  <form onsubmit="return addVendorPO(event)">
-    <div class="form-grid">
-      <div class="field"><label>P.O Number</label><input type="text" id="vpo-number" placeholder="Auto if blank"></div>
-      <div class="field"><label>P.O Date</label><input type="date" id="vpo-date" value="${today()}" required></div>
-      <div class="field"><label>Vendor Name</label><input type="text" id="vpo-vendor" list="dl-vendors" autocomplete="off" placeholder="Optional"></div>
-      <div class="field"><label>Customer Name</label><input type="text" id="vpo-customer" placeholder="Optional"></div>
-      <div class="field"><label>Customer P.O</label><input type="text" id="vpo-customer-po" placeholder="Optional"></div>
-      <div class="field"><label>Sub</label><input type="text" id="vpo-sub" placeholder="Optional"></div>
-      <div class="field"><label>Ref</label><input type="text" id="vpo-ref" placeholder="Optional"></div>
-      <div class="field"><label>O.A Number</label><input type="text" id="vpo-oa-num" placeholder="Enter manually"></div>
-      <div class="field"><label>O.A / DOD Date</label><input type="date" id="vpo-oa-dod"></div>
-      <div class="field"><label>Status</label>
-        <select id="vpo-status">
-          <option value="Non-Executed" selected>Non-Executed</option>
-          <option value="Part Shipment">Part Shipment</option>
-          <option value="Executed">Executed</option>
-          <option value="Cancelled">Cancelled</option>
-        </select>
-      </div>
-    </div>
-    <div class="out-lines-head">Items in this P.O</div>
-    <div id="vpo-item-lines">${vpoItemLineHtml()}</div>
-    <div style="margin:10px 0 14px 0;"><button type="button" class="btn btn-ghost" onclick="addVpoItemLine()">+ Add another item</button></div>
-    <button type="submit" class="btn">Add Vendor P.O</button>
-  </form>
-  <p style="margin:10px 0 0 0; font-size:11.5px; color:var(--muted);">All items are saved under the same P.O number, vendor and customer in one go. Total value per item is calculated automatically from Qty &times; Unit Price.</p>
-  </div></div>
-  ${secHead('&#128203;', 'Records')}
-  <div class="panel"><div class="panel-head"><h3>Vendor purchase orders</h3><div class="panel-head-actions">${importBtn('vendorPO')}${exportBtn('exportVendorPO')}</div></div>
-  <div class="panel-body table-scroll">
   ${tableToolbar('vendorPO', d.vendorPO)}
-  <table><thead><tr><th>P.O Number</th><th>P.O Date</th><th>Vendor Name</th><th>Customer Name</th><th>Customer P.O</th><th>Sub</th><th>Ref</th><th>Item Description</th><th>Qty</th><th>Unit Price</th><th>Total Value</th><th>O.A Number</th><th>O.A / DOD Date</th><th>Status</th>${cfHeaders('vendorPO')}<th>Added By</th><th></th></tr></thead><tbody>
-  ${vpoRows.length===0 ? noMatchRow(16, d.vendorPO.length) :
-    vpoRows.map(p=>`<tr>
-      <td>${esc(p.poNumber)}</td><td>${fd(p.poDate)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(p.vendor)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(p.customer)}</td><td>${esc(p.customerPO)}</td><td>${esc(p.sub)}</td><td>${esc(p.ref)}</td><td>${descCellHtml('vendorPO:'+p.id+':item', p.item)}</td><td>${esc(p.qty)}</td><td>${esc(p.unitPrice)}</td><td>${rowTotal(p.qty, p.unitPrice) || esc(p.totalValue)}</td><td>${esc(p.oaNumber)}</td><td>${fd(p.oaDodDate)}</td>
-      <td>
-        <select class="status-select ${poStatusClass(p.status)}" onchange="updateVendorPOStatus('${p.id}', this.value)">
-          <option value="Non-Executed" ${(!p.status||p.status==='Non-Executed')?'selected':''}>Non-Executed</option>
-          <option value="Part Shipment" ${p.status==='Part Shipment'?'selected':''}>Part Shipment</option>
-          <option value="Executed" ${p.status==='Executed'?'selected':''}>Executed</option>
-          <option value="Cancelled" ${p.status==='Cancelled'?'selected':''}>Cancelled</option>
-        </select>
-      </td>
-      ${cfCells('vendorPO', p)}${addedByCell(p)}
-      <td>${actionCell(editBtn('vendorPO', p.id), deleteBtn(`deleteVendorPO('${p.id}')`))}</td>
-    </tr>`).join('')}
-  </tbody></table>
-  ${showMoreBar('vendorPO', vpoAll.length)}
-  </div></div>`;
+
+  ${secHead('&#128274;', 'Internal V.PO')}
+  ${vpoFormHtml('vpoI', 'internal', 'New internal vendor purchase order')}
+  ${vpoTableHtml('Internal V.PO records', vpoInternal, '')}
+
+  ${secHead('&#127760;', 'External V.PO')}
+  ${vpoFormHtml('vpoE', 'external', 'New external vendor purchase order')}
+  ${vpoTableHtml('External V.PO records', vpoExternal, '')}
+
+  ${vpoUntagged.length ? `
+  ${secHead('&#128203;', 'Existing Vendor P.O (untagged)')}
+  ${vpoTableHtml('Existing records &mdash; not yet marked Internal or External', limitRows('vendorPO', vpoUntagged), importBtn('vendorPO')+exportBtn('exportVendorPO'))}
+  ${showMoreBar('vendorPO', vpoUntagged.length)}
+  ` : `
+  <div class="panel"><div class="panel-head"><h3>Import / Export</h3><div class="panel-head-actions">${importBtn('vendorPO')}${exportBtn('exportVendorPO')}</div></div><div class="panel-body"><p style="margin:0; font-size:12px; color:var(--muted);">Import or export all vendor P.O records (internal, external and untagged).</p></div></div>
+  `}`;
 
   const customerSection = `
   <div class="subsection-title alt">Customer P.O</div>
@@ -4878,26 +4848,96 @@ function renderPO(){
   ${poSection==='vendor' ? vendorSection : poSection==='customer' ? customerSection : contactSection}`;
 }
 
-function vpoItemLineHtml(){
+function vpoItemLineHtml(pfx){
+  pfx = pfx || 'vpo';
   return `<div class="out-line">
-    <input type="text" class="vpo-line-item" placeholder="Item description" style="flex:2 1 220px; min-width:180px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:'IBM Plex Sans',sans-serif; font-size:13px; border-radius:4px;">
-    <input type="number" class="out-line-qty vpo-line-qty" min="1" placeholder="Qty">
-    <input type="number" step="0.01" class="out-line-price vpo-line-price" placeholder="Unit Price">
-    <button type="button" class="icon-btn out-line-remove" onclick="removeVpoItemLine(this)" title="Remove this item">&#10005;</button>
+    <input type="text" class="${pfx}-line-item" placeholder="Item description" style="flex:2 1 220px; min-width:180px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:'IBM Plex Sans',sans-serif; font-size:13px; border-radius:4px;">
+    <input type="number" class="out-line-qty ${pfx}-line-qty" min="1" placeholder="Qty">
+    <input type="number" step="0.01" class="out-line-price ${pfx}-line-price" placeholder="Unit Price">
+    <button type="button" class="icon-btn out-line-remove" onclick="removeVpoItemLine(this,'${pfx}')" title="Remove this item">&#10005;</button>
   </div>`;
 }
-function addVpoItemLine(){
-  const wrap = document.getElementById('vpo-item-lines');
-  if(wrap) wrap.insertAdjacentHTML('beforeend', vpoItemLineHtml());
+function addVpoItemLine(pfx){
+  pfx = pfx || 'vpo';
+  const wrap = document.getElementById(pfx+'-item-lines');
+  if(wrap) wrap.insertAdjacentHTML('beforeend', vpoItemLineHtml(pfx));
 }
-function removeVpoItemLine(btn){
-  const wrap = document.getElementById('vpo-item-lines');
+/* Reusable New Entry form for a vendor PO. pfx makes every field id unique
+   (vpoI- for Internal, vpoE- for External); poType is stored on each record. */
+function vpoFormHtml(pfx, poType, heading){
+  return `
+  <div class="panel"><div class="panel-head"><h3>${heading}</h3></div>
+  <div class="panel-body">
+  <form onsubmit="return addVendorPOForm(event,'${poType}','${pfx}')">
+    <div class="form-grid">
+      <div class="field"><label>P.O Number</label><input type="text" id="${pfx}-number" placeholder="Auto if blank"></div>
+      <div class="field"><label>P.O Date</label><input type="date" id="${pfx}-date" value="${today()}" required></div>
+      <div class="field"><label>Vendor Name</label><input type="text" id="${pfx}-vendor" list="dl-vendors" autocomplete="off" placeholder="Optional"></div>
+      <div class="field"><label>Customer Name</label><input type="text" id="${pfx}-customer" placeholder="Optional"></div>
+      <div class="field"><label>Customer P.O</label><input type="text" id="${pfx}-customer-po" placeholder="Optional"></div>
+      <div class="field"><label>Sub</label><input type="text" id="${pfx}-sub" placeholder="Optional"></div>
+      <div class="field"><label>Ref</label><input type="text" id="${pfx}-ref" placeholder="Optional"></div>
+      <div class="field"><label>O.A Number</label><input type="text" id="${pfx}-oa-num" placeholder="Enter manually"></div>
+      <div class="field"><label>O.A / DOD Date</label><input type="date" id="${pfx}-oa-dod"></div>
+      <div class="field"><label>Status</label>
+        <select id="${pfx}-status">
+          <option value="Non-Executed" selected>Non-Executed</option>
+          <option value="Part Shipment">Part Shipment</option>
+          <option value="Executed">Executed</option>
+          <option value="Cancelled">Cancelled</option>
+        </select>
+      </div>
+    </div>
+    <div class="out-lines-head">Items in this P.O</div>
+    <div id="${pfx}-item-lines">${vpoItemLineHtml(pfx)}</div>
+    <div style="margin:10px 0 14px 0;"><button type="button" class="btn btn-ghost" onclick="addVpoItemLine('${pfx}')">+ Add another item</button></div>
+    <button type="submit" class="btn">Add ${poType==='internal'?'Internal':'External'} V.PO</button>
+  </form>
+  <p style="margin:10px 0 0 0; font-size:11.5px; color:var(--muted);">All items are saved under the same P.O number, vendor and customer in one go. Total value per item is calculated automatically from Qty &times; Unit Price.</p>
+  </div></div>`;
+}
+/* One table row for a vendor PO record (shared by all three tables). */
+function vpoRowHtml(p){
+  return `<tr>
+      <td>
+        <select class="status-select" style="min-width:96px;" onchange="updateVendorPOType('${p.id}', this.value)" title="Tag as Internal or External">
+          <option value="" ${!p.poType?'selected':''}>&mdash; Untagged</option>
+          <option value="internal" ${p.poType==='internal'?'selected':''}>Internal</option>
+          <option value="external" ${p.poType==='external'?'selected':''}>External</option>
+        </select>
+      </td>
+      <td>${esc(p.poNumber)}</td><td>${fd(p.poDate)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(p.vendor)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(p.customer)}</td><td>${esc(p.customerPO)}</td><td>${esc(p.sub)}</td><td>${esc(p.ref)}</td><td>${descCellHtml('vendorPO:'+p.id+':item', p.item)}</td><td>${esc(p.qty)}</td><td>${esc(p.unitPrice)}</td><td>${rowTotal(p.qty, p.unitPrice) || esc(p.totalValue)}</td><td>${esc(p.oaNumber)}</td><td>${fd(p.oaDodDate)}</td>
+      <td>
+        <select class="status-select ${poStatusClass(p.status)}" onchange="updateVendorPOStatus('${p.id}', this.value)">
+          <option value="Non-Executed" ${(!p.status||p.status==='Non-Executed')?'selected':''}>Non-Executed</option>
+          <option value="Part Shipment" ${p.status==='Part Shipment'?'selected':''}>Part Shipment</option>
+          <option value="Executed" ${p.status==='Executed'?'selected':''}>Executed</option>
+          <option value="Cancelled" ${p.status==='Cancelled'?'selected':''}>Cancelled</option>
+        </select>
+      </td>
+      ${cfCells('vendorPO', p)}${addedByCell(p)}
+      <td>${actionCell(editBtn('vendorPO', p.id), deleteBtn(`deleteVendorPO('${p.id}')`))}</td>
+    </tr>`;
+}
+/* A full vendor PO records table for a given row subset. */
+function vpoTableHtml(heading, rows, actionsHtml){
+  return `
+  <div class="panel"><div class="panel-head"><h3>${heading}</h3>${actionsHtml?`<div class="panel-head-actions">${actionsHtml}</div>`:''}</div>
+  <div class="panel-body table-scroll">
+  <table><thead><tr><th>Type</th><th>P.O Number</th><th>P.O Date</th><th>Vendor Name</th><th>Customer Name</th><th>Customer P.O</th><th>Sub</th><th>Ref</th><th>Item Description</th><th>Qty</th><th>Unit Price</th><th>Total Value</th><th>O.A Number</th><th>O.A / DOD Date</th><th>Status</th>${cfHeaders('vendorPO')}<th>Added By</th><th></th></tr></thead><tbody>
+  ${rows.length===0 ? `<tr><td colspan="${17+cfDefs('vendorPO').length}" style="text-align:center; color:var(--muted); padding:18px;">No records yet.</td></tr>` : rows.map(vpoRowHtml).join('')}
+  </tbody></table>
+  </div></div>`;
+}
+function removeVpoItemLine(btn, pfx){
+  pfx = pfx || 'vpo';
+  const wrap = document.getElementById(pfx+'-item-lines');
   const line = btn.closest('.out-line');
   if(!wrap || !line) return;
   if(wrap.querySelectorAll('.out-line').length <= 1){
-    line.querySelector('.vpo-line-item').value = '';
-    line.querySelector('.vpo-line-qty').value = '';
-    line.querySelector('.vpo-line-price').value = '';
+    line.querySelector('.'+pfx+'-line-item').value = '';
+    line.querySelector('.'+pfx+'-line-qty').value = '';
+    line.querySelector('.'+pfx+'-line-price').value = '';
     return;
   }
   line.remove();
@@ -4950,15 +4990,77 @@ async function addVendorPO(e){
   render();
   return false;
 }
+/* Handles both the Internal (pfx 'vpoI') and External (pfx 'vpoE') forms.
+   poType is stored on every line so the record shows in the right table. */
+async function addVendorPOForm(e, poType, pfx){
+  e.preventDefault();
+  const d = DATA[currentLocation];
+  const g = id => document.getElementById(pfx+'-'+id);
+  const num = g('number').value.trim() || ('VPO-'+(d.vendorPO.length+1).toString().padStart(4,'0'));
+  const header = {
+    poNumber: num,
+    poDate: g('date').value,
+    vendor: g('vendor').value.trim(),
+    customer: g('customer').value.trim(),
+    customerPO: g('customer-po').value.trim(),
+    sub: g('sub').value.trim(),
+    ref: g('ref').value.trim(),
+    oaNumber: g('oa-num').value.trim(),
+    oaDodDate: g('oa-dod').value,
+    status: g('status').value || 'Non-Executed'
+  };
+  const lines = [...document.querySelectorAll('#'+pfx+'-item-lines .out-line')].map(line => ({
+    item: line.querySelector('.'+pfx+'-line-item').value.trim(),
+    qty: line.querySelector('.'+pfx+'-line-qty').value.trim(),
+    unitPrice: line.querySelector('.'+pfx+'-line-price').value.trim()
+  })).filter(l => l.item || l.qty || l.unitPrice);
+  if(lines.length === 0) lines.push({item:'', qty:'', unitPrice:''});
+  for(const l of lines){
+    const qty = parseFloat(l.qty)||0;
+    const unitPrice = parseFloat(l.unitPrice)||0;
+    d.vendorPO.push({
+      id: uid(),
+      poType: poType,
+      poNumber: header.poNumber,
+      poDate: header.poDate,
+      vendor: header.vendor,
+      customer: header.customer,
+      customerPO: header.customerPO,
+      sub: header.sub,
+      ref: header.ref,
+      item: l.item,
+      qty: l.qty,
+      unitPrice: l.unitPrice,
+      totalValue: (qty && unitPrice) ? (qty*unitPrice) : '',
+      oaNumber: header.oaNumber,
+      oaDodDate: header.oaDodDate,
+      status: header.status,
+      addedBy: actorName()
+    });
+  }
+  await saveLocation(currentLocation);
+  render();
+  return false;
+}
 async function updateVendorPOStatus(id, status){
   const d = DATA[currentLocation];
   const r = d.vendorPO.find(x=>x.id===id);
   if(r){ r.status = status; await saveLocation(currentLocation); render(); }
 }
+/* Tag a P.O as internal/external (or blank = untagged). Re-render moves the
+   row into the matching section automatically. */
+async function updateVendorPOType(id, type){
+  const d = DATA[currentLocation];
+  const r = d.vendorPO.find(x=>x.id===id);
+  if(!r) return;
+  if(type) r.poType = type; else delete r.poType;
+  await saveLocation(currentLocation);
+  render();
+}
 function exportVendorPO(){
   const d = DATA[currentLocation];
-  const headers = ['P.O Number','P.O Date','Vendor Name','Customer Name','Customer P.O','Sub','Ref','Item Description','Qty','Unit Price','Total Value','O.A Number','O.A / DOD Date','Status','Added By'];
-  const rows = d.vendorPO.map(p=>[p.poNumber, p.poDate, p.vendor, p.customer, p.customerPO, p.sub, p.ref, p.item, p.qty, p.unitPrice, (rowTotal(p.qty,p.unitPrice)||p.totalValue||''), p.oaNumber, p.oaDodDate, p.status, p.addedBy]);
+  const headers = ['Type','P.O Number','P.O Date','Vendor Name','Customer Name','Customer P.O','Sub','Ref','Item Description','Qty','Unit Price','Total Value','O.A Number','O.A / DOD Date','Status','Added By'];
+  const rows = d.vendorPO.map(p=>[(p.poType==='internal'?'Internal':p.poType==='external'?'External':'Untagged'), p.poNumber, p.poDate, p.vendor, p.customer, p.customerPO, p.sub, p.ref, p.item, p.qty, p.unitPrice, (rowTotal(p.qty,p.unitPrice)||p.totalValue||''), p.oaNumber, p.oaDodDate, p.status, p.addedBy]);
   cfExportAppend('vendorPO', d.vendorPO, headers, rows);
   exportToExcel(currentLocation+'_VendorPO', headers, rows);
 }
@@ -10459,6 +10561,7 @@ const EDIT_SCHEMAS = {
     {key:'itemCode', label:'Barcode Code', type:'text'}
   ],
   vendorPO: [
+    {key:'poType', label:'Type (Internal / External)', type:'select', options:['','internal','external']},
     {key:'poNumber', label:'P.O Number', type:'text'},
     {key:'poDate', label:'P.O Date', type:'date'},
     {key:'vendor', label:'Vendor Name', type:'text'},
