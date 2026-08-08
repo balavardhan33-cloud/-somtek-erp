@@ -791,10 +791,10 @@ const DEFAULT_USERS = [
 ];
 
 function emptyLocationData(){
-  return { inventory:[], po:[], vendorPO:[], customerPO:[], poContractDocs:[], inward:[], outward:[], logistics:[], futureShipments:[], invoice:[], sales:[], employees:[], attendance:[], leaves:[], salaries:[], automation:[], pendingAssembly:[], enquiry:[], purchaseAccounts:[], salesAccounts:[], proformaInvoices:[], quotations:[], quoteCompany:null };
+  return { inventory:[], po:[], vendorPO:[], customerPO:[], poContractDocs:[], inward:[], outward:[], logistics:[], futureShipments:[], invoice:[], sales:[], employees:[], attendance:[], leaves:[], salaries:[], automation:[], pendingAssembly:[], enquiry:[], purchaseAccounts:[], salesAccounts:[], proformaInvoices:[], quotations:[], customers:[], opportunities:[], rfqs:[], followups:[], quoteCompany:null };
 }
 function ensureShape(d){
-  const keys = ['inventory','po','vendorPO','customerPO','poContractDocs','inward','outward','logistics','futureShipments','invoice','sales','employees','attendance','leaves','salaries','automation','pendingAssembly','enquiry','purchaseAccounts','salesAccounts','proformaInvoices','quotations'];
+  const keys = ['inventory','po','vendorPO','customerPO','poContractDocs','inward','outward','logistics','futureShipments','invoice','sales','employees','attendance','leaves','salaries','automation','pendingAssembly','enquiry','purchaseAccounts','salesAccounts','proformaInvoices','quotations','customers','opportunities','rfqs','followups'];
   keys.forEach(k=>{ if(!Array.isArray(d[k])) d[k] = []; });
   return d;
 }
@@ -2831,7 +2831,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.75';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.76';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -3567,6 +3567,51 @@ function exportBtn(fnName, label){
    then Import Excel that file back in. Column order in the file doesn't
    matter - headers are matched by name, not position. */
 const IMPORT_SCHEMAS = {
+  customers: [
+    {key:'name', header:'Customer Name'},
+    {key:'category', header:'Category', options:['','EPC','End User','OEM','Dealer','Government/PSU','Consultant']},
+    {key:'industry', header:'Industry'},
+    {key:'plant', header:'Plant'},
+    {key:'contactName', header:'Contact Person'},
+    {key:'contactPhone', header:'Contact Phone'},
+    {key:'contactEmail', header:'Contact Email'},
+    {key:'paymentTerms', header:'Payment Terms'},
+    {key:'creditLimit', header:'Credit Limit'},
+    {key:'valveHistory', header:'Valve History'},
+    {key:'remarks', header:'Remarks'}
+  ],
+  opportunities: [
+    {key:'date', header:'Date', type:'date'},
+    {key:'customer', header:'Customer'},
+    {key:'project', header:'Project'},
+    {key:'source', header:'Lead Source'},
+    {key:'estValue', header:'Estimated Value'},
+    {key:'competitor', header:'Competitor'},
+    {key:'probability', header:'Probability'},
+    {key:'stage', header:'Sales Stage', options:['Prospecting','Qualification','Quotation','Negotiation','Won','Lost']},
+    {key:'remarks', header:'Remarks'}
+  ],
+  rfqs: [
+    {key:'date', header:'RFQ Date', type:'date'},
+    {key:'rfqNo', header:'RFQ / Tender No.'},
+    {key:'customer', header:'Customer'},
+    {key:'project', header:'Project'},
+    {key:'valveSpec', header:'Valve Specifications'},
+    {key:'dueDate', header:'Due Date', type:'date'},
+    {key:'assignedTo', header:'Assigned To'},
+    {key:'attachments', header:'Attachments'},
+    {key:'status', header:'Status', options:['Received','Under Review','Quoted','Regretted','Won','Lost']},
+    {key:'remarks', header:'Remarks'}
+  ],
+  followups: [
+    {key:'date', header:'Date', type:'date'},
+    {key:'customer', header:'Customer'},
+    {key:'type', header:'Type', options:['Call','Meeting','Email','WhatsApp','Site Visit']},
+    {key:'summary', header:'Summary'},
+    {key:'nextAction', header:'Next Action'},
+    {key:'nextDate', header:'Next Action Date', type:'date'},
+    {key:'remarks', header:'Remarks'}
+  ],
   inventory: [
     {key:'name', header:'Item'},
     {key:'addedOn', header:'Date', type:'date'},
@@ -4580,6 +4625,9 @@ function renderDashboard(){
       : `<div class="wlist-empty">No upcoming follow-ups.</div>`;
     tiles.push({show:can('enquiry')||can('sales'), html: widget('','&#128467;','Follow-ups', body)});
   }
+  /* ---- Sales-module KPIs (each gated to its module) ---- */
+  salesKpiTiles(d, can, inr, widget, ymNow, todayStr).forEach(t => tiles.push(t));
+
   /* ---- 12. Quick Actions ---- */
   {
     const mods=[
@@ -6544,6 +6592,176 @@ async function deleteLogistics(id){
 }
 
 /* ---------------- SALES ---------------- */
+/* ============================================================
+   SALES MODULE (Phase 1) - self-contained inside the Sales tab.
+   Each section below becomes an automatic sub-tab (applyTabSections
+   turns every top-level secHead into a tab). Nothing outside the
+   Sales tab is touched. Modules are generated from EDIT_SCHEMAS so
+   the form, table and edit modal always stay in sync.
+   ============================================================ */
+const CRM_TITLES = {
+  customers:'Customer Master',
+  opportunities:'Lead & Opportunity',
+  rfqs:'RFQ Management',
+  followups:'Follow-up'
+};
+function crmTitle(table){ return CRM_TITLES[table] || table; }
+
+/* Build a New Entry form straight from a table's EDIT_SCHEMAS definition. */
+function crmForm(table, idpfx, requiredKey, submitLabel){
+  const fields = EDIT_SCHEMAS[table] || [];
+  const inputs = fields.map(f=>{
+    const id = idpfx+'-'+f.key;
+    const req = f.key===requiredKey ? ' required' : '';
+    if(f.type==='select'){
+      return `<div class="field"><label>${esc(f.label)}${req?' *':''}</label><select id="${id}"${req}>${(f.options||[]).map(o=>`<option value="${esc(o)}">${o===''?'Select':esc(o)}</option>`).join('')}</select></div>`;
+    }
+    const t = f.type==='date' ? 'date' : (f.type==='number' ? 'number' : 'text');
+    const val = (f.type==='date' && f.key==='date') ? ` value="${today()}"` : '';
+    const step = t==='number' ? ' step="any"' : '';
+    return `<div class="field"><label>${esc(f.label)}${req?' *':''}</label><input type="${t}" id="${id}"${step}${val}${req}></div>`;
+  }).join('');
+  return `<div class="panel"><div class="panel-head"><h3>New ${crmTitle(table).toLowerCase()} entry</h3></div>
+  <div class="panel-body">
+  <form onsubmit="return crmAdd(event,'${table}','${idpfx}')">
+    <div class="form-grid">${inputs}</div>
+    <div style="margin-top:10px;"><button type="submit" class="btn">${submitLabel||('Add '+crmTitle(table))}</button></div>
+  </form>
+  </div></div>`;
+}
+async function crmAdd(e, table, idpfx){
+  e.preventDefault();
+  const d = DATA[currentLocation];
+  d[table] = d[table] || [];
+  const fields = EDIT_SCHEMAS[table] || [];
+  const rec = { id: uid() };
+  fields.forEach(f=>{ const el = document.getElementById(idpfx+'-'+f.key); rec[f.key] = el ? (el.value||'').trim() : ''; });
+  rec.addedBy = actorName();
+  d[table].push(rec);
+  await saveLocation(currentLocation);
+  render();
+  return false;
+}
+async function crmDelete(table, id){
+  if(!isAdmin()) return;
+  const d = DATA[currentLocation];
+  d[table] = (d[table]||[]).filter(x=>x.id!==id);
+  await saveLocation(currentLocation);
+  render();
+}
+/* Records table generated from EDIT_SCHEMAS - headers and cells always align. */
+function crmTable(table, exportFn){
+  const d = DATA[currentLocation];
+  const arr = d[table] || [];
+  const all = applyTableTools(table, arr.slice().reverse());
+  const rows = limitRows(table, all);
+  const fields = EDIT_SCHEMAS[table] || [];
+  const head = fields.map(f=>`<th>${esc(f.label)}</th>`).join('') + cfHeaders(table) + '<th>Added By</th><th></th>';
+  const colspan = fields.length + 2 + cfDefs(table).length;
+  const body = rows.length===0
+    ? `<tr><td colspan="${colspan}" style="text-align:center; color:var(--muted); padding:18px;">No records yet.</td></tr>`
+    : rows.map(r=>`<tr>${fields.map(f=>{
+        const raw = r[f.key]==null ? '' : String(r[f.key]);
+        const cell = f.type==='date' ? fd(raw) : descCellHtml(table+':'+r.id+':'+f.key, raw);
+        return `<td>${cell}</td>`;
+      }).join('')}${cfCells(table, r)}${addedByCell(r)}<td>${actionCell(editBtn(table, r.id), deleteBtn(`crmDelete('${table}','${r.id}')`))}</td></tr>`).join('');
+  return `<div class="panel"><div class="panel-head"><h3>${crmTitle(table)} register</h3><div class="panel-head-actions">${importBtn(table)}${exportFn?exportBtn(exportFn):''}</div></div>
+  <div class="panel-body table-scroll">
+  ${tableToolbar(table, arr)}
+  <table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>
+  ${showMoreBar(table, all.length)}
+  </div></div>`;
+}
+/* Generic Excel export using the schema labels as headers. */
+function crmExport(table, fileLabel){
+  const d = DATA[currentLocation];
+  const fields = EDIT_SCHEMAS[table] || [];
+  const headers = fields.map(f=>f.label);
+  const rows = (d[table]||[]).map(r=>fields.map(f=> r[f.key]==null ? '' : r[f.key]));
+  cfExportAppend(table, d[table]||[], headers, rows);
+  exportToExcel(currentLocation+'_'+fileLabel, headers, rows);
+}
+function exportCustomers(){ crmExport('customers','CustomerMaster'); }
+function exportOpportunities(){ crmExport('opportunities','Opportunities'); }
+function exportRfqs(){ crmExport('rfqs','RFQs'); }
+function exportFollowups(){ crmExport('followups','Followups'); }
+
+/* ---- Sales-module KPI tiles for the MAIN dashboard ----
+   Returns {show, html} tiles, each gated to the module it belongs to,
+   so a user only sees a tile if they have access to that module. */
+function salesKpiTiles(d, can, inr, widget, ymNow, todayStr){
+  const num = v => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
+  const out = [];
+
+  /* New Enquiries (pending) - enquiry module */
+  {
+    const n = (d.enquiry||[]).filter(e=>(e.action||'Pending')==='Pending').length;
+    out.push({show:can('enquiry'), html: widget('kpi accent-blue','&#128231;','New Enquiries',
+      `<div class="kpi-num">${n.toLocaleString('en-IN')}</div><div class="kpi-sub">Pending action</div>`)});
+  }
+  /* Pending Quotations - quotation module */
+  {
+    const n = (d.quotations||[]).length;
+    out.push({show:can('quotation'), html: widget('kpi accent-purple','&#128220;','Pending Quotations',
+      `<div class="kpi-num">${n.toLocaleString('en-IN')}</div><div class="kpi-sub">In quotation register</div>`)});
+  }
+  /* Pipeline Value (open opportunities) - sales module */
+  {
+    let pipeline = 0, open = 0;
+    (d.opportunities||[]).forEach(o=>{ if(o.stage!=='Won' && o.stage!=='Lost'){ pipeline += num(o.estValue); open++; } });
+    out.push({show:can('sales'), html: widget('kpi accent-purple','&#128200;','Pipeline Value',
+      `<div class="kpi-num">${inr(pipeline)}</div><div class="kpi-sub">${open} open opportunit${open===1?'y':'ies'}</div>`)});
+  }
+  /* Today's Follow-ups - sales module (follow-up sub-module) */
+  {
+    const todays = (d.followups||[]).filter(f=>f.nextDate===todayStr).length;
+    const overdue = (d.followups||[]).filter(f=>f.nextDate && f.nextDate < todayStr).length;
+    out.push({show:can('sales'), html: widget('kpi accent-amber','&#128276;','Today\'s Follow-ups',
+      `<div class="kpi-num">${todays.toLocaleString('en-IN')}</div><div class="kpi-sub">${overdue?`<b class="neg">${overdue} overdue</b>`:'Nothing overdue'}</div>`)});
+  }
+  /* Dispatch Due - logistics module */
+  {
+    const n = (d.futureShipments||[]).length;
+    out.push({show:can('logistics'), html: widget('kpi accent-blue','&#128666;','Dispatch Due',
+      `<div class="kpi-num">${n.toLocaleString('en-IN')}</div><div class="kpi-sub">Upcoming shipments</div>`)});
+  }
+  /* Outstanding Payments - accounts module (dedupe by invoice no.) */
+  {
+    const invMap = {};
+    (d.salesAccounts||[]).forEach(r=>{
+      const k = r.invNo || r.id;
+      if(!invMap[k]) invMap[k] = { inv:num(r.invoiceValue), rec:num(r.amountReceived), status:r.paymentStatus };
+      else { invMap[k].inv = Math.max(invMap[k].inv, num(r.invoiceValue)); invMap[k].rec = Math.max(invMap[k].rec, num(r.amountReceived)); }
+    });
+    let outstanding = 0;
+    Object.keys(invMap).forEach(k=>{ const v = invMap[k]; if(v.status!=='Received'){ const o = v.inv - v.rec; if(o>0) outstanding += o; } });
+    out.push({show:can('accounts'), html: widget('kpi accent-amber','&#128176;','Outstanding Payments',
+      `<div class="kpi-num">${inr(outstanding)}</div><div class="kpi-sub">Not yet received</div>`)});
+  }
+  return out;
+}
+
+/* All new Sales-module sections, appended into the Sales tab render. */
+function salesModuleSectionsHtml(d){
+  return `
+  ${secHead('&#127970;', 'Customer Master')}
+  ${crmForm('customers','cm','name')}
+  ${crmTable('customers','exportCustomers')}
+
+  ${secHead('&#127919;', 'Lead &amp; Opportunity')}
+  ${crmForm('opportunities','op','customer')}
+  ${crmTable('opportunities','exportOpportunities')}
+
+  ${secHead('&#128203;', 'RFQ Management')}
+  ${crmForm('rfqs','rq','customer')}
+  ${crmTable('rfqs','exportRfqs')}
+
+  ${secHead('&#128222;', 'Follow-up')}
+  ${crmForm('followups','fu','customer')}
+  ${crmTable('followups','exportFollowups')}
+  `;
+}
+
 function renderSales(){
   const d = DATA[currentLocation];
   d.sales = d.sales || [];
@@ -6582,7 +6800,8 @@ function renderSales(){
     </tr>`).join('')}
   </tbody></table>
   ${showMoreBar('sales', slAll.length)}
-  </div></div>`;
+  </div></div>
+  ${salesModuleSectionsHtml(d)}`;
 }
 function leadsSectionHtml(d){
   d.leads = d.leads || [];
@@ -10549,6 +10768,51 @@ function renderReports(){
 
 /* ---------------- EDIT RECORD MODAL (available to all users) ---------------- */
 const EDIT_SCHEMAS = {
+  customers: [
+    {key:'name', label:'Customer Name', type:'text'},
+    {key:'category', label:'Category', type:'select', options:['','EPC','End User','OEM','Dealer','Government/PSU','Consultant']},
+    {key:'industry', label:'Industry', type:'text'},
+    {key:'plant', label:'Plant / Location', type:'text'},
+    {key:'contactName', label:'Contact Person', type:'text'},
+    {key:'contactPhone', label:'Contact Phone', type:'text'},
+    {key:'contactEmail', label:'Contact Email', type:'text'},
+    {key:'paymentTerms', label:'Payment Terms', type:'text'},
+    {key:'creditLimit', label:'Credit Limit', type:'number'},
+    {key:'valveHistory', label:'Installed / Supplied Valve History', type:'text'},
+    {key:'remarks', label:'Remarks', type:'text'}
+  ],
+  opportunities: [
+    {key:'date', label:'Date', type:'date'},
+    {key:'customer', label:'Customer', type:'text'},
+    {key:'project', label:'Project', type:'text'},
+    {key:'source', label:'Lead Source', type:'select', options:['','Website','Referral','IndiaMART','Justdial','Tender','Cold Call','Existing Customer','Exhibition']},
+    {key:'estValue', label:'Estimated Value', type:'number'},
+    {key:'competitor', label:'Competitor', type:'text'},
+    {key:'probability', label:'Probability', type:'select', options:['','10%','25%','50%','75%','90%']},
+    {key:'stage', label:'Sales Stage', type:'select', options:['Prospecting','Qualification','Quotation','Negotiation','Won','Lost']},
+    {key:'remarks', label:'Remarks', type:'text'}
+  ],
+  rfqs: [
+    {key:'date', label:'RFQ Date', type:'date'},
+    {key:'rfqNo', label:'RFQ / Tender No.', type:'text'},
+    {key:'customer', label:'Customer', type:'text'},
+    {key:'project', label:'Project', type:'text'},
+    {key:'valveSpec', label:'Valve Specifications', type:'text'},
+    {key:'dueDate', label:'Due Date', type:'date'},
+    {key:'assignedTo', label:'Assigned To', type:'text'},
+    {key:'attachments', label:'Attachments (links / names)', type:'text'},
+    {key:'status', label:'Status', type:'select', options:['Received','Under Review','Quoted','Regretted','Won','Lost']},
+    {key:'remarks', label:'Remarks', type:'text'}
+  ],
+  followups: [
+    {key:'date', label:'Date', type:'date'},
+    {key:'customer', label:'Customer', type:'text'},
+    {key:'type', label:'Type', type:'select', options:['Call','Meeting','Email','WhatsApp','Site Visit']},
+    {key:'summary', label:'Summary', type:'text'},
+    {key:'nextAction', label:'Next Action', type:'text'},
+    {key:'nextDate', label:'Next Action Date', type:'date'},
+    {key:'remarks', label:'Remarks', type:'text'}
+  ],
   inventory: [
     {key:'name', label:'Item name', type:'text'},
     {key:'qty', label:'Quantity', type:'number'},
