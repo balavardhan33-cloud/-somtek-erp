@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SOMTEK ERP</title>
+<title>SEV7EN</title>
 <link rel="icon" id="favicon-link" href="">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -125,6 +125,12 @@ h1,h2,h3,.stencil{font-family:'Oswald', sans-serif; text-transform:uppercase; le
   100%{ left:130%; }
 }
 .login-sub{color:var(--text); font-size:14.5px; font-weight:500; margin-bottom:32px; letter-spacing:0.03em; text-align:center;}
+.sev7en-brand{text-align:center; margin-top:22px;}
+.sev7en-logo{display:flex; justify-content:center; margin-bottom:14px;}
+.sev7en-logo svg{width:210px; height:auto; display:block;}
+.sev7en-name{font-family:'Oswald','IBM Plex Sans',sans-serif; font-size:22px; font-weight:700; letter-spacing:0.16em; color:var(--text);}
+.sev7en-name span{color:var(--accent);}
+.sev7en-tag{margin-top:3px; font-size:11px; letter-spacing:0.06em; color:var(--muted); text-transform:uppercase;}
 .field{margin-bottom:16px;}
 .field label{display:block; font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--muted); margin-bottom:6px; font-family:'Oswald',sans-serif;}
 .field input, .field select, .field textarea{
@@ -1942,7 +1948,7 @@ async function generateReport(s, auto){
   }
   if(sheets.length === 0){ alert('This schedule has no sections selected.'); return; }
   const stamp = today();
-  const ok = exportWorkbook((s.name||'TEKFLOW_Report') + '_' + stamp, sheets);
+  const ok = exportWorkbook((s.name||'SEV7EN_Report') + '_' + stamp, sheets);
   if(ok){
     s.lastRun = new Date().toISOString();
     await saveReportSchedules();
@@ -2495,7 +2501,7 @@ document.addEventListener('focusin', function(e){
 });
 
 async function boot(){
-  render(loadingScreen('Initializing TEKFLOW...'));
+  render(loadingScreen('Initializing SEV7EN...'));
   try{
     await withTimeout(initFirebase(), FS_TIMEOUT_MS + 2000, 'Firebase startup');
   }catch(e){
@@ -2857,7 +2863,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.77';
+const APP_VERSION_LABEL = 'SEV7EN v11.78';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -2977,7 +2983,7 @@ function toggleSettingsMenu(ev){
 function exportFullBackup(){
   try{
     const payload = {
-      app: 'TEKFLOW ERP',
+      app: 'SEV7EN',
       version: APP_VERSION_LABEL,
       location: currentLocation,
       exportedAt: new Date().toISOString(),
@@ -2987,7 +2993,7 @@ function exportFullBackup(){
     const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = 'tekflow_backup_' + currentLocation.replace(/[^a-z0-9]+/gi,'_') + '_' + today() + '.json';
+    a.download = 'sev7en_backup_' + currentLocation.replace(/[^a-z0-9]+/gi,'_') + '_' + today() + '.json';
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
   }catch(e){ alert('Backup failed: ' + e.message); }
@@ -3004,7 +3010,7 @@ function importFullBackup(){
       const payload = JSON.parse(text);
       const data = payload && payload.data;
       if(!data || typeof data !== 'object' || !Array.isArray(data.inventory)){
-        alert('This does not look like a TEKFLOW backup file.'); return;
+        alert('This does not look like a SEV7EN backup file.'); return;
       }
       const counts = Object.keys(data).filter(k=>Array.isArray(data[k])).map(k=>k+': '+data[k].length).join(', ');
       const from = payload.location ? ' (backup of ' + payload.location + (payload.exportedAt ? ', taken ' + payload.exportedAt.slice(0,10) : '') + ')' : '';
@@ -3201,10 +3207,14 @@ async function submitChangePassword(){
 function renderLogin(){
   return `
   <div class="login-wrap">
-    <div class="login-hero-caption">Valves &amp; Pumping Solutions</div>
     <div class="login-card">
-      <div class="login-logo"><img src="${LOGO_DATA_URI}" alt="Somtek Valves &amp; Pumping Solutions"></div>
-      <div class="login-sub">Inventory &amp; Logistics Control &mdash; SOMTEK / EVISSAT</div>
+      <div class="login-logo sev7en-logo">
+        <svg viewBox="0 0 360 100" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="SEV7EN">
+          <text x="180" y="62" text-anchor="middle" font-family="'Oswald','IBM Plex Sans',sans-serif" font-size="54" font-weight="700" fill="var(--text)">SEV<tspan fill="var(--accent)">7</tspan>EN</text>
+          <rect x="105" y="78" width="150" height="4.5" rx="2.25" fill="var(--accent)"></rect>
+        </svg>
+      </div>
+      <div class="login-sub">Built by Users. Built for Business.</div>
       ${loginError ? `<div class="login-error">${esc(loginError)}</div>` : ''}
       ${loginNotice ? `<div class="login-success">${esc(loginNotice)}</div>` : ''}
       ${loginStage==='totp-setup' ? `
