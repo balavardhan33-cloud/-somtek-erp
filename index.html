@@ -3538,10 +3538,50 @@ function birthdayBannerHtml(){
   return `<div class="bday-banner" title="Birthdays today"><div class="bday-track">${chunk}${chunk}${chunk}</div></div>`;
 }
 /* ---------------- IMPORTANT NOTICE BANNER (admin-authored, shown on dashboards) ---------------- */
+/* Parse the shared HR holiday calendar and return any holidays that fall in
+   the current week (Mon-Sun). Lines look like: "Aug 15 - Saturday - Independence Day". */
+function weekHolidayNoticeItems(){
+  try{
+    const src = (DATA[currentLocation] && DATA[currentLocation].hrInfo && DATA[currentLocation].hrInfo.holidays)
+      || (SHARED_HR && SHARED_HR.hrInfo && SHARED_HR.hrInfo.holidays) || '';
+    if(!src || typeof src !== 'string') return [];
+    const months = {jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,sept:8,oct:9,nov:10,dec:11};
+    const now = new Date(); now.setHours(0,0,0,0);
+    const dow = now.getDay();                 /* 0=Sun..6=Sat */
+    const offset = (dow === 0) ? 6 : (dow - 1); /* week starts Monday */
+    const weekStart = new Date(now); weekStart.setDate(now.getDate() - offset); weekStart.setHours(0,0,0,0);
+    const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6); weekEnd.setHours(23,59,59,999);
+    const year = now.getFullYear();
+    const items = [];
+    src.split(/\r?\n/).forEach(line => {
+      line = line.trim(); if(!line) return;
+      const parts = line.split('-').map(s => s.trim());
+      const m = parts[0].match(/([A-Za-z]+)\s+(\d{1,2})/);
+      if(!m) return;
+      const key4 = m[1].toLowerCase().slice(0,4), key3 = m[1].toLowerCase().slice(0,3);
+      const mon = (months[key4] !== undefined) ? months[key4] : months[key3];
+      if(mon === undefined) return;
+      const day = parseInt(m[2], 10);
+      const dt = new Date(year, mon, day); dt.setHours(0,0,0,0);
+      if(dt >= weekStart && dt <= weekEnd){
+        const name = parts.slice(2).join(' - ') || parts.slice(1).join(' - ') || 'Holiday';
+        const wd = dt.toLocaleDateString('en-US', {weekday:'long'});
+        const mm = dt.toLocaleDateString('en-US', {month:'short'});
+        items.push(`Holiday this week: ${mm} ${day} (${wd}) \u2014 ${name}`);
+      }
+    });
+    return items;
+  }catch(e){ return []; }
+}
 function noticeBannerHtml(){
+  const spans = [];
+  /* auto: this week's holidays first */
+  weekHolidayNoticeItems().forEach(h => spans.push(`<span class="notice-item">&#127881; ${esc(h)}</span>`));
+  /* then the admin-authored notice, if any */
   const text = (NOTICE && NOTICE.text) ? String(NOTICE.text).trim() : '';
-  if(!text) return '';
-  const chunk = `<span class="notice-item">&#128226; <b>Important Notice:</b> ${esc(text)}</span>`;
+  if(text) spans.push(`<span class="notice-item">&#128226; <b>Important Notice:</b> ${esc(text)}</span>`);
+  if(!spans.length) return '';
+  const chunk = spans.join('');
   return `<div class="notice-banner" title="Important notice"><div class="notice-track">${chunk}${chunk}${chunk}</div></div>`;
 }
 function topbarDateBadge(){
