@@ -401,6 +401,26 @@ select.status-select.st-partial{color:#d98324; border-color:#d98324; font-weight
 /* ---------- USER ACCESS PANEL ---------- */
 tr.user-row-clickable{cursor:pointer;}
 tr.user-row-clickable:hover td{background:var(--panel-2);}
+.user-list{display:flex; flex-direction:column; gap:8px;}
+.user-item{border:1px solid var(--border); border-radius:12px; overflow:hidden; background:var(--panel);}
+.user-item.open{border-color:var(--accent); box-shadow:0 2px 10px rgba(15,20,32,0.06);}
+.user-item-head{display:flex; align-items:center; gap:12px; padding:11px 14px; cursor:pointer;}
+.user-item-head:hover{background:var(--panel-2);}
+.user-avatar{width:34px; height:34px; border-radius:50%; background:var(--panel-2); display:flex; align-items:center; justify-content:center; overflow:hidden; flex:0 0 auto;}
+.user-item-name{flex:1 1 auto; min-width:0;}
+.uin-main{font-family:'IBM Plex Sans',sans-serif; font-size:14px; font-weight:600; color:var(--text);}
+.uin-sub{font-size:11.5px; color:var(--muted); text-transform:capitalize;}
+.user-item-meta{display:flex; align-items:center; gap:8px; flex:0 0 auto;}
+.user-caret{font-size:10px; color:var(--muted);}
+.user-badge{display:inline-block; padding:2px 8px; border-radius:10px; font-size:10px; font-weight:700; letter-spacing:0.04em;}
+.user-badge.ok{background:rgba(46,158,91,0.14); color:var(--success);}
+.user-badge.blocked{background:#e6577a; color:#fff;}
+.user-detail{border-top:1px solid var(--border); background:var(--panel-2);}
+.user-detail-tabs{display:flex; gap:0; border-bottom:1px solid var(--border);}
+.udt-btn{appearance:none; background:transparent; border:none; border-bottom:2px solid transparent; padding:10px 18px; font-size:13px; font-weight:600; color:var(--muted); cursor:pointer; font-family:'IBM Plex Sans',sans-serif;}
+.udt-btn:hover{color:var(--text);}
+.udt-btn.active{color:var(--accent); border-bottom-color:var(--accent);}
+.user-detail-body{padding:16px;}
 tr.access-row td{background:var(--panel-2); padding:14px 16px;}
 .access-title{font-family:'Oswald',sans-serif; font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--muted); margin-bottom:10px;}
 .access-chips{display:flex; flex-wrap:wrap; gap:8px;}
@@ -2831,7 +2851,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'TEKFLOW ERP v11.76';
+const APP_VERSION_LABEL = 'TEKFLOW ERP v11.77';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -12202,8 +12222,18 @@ function customFieldsPanel(){
 }
 
 let expandedAccessUser = null;
+let userDetailTab = 'general';   /* 'general' | 'access' */
 function toggleAccessPanel(username){
-  expandedAccessUser = (expandedAccessUser === username) ? null : username;
+  if(expandedAccessUser === username){
+    expandedAccessUser = null;
+  } else {
+    expandedAccessUser = username;
+    userDetailTab = 'general';   /* always open on General */
+  }
+  render();
+}
+function setUserDetailTab(tab){
+  userDetailTab = tab;
   render();
 }
 async function toggleUserExtraTab(username, tabId){
@@ -12236,6 +12266,83 @@ async function toggleUserExtraTab(username, tabId){
   await saveUsers();
   render();
 }
+/* Tab-access chips for a user (reused inside the Access detail section). */
+function accessChipsHtml(u){
+  const roleTabs = roleTabsFor(u.role);
+  const extras = Array.isArray(u.extraTabs) ? u.extraTabs : [];
+  const denied = Array.isArray(u.deniedTabs) ? u.deniedTabs : [];
+  const isSelf = u.username === session.username;
+  return TABS.filter(t => t.id !== 'users' || u.role === 'admin').map(t => {
+    const label = esc(t.label);
+    const click = (LOCKED_TABS.includes(t.id) || isSelf) ? '' : ` onclick="toggleUserExtraTab('${esc(u.username)}','${t.id}')"`;
+    if(LOCKED_TABS.includes(t.id) && (roleTabs.includes(t.id))){
+      return `<span class="access-chip chip-role" title="Fixed access">&#10003; ${label} <span class="chip-tag">fixed</span></span>`;
+    }
+    if(roleTabs.includes(t.id) && !denied.includes(t.id)){
+      return `<span class="access-chip chip-role${click?' chip-clickable':''}"${click} title="From the ${esc(u.role)} role &mdash; click to remove">&#10003; ${label} <span class="chip-tag">role &#10005;</span></span>`;
+    }
+    if(roleTabs.includes(t.id) && denied.includes(t.id)){
+      return `<span class="access-chip chip-denied"${click} title="Role access removed by admin &mdash; click to restore">&#8856; ${label} <span class="chip-tag">removed</span></span>`;
+    }
+    if(extras.includes(t.id)){
+      return `<span class="access-chip chip-extra"${click} title="Click to remove this access">&#10003; ${label} <span class="chip-tag">granted &#10005;</span></span>`;
+    }
+    return `<span class="access-chip chip-grant"${click} title="Click to grant access">+ ${label}</span>`;
+  }).join('');
+}
+
+/* Detail panel shown when an admin clicks a user name: General + Access tabs. */
+function userDetailPanel(u){
+  const isSelf = u.username === session.username;
+  const tab = userDetailTab || 'general';
+  const avatar = u.profilePic
+    ? `<img src="${esc(u.profilePic)}" alt="" style="width:64px; height:64px; border-radius:50%; object-fit:cover; display:block;">`
+    : `<span style="font-size:48px; line-height:1;">&#128100;</span>`;
+
+  const field = (label, val) => `<div class="field" style="margin:0;"><label>${label}</label><div style="padding:8px 0; font-size:13.5px; color:var(--text); font-family:'IBM Plex Sans',sans-serif;">${val && String(val).trim() ? esc(val) : '<span style=\'color:var(--muted);\'>&mdash;</span>'}</div></div>`;
+
+  const general = `
+    <div style="display:flex; gap:18px; align-items:flex-start; flex-wrap:wrap;">
+      <div style="flex:0 0 auto; text-align:center;">
+        <div style="width:64px; height:64px; border-radius:50%; background:var(--panel-2); display:flex; align-items:center; justify-content:center; overflow:hidden; border:1px solid var(--border);">${avatar}</div>
+      </div>
+      <div style="flex:1 1 320px;">
+        <div class="form-grid">
+          ${field('Full name', u.name)}
+          ${field('Username', u.username)}
+          ${field('Role', u.role)}
+          ${field('Mobile', u.mobile)}
+          ${field('Date of Birth', u.dob ? fd(u.dob) : '')}
+          ${field('Address', u.address)}
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap;">
+      ${actionCell(editBtn('users', u.username), isSelf ? '' : deleteBtn(`deleteUser('${esc(u.username)}')`))}
+    </div>`;
+
+  const allowed = userAllowedTabs(u);
+  const note = isSelf
+    ? 'You cannot change your own access. Ask another admin to do it.'
+    : 'Green = from role (click to remove), blue = extra granted (click to remove), red = removed (click to restore), dashed = click to grant.';
+  const access = `
+    <div style="margin-bottom:10px; font-size:13px; color:var(--text);"><b>${allowed.length}</b> module${allowed.length===1?'':'s'} accessible</div>
+    <div class="access-title" style="margin-bottom:8px;">Module access &mdash; ${note}</div>
+    <div class="access-chips">${accessChipsHtml(u)}</div>
+    <div class="access-title" style="margin:16px 0 8px 0;">Security</div>
+    ${userSecurityCell(u)}`;
+
+  return `<div class="user-detail">
+    <div class="user-detail-tabs">
+      <button class="udt-btn${tab==='general'?' active':''}" onclick="event.stopPropagation(); setUserDetailTab('general')">General</button>
+      <button class="udt-btn${tab==='access'?' active':''}" onclick="event.stopPropagation(); setUserDetailTab('access')">Access</button>
+    </div>
+    <div class="user-detail-body" onclick="event.stopPropagation()">
+      ${tab==='general' ? general : access}
+    </div>
+  </div>`;
+}
+
 function accessPanelRow(u){
   const roleTabs = roleTabsFor(u.role);
   const extras = Array.isArray(u.extraTabs) ? u.extraTabs : [];
@@ -12431,26 +12538,30 @@ function renderUsers(){
   </form>
   </div></div>
   ${secHead('&#128203;', 'Records')}
-  <div class="panel"><div class="panel-head"><h3>All logins <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(click a user to view &amp; manage their access)</span></h3><div class="panel-head-actions">${importBtn('users')}<button class="icon-btn" onclick="restoreUsersFromBackup()" title="Restore the user list from the automatic backup">&#8634; Restore from backup${USERS_BACKUP_META ? ' ('+USERS_BACKUP_META.count+' users, '+new Date(USERS_BACKUP_META.savedAt).toLocaleDateString()+')' : ''}</button>${exportBtn('exportUsers')}</div></div>
+  <div class="panel"><div class="panel-head"><h3>All logins <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(click a name to view General &amp; Access)</span></h3><div class="panel-head-actions">${importBtn('users')}<button class="icon-btn" onclick="restoreUsersFromBackup()" title="Restore the user list from the automatic backup">&#8634; Restore from backup${USERS_BACKUP_META ? ' ('+USERS_BACKUP_META.count+' users, '+new Date(USERS_BACKUP_META.savedAt).toLocaleDateString()+')' : ''}</button>${exportBtn('exportUsers')}</div></div>
   <div class="panel-body">
-  <table><thead><tr><th>Photo</th><th>Name</th><th>Username</th><th>Role</th><th>Mobile</th><th>DOB</th><th>Address</th><th>Access</th><th>Security</th><th></th></tr></thead><tbody>
+  <div class="user-list">
   ${limitRows('users', USERS).map(u=>{
-    const roleT = roleTabsFor(u.role);
-    const extras = Array.isArray(u.extraTabs) ? u.extraTabs.filter(t=>!roleT.includes(t) && !LOCKED_TABS.includes(t)) : [];
-    const removed = Array.isArray(u.deniedTabs) ? u.deniedTabs.filter(t=>roleT.includes(t) && !LOCKED_TABS.includes(t)) : [];
+    const open = expandedAccessUser===u.username;
     const avatar = u.profilePic
-      ? `<img src="${esc(u.profilePic)}" alt="" style="width:32px; height:32px; border-radius:50%; object-fit:cover; display:block;">`
-      : `<span style="font-size:20px;">&#128100;</span>`;
-    return `<tr class="user-row-clickable" onclick="toggleAccessPanel('${esc(u.username)}')">
-    <td>${avatar}</td>
-    <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(u.name)}</td><td>${esc(u.username)}</td><td>${esc(u.role)}</td>
-    <td>${esc(u.mobile||'-')}</td><td>${u.dob ? fd(u.dob) : '-'}</td><td>${esc(u.address||'-')}</td>
-    <td>${userAllowedTabs(u).length} tabs${extras.length ? ` <span style="color:#3d8bef;">(+${extras.length} extra)</span>` : ''}${removed.length ? ` <span style="color:#e6577a;">(&minus;${removed.length} removed)</span>` : ''}</td>
-    <td onclick="event.stopPropagation()">${userSecurityCell(u)}</td>
-    <td onclick="event.stopPropagation()">${actionCell(editBtn('users', u.username), u.username===session.username ? '' : deleteBtn(`deleteUser('${esc(u.username)}')`))}</td>
-  </tr>${expandedAccessUser===u.username ? accessPanelRow(u) : ''}`;
+      ? `<img src="${esc(u.profilePic)}" alt="" style="width:34px; height:34px; border-radius:50%; object-fit:cover; display:block;">`
+      : `<span style="font-size:22px;">&#128100;</span>`;
+    const sec = u.blocked
+      ? `<span class="user-badge blocked">Blocked</span>`
+      : (u.totpSecret ? `<span class="user-badge ok">2FA</span>` : '');
+    return `<div class="user-item${open?' open':''}">
+      <div class="user-item-head" onclick="toggleAccessPanel('${esc(u.username)}')">
+        <div class="user-avatar">${avatar}</div>
+        <div class="user-item-name">
+          <div class="uin-main">${esc(u.name)}</div>
+          <div class="uin-sub">${esc(u.username)} &middot; ${esc(u.role)}</div>
+        </div>
+        <div class="user-item-meta">${sec}<span class="user-caret">${open?'&#9650;':'&#9660;'}</span></div>
+      </div>
+      ${open ? userDetailPanel(u) : ''}
+    </div>`;
   }).join('')}
-  </tbody></table>
+  </div>
   ${showMoreBar('users', USERS.length)}
   </div></div>
   ${roleManagerPanel()}
