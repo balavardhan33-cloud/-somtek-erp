@@ -2863,7 +2863,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'SEV7EN v11.78';
+const APP_VERSION_LABEL = 'SEV7EN v11.79';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -6100,10 +6100,17 @@ function renderInventory(){
   ${secHead('&#128683;', 'Low Stock')}
   <div class="panel"><div class="panel-head"><h3>&#128683; Low Stock &mdash; ${locationLabel(currentLocation, 14)} <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(marked as low stock, or zero quantity on hand)</span></h3><div class="panel-head-actions">${exportBtn('exportLowStock')}</div></div>
   <div class="panel-body">
-  <table><thead><tr><th>Item</th><th>Date</th><th>Qty</th><th>Specifications</th><th>Cost</th><th>Category</th><th>Added By</th><th></th></tr></thead><tbody>
-  ${lowRows.length===0 ? `<tr class="empty-row"><td colspan="8">No low stock items &mdash; every item currently has quantity on hand.</td></tr>` :
+  <table><thead><tr><th>Item</th><th>Date</th><th>Qty</th><th>Specifications</th><th>Cost</th><th>Category</th><th>Action</th><th>Remarks</th><th>Added By</th><th></th></tr></thead><tbody>
+  ${lowRows.length===0 ? `<tr class="empty-row"><td colspan="10">No low stock items &mdash; every item currently has quantity on hand.</td></tr>` :
     lowRows.map(i=>`<tr>
-      <td style="font-family:'IBM Plex Sans',sans-serif; max-width:340px; white-space:normal;">${descCellHtml('inventory:'+i.id+':name', i.name, 70)}</td><td>${fd(invDate(i)) || '<span style="color:var(--muted); font-size:11px;">&mdash;</span>'}</td><td>${esc(i.qty)}</td><td style="white-space:normal; max-width:220px;">${descCellHtml('inventoryLow:'+i.id+':specs', i.specs)}</td><td>${esc(i.cost)}</td><td>${esc(i.category)}</td>${addedByCell(i)}
+      <td style="font-family:'IBM Plex Sans',sans-serif; max-width:340px; white-space:normal;">${descCellHtml('inventory:'+i.id+':name', i.name, 70)}</td><td>${fd(invDate(i)) || '<span style="color:var(--muted); font-size:11px;">&mdash;</span>'}</td><td>${esc(i.qty)}</td><td style="white-space:normal; max-width:220px;">${descCellHtml('inventoryLow:'+i.id+':specs', i.specs)}</td><td>${esc(i.cost)}</td><td>${esc(i.category)}</td>
+      <td><select class="status-select ${lowStockActionClass(i.lowStockAction)}" onchange="updateInventoryLowStockAction('${i.id}', this.value)">
+        <option value="" ${!i.lowStockAction?'selected':''}>&mdash; Select &mdash;</option>
+        <option value="Ordering" ${i.lowStockAction==='Ordering'?'selected':''}>Ordering</option>
+        <option value="NA" ${i.lowStockAction==='NA'?'selected':''}>N/A</option>
+      </select></td>
+      <td><input type="text" class="poc-cell-input" style="min-width:140px;" placeholder="Reason / remarks" value="${esc(i.lowStockRemarks||'')}" onchange="updateInventoryLowStockRemarks('${i.id}', this.value)"></td>
+      ${addedByCell(i)}
       <td>${actionCell(editBtn('inventory', i.id), deleteBtn(`deleteInventory('${i.id}')`))}</td>
     </tr>`).join('')}
   </tbody></table>
@@ -6192,6 +6199,23 @@ async function updateInventoryDeadStock(id, value){
   const item = d.inventory.find(x=>x.id===id);
   if(item){ item.deadStock = value; await saveLocation(currentLocation); render(); }
 }
+/* Low Stock panel: Action (Ordering / N/A) + free-text Remarks.
+   Ordering shows green (st-delivered), N/A shows red (st-rejected). */
+function lowStockActionClass(v){
+  if(v==='Ordering') return 'st-delivered';
+  if(v==='NA') return 'st-rejected';
+  return '';
+}
+async function updateInventoryLowStockAction(id, value){
+  const d = DATA[currentLocation];
+  const item = d.inventory.find(x=>x.id===id);
+  if(item){ item.lowStockAction = value; await saveLocation(currentLocation); render(); }
+}
+async function updateInventoryLowStockRemarks(id, value){
+  const d = DATA[currentLocation];
+  const item = d.inventory.find(x=>x.id===id);
+  if(item){ item.lowStockRemarks = value; await saveLocation(currentLocation); render(); }
+}
 function exportInventory(){
   const d = DATA[currentLocation];
   const headers = ['Item','Code','Date','Qty','Specifications','Cost','Total Value','Category','Low Stock','Added By'];
@@ -6202,8 +6226,8 @@ function exportInventory(){
 function exportLowStock(){
   const d = DATA[currentLocation];
   const lowStockList = d.inventory.filter(isLowStockFlag);
-  const headers = ['Item','Date','Qty','Specifications','Cost','Category','Added By'];
-  const rows = lowStockList.map(i=>[i.name, invDate(i), i.qty, i.specs, i.cost, i.category, i.addedBy]);
+  const headers = ['Item','Date','Qty','Specifications','Cost','Category','Action','Remarks','Added By'];
+  const rows = lowStockList.map(i=>[i.name, invDate(i), i.qty, i.specs, i.cost, i.category, i.lowStockAction||'', i.lowStockRemarks||'', i.addedBy]);
   exportToExcel(currentLocation+'_LowStock', headers, rows);
 }
 function exportDeadStock(){
