@@ -8,82 +8,107 @@
 @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 
 :root{
-  --bg:#f4f3f0; --panel:#ffffff; --panel-2:#f7f6f3; --border:#e3e0d9;
-  --accent:#c6202f; --accent-2:#1f4491; --text:#1c2230; --muted:#6b7180;
-  --success:#2f8f5b; --danger:#c6202f; --grid-line:rgba(31,68,145,0.045);
+--bg:#f4f3f0; --panel:#ffffff; --panel-2:#f7f6f3; --border:#e3e0d9;
+--accent:#c6202f; --accent-2:#1f4491; --text:#1c2230; --muted:#6b7180;
+--success:#2f8f5b; --danger:#c6202f; --grid-line:rgba(31,68,145,0.045);
 }
+
 *{box-sizing:border-box; margin:0; padding:0;}
+
 body{
-  font-family:'IBM Plex Sans', sans-serif;
-  background:
-    repeating-linear-gradient(0deg, var(--grid-line) 0, var(--grid-line) 1px, transparent 1px, transparent 40px),
-    repeating-linear-gradient(90deg, var(--grid-line) 0, var(--grid-line) 1px, transparent 1px, transparent 40px),
-    var(--bg);
-  color:var(--text); min-height:100vh;
+font-family:'IBM Plex Sans', sans-serif;
+background:
+repeating-linear-gradient(0deg, var(--grid-line) 0, var(--grid-line) 1px, transparent 1px, transparent 40px),
+repeating-linear-gradient(90deg, var(--grid-line) 0, var(--grid-line) 1px, transparent 1px, transparent 40px),
+var(--bg);
+color:var(--text); min-height:100vh;
 }
+
 .wrap{min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px;}
+
 .card{
-  width:480px; max-width:100%; background:var(--panel); box-shadow:0 20px 60px rgba(28,34,48,0.18);
-  padding:52px 56px; border-top:6px solid var(--accent); border-radius:6px;
+width:480px; max-width:100%; background:var(--panel); box-shadow:0 20px 60px rgba(28,34,48,0.18);
+padding:52px 56px; border-top:6px solid var(--accent); border-radius:6px;
 }
+
 .logo{display:flex; justify-content:center; margin-bottom:14px;}
 .logo svg{width:210px; height:auto;}
+
 .sub{color:var(--text); font-size:14.5px; font-weight:500; margin-bottom:28px; letter-spacing:0.03em; text-align:center;}
+
 .field{margin-bottom:20px;}
 .field label{display:block; font-size:12px; font-weight:600; color:var(--text); margin-bottom:6px; font-family:'Oswald',sans-serif; text-transform:uppercase; letter-spacing:0.06em;}
 .field input{
-  width:100%; padding:14px; font-size:15px; background:#fff; border:1.5px solid var(--accent-2);
-  box-shadow:0 2px 8px rgba(31,68,145,0.08); font-family:'IBM Plex Mono', monospace;
+width:100%; padding:14px; font-size:15px; background:#fff; border:1.5px solid var(--accent-2);
+box-shadow:0 2px 8px rgba(31,68,145,0.08); font-family:'IBM Plex Mono', monospace;
 }
 .field input:focus{outline:none; border-color:var(--accent); box-shadow:0 0 0 3px rgba(198,32,47,0.15);}
+
 .btn{
-  width:100%; background:var(--accent); color:#fff; border:none; padding:15px 20px; font-family:'Oswald',sans-serif;
-  text-transform:uppercase; letter-spacing:0.08em; font-weight:600; font-size:14px; cursor:pointer;
+width:100%; background:var(--accent); color:#fff; border:none; padding:15px 20px; font-family:'Oswald',sans-serif;
+text-transform:uppercase; letter-spacing:0.08em; font-weight:600; font-size:14px; cursor:pointer;
 }
 .btn:hover{filter:brightness(1.1);}
 .btn:disabled{opacity:.5; cursor:default;}
+
 .msg{padding:10px 12px; font-size:13px; margin-bottom:16px; border-radius:3px;}
 .msg.err{background:rgba(198,32,47,0.1); border:1px solid var(--danger); color:var(--danger);}
 .msg.ok{background:rgba(47,143,91,0.1); border:1px solid var(--success); color:var(--success);}
+
 .picker-title{font-family:'Oswald',sans-serif; font-size:14px; letter-spacing:0.06em; text-transform:uppercase; text-align:center; margin-bottom:20px; color:var(--muted);}
 .picker-list{display:flex; flex-direction:column; gap:10px;}
+
 .picker-btn{
-  background:var(--bg); border:1.5px solid var(--border); cursor:pointer; padding:16px 18px;
-  display:flex; justify-content:space-between; align-items:center; text-align:left; width:100%;
-  font-family:'IBM Plex Sans',sans-serif;
+background:var(--bg); border:1.5px solid var(--border); cursor:pointer; padding:16px 18px;
+display:flex; justify-content:space-between; align-items:center; text-align:left; width:100%;
+font-family:'IBM Plex Sans',sans-serif;
 }
 .picker-btn:hover{border-color:var(--accent-2); background:rgba(31,68,145,0.06);}
+
 .picker-name{font-weight:600; font-size:15px; color:var(--text);}
 .picker-role{font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.05em; margin-top:2px;}
 .picker-go{font-size:11px; color:var(--accent-2); text-transform:uppercase; letter-spacing:0.06em; font-family:'Oswald',sans-serif;}
+
 .connected{text-align:center;}
 .connected .company{font-family:'Oswald',sans-serif; font-size:22px; font-weight:700; margin:14px 0 6px;}
 .connected .role{color:var(--muted); font-size:13px; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:24px;}
 .connected .note{font-size:13px; color:var(--muted); background:var(--panel-2); border:1px solid var(--border); padding:14px; text-align:left; line-height:1.6;}
+
 .table-wrap{width:100%; overflow-x:auto; margin-top:10px;}
+
 table.datatable{width:100%; border-collapse:collapse; font-size:13px;}
 table.datatable th{text-align:left; font-family:'Oswald',sans-serif; text-transform:uppercase; letter-spacing:0.04em; font-size:11px; color:var(--muted); border-bottom:1.5px solid var(--border); padding:8px 10px;}
 table.datatable td{padding:8px 10px; border-bottom:1px solid var(--border);}
 table.datatable tr:hover td{background:var(--panel-2);}
+
 .badge{display:inline-block; padding:3px 8px; border-radius:3px; font-size:11px; font-weight:600; text-transform:uppercase;}
 .badge.green{background:rgba(47,143,91,0.12); color:var(--success);}
 .badge.red{background:rgba(198,32,47,0.12); color:var(--danger);}
 .badge.grey{background:var(--panel-2); color:var(--muted);}
+.badge.blue{background:rgba(31,68,145,0.1); color:var(--accent-2);}
+
 .topline{display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;}
 .topline .company-name{font-family:'Oswald',sans-serif; font-weight:700; font-size:18px;}
 .topline .loc-name{font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:0.05em;}
+
 .wide-card{width:900px; max-width:100%;}
+
 .add-form-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:12px; align-items:end;}
 .add-form-grid .field{margin-bottom:0;}
 .add-form-grid input, .add-form-grid select{padding:9px 10px; font-size:13px;}
+
 .small-btn{padding:9px 14px; font-size:12px;}
 .del-link{color:var(--danger); font-size:11px; text-transform:uppercase; cursor:pointer; text-decoration:underline;}
+
 select.inline-select{padding:5px 8px; font-size:12px; border:1px solid var(--border); background:var(--bg); color:var(--text);}
+
 .module-tabs{display:flex; gap:4px; border-bottom:1.5px solid var(--border); margin-bottom:4px;}
 .module-tab{padding:9px 16px; font-family:'Oswald',sans-serif; font-size:12.5px; text-transform:uppercase; letter-spacing:0.05em; color:var(--muted); cursor:pointer; border-bottom:3px solid transparent; margin-bottom:-1.5px;}
 .module-tab:hover{color:var(--text);}
 .module-tab.active{color:var(--accent); border-bottom-color:var(--accent); font-weight:600;}
-.badge.blue{background:rgba(31,68,145,0.1); color:var(--accent-2);}
+
+.logout-link{color:var(--accent-2); font-size:11px; text-transform:uppercase; cursor:pointer; text-decoration:underline; margin-top:14px;}
+
 </style>
 </head>
 <body>
@@ -91,32 +116,31 @@ select.inline-select{padding:5px 8px; font-size:12px; border:1px solid var(--bor
 <div class="wrap"><div class="card" id="card">Loading...</div></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.47.0"></script>
+
 <script>
-const SUPABASE_URL = 'https://wqtmvfqnjworcyrbdoex.supabase.co';
+const SUPABASE_URL = 'https://wqtmvfqnjworcynjworcyrbdoex.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_RJwNY-AE7lwJE5Ff10XN4Q_hxl09Iys';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const BUILT_MODULES = [
-  {id:'po', label:'Purchase'}, {id:'inward', label:'Inward'}, {id:'inventory', label:'Inventory'},
-  {id:'outward', label:'Outward'}, {id:'logistics', label:'Logistics'}, {id:'sales', label:'Sales'},
-  {id:'automation', label:'Automation'}, {id:'enquiry', label:'Enquiry'}, {id:'accounts', label:'Accounts'},
-  {id:'quotation', label:'Quotation'}, {id:'hr', label:'HR'}, {id:'reports', label:'Reports'}
+{id:'po', label:'Purchase'}, {id:'inward', label:'Inward'}, {id:'inventory', label:'Inventory'},
+{id:'outward', label:'Outward'}, {id:'logistics', label:'Logistics'}, {id:'sales', label:'Sales'},
+{id:'automation', label:'Automation'}, {id:'enquiry', label:'Enquiry'}, {id:'accounts', label:'Accounts'},
+{id:'quotation', label:'Quotation'}, {id:'hr', label:'HR'}, {id:'reports', label:'Reports'}
 ];
+
 let currentModule = 'inventory';
-
-const LOGO_SVG = `<svg viewBox="0 0 360 100" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="SEV7EN">
-  <text x="180" y="62" text-anchor="middle" font-family="'Oswald','IBM Plex Sans',sans-serif" font-size="54" font-weight="700" fill="var(--text)">SEV<tspan fill="var(--accent)">7</tspan>EN</text>
-  <rect x="105" y="78" width="150" height="4.5" rx="2.25" fill="var(--accent)"></rect>
-</svg>`;
-
-let loginError = '';
+let currentUser = null;
 let isSuperAdmin = false;
-let companies = [];        // [{tenant_id, name, role}]
+let companies = [];
 let chosenCompany = null;
-let locations = [];        // [{id, code, name}]
+let locations = [];
 let chosenLocation = null;
-let inventory = [];        // rows from Supabase
-let salesOrders = [];      // rows from Supabase
+let inventory = [];
+let salesOrders = [];
+let userTemplates = []; // Current user's template IDs for this company
+let templates = []; // All templates in the company
+let userAccessibleModules = []; // Cached list of modules current user can access
 
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function cardEl(){ return document.getElementById('card'); }
@@ -124,354 +148,395 @@ function setCardClass(wide){ cardEl().className = wide ? 'card wide-card' : 'car
 function renderCard(html, wide){ setCardClass(!!wide); cardEl().innerHTML = html; }
 
 function renderLoginForm(){
-  renderCard(`
-    <div class="logo">${LOGO_SVG}</div>
-    <div class="sub">Built by Users. Built for Business.</div>
-    ${loginError ? `<div class="msg err">${esc(loginError)}</div>` : ''}
-    <form id="loginForm">
-      <div class="field"><label>Email</label><input type="email" id="email" required></div>
-      <div class="field"><label>Password</label><input type="password" id="password" required></div>
-      <button type="submit" class="btn" id="loginBtn">Sign In</button>
-    </form>
-  `);
-  document.getElementById('loginForm').addEventListener('submit', handleLogin);
+renderCard(`
+<div class="logo">${LOGO_SVG}</div>
+<div class="sub">Built by Users. Built for Business.</div>
+${loginError ? `<div class="msg err">${esc(loginError)}</div>` : ''}
+<form id="loginForm">
+<div class="field"><label>Email</label><input type="email" id="email" required></div>
+<div class="field"><label>Password</label><input type="password" id="password" required></div>
+<button type="submit" class="btn" id="loginBtn">Sign In</button>
+</form>
+`);
+document.getElementById('loginForm').addEventListener('submit', handleLogin);
 }
 
+let loginError = '';
+
+async function canAccessModule(moduleId){
+return userAccessibleModules.includes(moduleId);
+}
+
+async function loadUserAccessibleModules(){
+if(!chosenCompany || !currentUser) return;
+const { data, error } = await sb.rpc('user_accessible_modules', {
+uid: currentUser.id,
+tenant_id: chosenCompany.tenant_id
+});
+if(error){ console.error('Could not load accessible modules:', error); userAccessibleModules = []; }
+else { userAccessibleModules = (data||[]).map(r => r.module_id); }
+}
+
+const LOGO_SVG = `<svg viewBox="0 0 360 100" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="SEV7EN">
+<text x="180" y="62" text-anchor="middle" font-family="'Oswald','IBM Plex Sans',sans-serif" font-size="54" font-weight="700" fill="var(--text)">SEV<tspan fill="var(--accent)">7</tspan>EN</text>
+<rect x="105" y="78" width="150" height="4.5" rx="2.25" fill="var(--accent)"></rect>
+</svg>`;
+
 function renderCompanyPicker(){
-  renderCard(`
-    <div class="logo">${LOGO_SVG}</div>
-    <div class="picker-title">Which company would you like to work in?</div>
-    <div class="picker-list">
-      ${isSuperAdmin ? `
-        <button class="picker-btn" style="border-style:dashed; border-color:var(--accent-2);" onclick="renderCreateCompany()">
-          <div><div class="picker-name" style="color:var(--accent-2);">+ Create New Company</div><div class="picker-role">Super Admin only</div></div>
-          <span class="picker-go">Set up &rarr;</span>
-        </button>
-      ` : ''}
-      ${companies.map((c,i) => `
-        <button class="picker-btn" onclick="chooseCompany(${i})">
-          <div><div class="picker-name">${esc(c.name)}</div><div class="picker-role">${esc(c.role)}</div></div>
-          <span class="picker-go">Enter &rarr;</span>
-        </button>
-      `).join('')}
-    </div>
-    <div class="logout-link" onclick="doLogout()">Sign out</div>
-  `);
+renderCard(`
+<div class="logo">${LOGO_SVG}</div>
+<div class="picker-title">Which company would you like to work in?</div>
+<div class="picker-list">
+${isSuperAdmin ? `
+<button class="picker-btn" style="border-style:dashed; border-color:var(--accent-2);" onclick="renderCreateCompany()">
+<div><div class="picker-name" style="color:var(--accent-2);">+ Create New Company</div><div class="picker-role">Super Admin only</div></div>
+<span class="picker-go">Set up &rarr;</span>
+</button>
+` : ''}
+${companies.map((c,i) => `
+<button class="picker-btn" onclick="chooseCompany(${i})">
+<div><div class="picker-name">${esc(c.name)}</div><div class="picker-role">${esc(c.role)}</div></div>
+<span class="picker-go">Enter &rarr;</span>
+</button>
+`).join('')}
+</div>
+<div class="logout-link" onclick="doLogout()">Sign out</div>
+`);
 }
 
 const ALL_MODULES = [
-  {id:'po', label:'Purchase'}, {id:'inward', label:'Inward'}, {id:'inventory', label:'Inventory'},
-  {id:'outward', label:'Outward'}, {id:'logistics', label:'Logistics'}, {id:'sales', label:'Sales'},
-  {id:'automation', label:'Automation'}, {id:'enquiry', label:'Enquiry'}, {id:'accounts', label:'Accounts'},
-  {id:'quotation', label:'Quotation'}, {id:'hr', label:'HR'}, {id:'reports', label:'Reports'}
+{id:'po', label:'Purchase'}, {id:'inward', label:'Inward'}, {id:'inventory', label:'Inventory'},
+{id:'outward', label:'Outward'}, {id:'logistics', label:'Logistics'}, {id:'sales', label:'Sales'},
+{id:'automation', label:'Automation'}, {id:'enquiry', label:'Enquiry'}, {id:'accounts', label:'Accounts'},
+{id:'quotation', label:'Quotation'}, {id:'hr', label:'HR'}, {id:'reports', label:'Reports'}
 ];
+
 const PLAN_DEFAULT_MODULES = {
-  basic: ['po','inward','inventory','outward','reports'],
-  standard: ['po','inward','inventory','outward','logistics','sales','enquiry','accounts','quotation','reports'],
-  premium: ALL_MODULES.map(m=>m.id)
+basic: ['po','inward','inventory','outward','reports'],
+standard: ['po','inward','inventory','outward','logistics','sales','enquiry','accounts','quotation','reports'],
+premium: ALL_MODULES.map(m=>m.id)
 };
 
 function renderCreateCompany(){
-  renderCard(`
-    <div class="logo">${LOGO_SVG}</div>
-    <div class="picker-title">Create New Company</div>
-    ${loginError ? `<div class="msg err">${esc(loginError)}</div>` : ''}
-    <form id="createCompanyForm">
-      <div class="field"><label>Company name</label><input type="text" id="cc-name" placeholder="e.g. ABC Valves Pvt Ltd" required></div>
-      <div class="field"><label>First location name</label><input type="text" id="cc-loc-name" placeholder="e.g. ABC Valves - Head Office" required></div>
-      <div class="field"><label>Location code</label><input type="text" id="cc-loc-code" placeholder="e.g. ABCHO" required></div>
-      <div class="field"><label>Plan</label>
-        <select id="cc-plan" onchange="applyPlanDefaults(this.value)" style="width:100%; padding:14px; font-size:15px; border:1.5px solid var(--accent-2); background:#fff;">
-          <option value="basic">Basic &mdash; ₹999/mo</option>
-          <option value="standard" selected>Standard &mdash; ₹2,499/mo</option>
-          <option value="premium">Premium &mdash; ₹4,999/mo</option>
-        </select>
-      </div>
-      <div class="field">
-        <label>Modules for this company</label>
-        <div style="font-size:11px; color:var(--muted); margin-bottom:8px; text-transform:none; letter-spacing:0;">Picked automatically based on plan &mdash; check or uncheck anything to customize. Dashboard and Users are always included.</div>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px 16px; background:var(--panel-2); border:1px solid var(--border); padding:14px;">
-          ${ALL_MODULES.map(m => `
-            <label style="display:flex; align-items:center; gap:8px; font-size:13px; font-weight:500; text-transform:none; letter-spacing:0; cursor:pointer;">
-              <input type="checkbox" class="cc-module" value="${m.id}" checked style="width:auto;"> ${esc(m.label)}
-            </label>
-          `).join('')}
-        </div>
-      </div>
-      <div class="field"><label>First Company Admin's email (optional)</label><input type="email" id="cc-admin-email" placeholder="Leave blank to add later"></div>
-      <button type="submit" class="btn" id="createBtn" style="margin-top:20px;">Create Company</button>
-    </form>
-    <div class="logout-link" onclick="renderCompanyPicker()">&larr; Back</div>
-  `, true);
-  document.getElementById('createCompanyForm').addEventListener('submit', createCompany);
-  applyPlanDefaults('standard');
+renderCard(`
+<div class="logo">${LOGO_SVG}</div>
+<div class="picker-title">Create New Company</div>
+${loginError ? `<div class="msg err">${esc(loginError)}</div>` : ''}
+<form id="createCompanyForm">
+<div class="field"><label>Company name</label><input type="text" id="cc-name" placeholder="e.g. ABC Valves Pvt Ltd" required></div>
+<div class="field"><label>First location name</label><input type="text" id="cc-loc-name" placeholder="e.g. ABC Valves - Head Office" required></div>
+<div class="field"><label>Location code</label><input type="text" id="cc-loc-code" placeholder="e.g. ABCHO" required></div>
+<div class="field"><label>Plan</label>
+<select id="cc-plan" onchange="applyPlanDefaults(this.value)" style="width:100%; padding:14px; font-size:15px; border:1.5px solid var(--accent-2); background:#fff;">
+<option value="basic">Basic &mdash; ₹999/mo</option>
+<option value="standard" selected>Standard &mdash; ₹2,499/mo</option>
+<option value="premium">Premium &mdash; ₹4,999/mo</option>
+</select>
+</div>
+<div class="field">
+<label>Modules for this company</label>
+<div style="font-size:11px; color:var(--muted); margin-bottom:8px; text-transform:none; letter-spacing:0;">Picked automatically based on plan &mdash; check or uncheck anything to customize. Dashboard and Users are always included.</div>
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px 16px; background:var(--panel-2); border:1px solid var(--border); padding:14px;">
+${ALL_MODULES.map(m => `
+<label style="display:flex; align-items:center; gap:8px; font-size:13px; font-weight:500; text-transform:none; letter-spacing:0; cursor:pointer;">
+<input type="checkbox" class="cc-module" value="${m.id}" checked style="width:auto;"> ${esc(m.label)}
+</label>
+`).join('')}
+</div>
+</div>
+<div class="field"><label>First Company Admin's email (optional)</label><input type="email" id="cc-admin-email" placeholder="Leave blank to add later"></div>
+<button type="submit" class="btn" id="createBtn" style="margin-top:20px;">Create Company</button>
+</form>
+<div class="logout-link" onclick="renderCompanyPicker()">&larr; Back</div>
+`, true);
+document.getElementById('createCompanyForm').addEventListener('submit', createCompany);
+applyPlanDefaults('standard');
 }
 
 function applyPlanDefaults(plan){
-  const defaults = PLAN_DEFAULT_MODULES[plan] || [];
-  document.querySelectorAll('.cc-module').forEach(cb => { cb.checked = defaults.includes(cb.value); });
+const defaults = PLAN_DEFAULT_MODULES[plan] || [];
+document.querySelectorAll('.cc-module').forEach(cb => { cb.checked = defaults.includes(cb.value); });
 }
 
 async function createCompany(e){
-  e.preventDefault();
-  loginError = '';
-  const name = document.getElementById('cc-name').value.trim();
-  const locName = document.getElementById('cc-loc-name').value.trim();
-  const locCode = document.getElementById('cc-loc-code').value.trim().toUpperCase();
-  const plan = document.getElementById('cc-plan').value;
-  const enabled_modules = Array.from(document.querySelectorAll('.cc-module:checked')).map(cb => cb.value);
-  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-  document.getElementById('createBtn').disabled = true;
+e.preventDefault();
+loginError = '';
+const name = document.getElementById('cc-name').value.trim();
+const locName = document.getElementById('cc-loc-name').value.trim();
+const locCode = document.getElementById('cc-loc-code').value.trim().toUpperCase();
+const plan = document.getElementById('cc-plan').value;
+const enabled_modules = Array.from(document.querySelectorAll('.cc-module:checked')).map(cb => cb.value);
+const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 
-  const { data: tenant, error: tErr } = await sb.from('tenants')
-    .insert({ name, slug, plan, status: 'active', enabled_modules }).select('id, name').single();
-  if(tErr){ loginError = 'Could not create company: ' + tErr.message; renderCreateCompany(); return; }
+document.getElementById('createBtn').disabled = true;
 
-  const { error: lErr } = await sb.from('locations')
-    .insert({ tenant_id: tenant.id, code: locCode, name: locName });
-  if(lErr){ loginError = 'Company created, but location failed: ' + lErr.message; renderCreateCompany(); return; }
+const { data: tenant, error: tErr } = await sb.from('tenants')
+.insert({ name, slug, plan, status: 'active', enabled_modules }).select('id, name').single();
 
-  const adminEmail = document.getElementById('cc-admin-email').value.trim();
-  if(adminEmail){
-    const { data: inviteResult, error: inviteErr } = await sb.functions.invoke('invite-user', {
-      body: { email: adminEmail, tenant_id: tenant.id, role: 'owner' }
-    });
-    if(inviteErr || (inviteResult && inviteResult.error)){
-      alert('Company created, but the invite failed: ' + (inviteErr ? inviteErr.message : inviteResult.error) + '\n\nYou can invite them manually later.');
-    }
-  }
+if(tErr){ loginError = 'Could not create company: ' + tErr.message; renderCreateCompany(); return; }
 
-  /* Refresh the company list (Super Admin sees every tenant) and jump straight in. */
-  const { data: tenants } = await sb.from('tenants').select('id, name, enabled_modules').order('name');
-  companies = (tenants||[]).map(t => ({ tenant_id: t.id, name: t.name, role: 'Super Admin', enabled_modules: t.enabled_modules||[] }));
-  const idx = companies.findIndex(c => c.tenant_id === tenant.id);
-  await chooseCompany(idx >= 0 ? idx : 0);
+const { error: lErr } = await sb.from('locations')
+.insert({ tenant_id: tenant.id, code: locCode, name: locName });
+
+if(lErr){ loginError = 'Company created, but location failed: ' + lErr.message; renderCreateCompany(); return; }
+
+const adminEmail = document.getElementById('cc-admin-email').value.trim();
+if(adminEmail){
+const { data: inviteResult, error: inviteErr } = await sb.functions.invoke('invite-user', {
+body: { email: adminEmail, tenant_id: tenant.id, role: 'owner' }
+});
+if(inviteErr || (inviteResult && inviteResult.error)){
+alert('Company created, but the invite failed: ' + (inviteErr ? inviteErr.message : inviteResult.error) + '\n\nYou can invite them manually later.');
+}
+}
+
+const { data: tenants } = await sb.from('tenants').select('id, name, enabled_modules').order('name');
+companies = (tenants||[]).map(t => ({ tenant_id: t.id, name: t.name, role: 'Super Admin', enabled_modules: t.enabled_modules||[] }));
+const idx = companies.findIndex(c => c.tenant_id === tenant.id);
+await chooseCompany(idx >= 0 ? idx : 0);
 }
 
 function renderLocationPicker(){
-  renderCard(`
-    <div class="logo">${LOGO_SVG}</div>
-    <div class="picker-title">${esc(chosenCompany.name)} &mdash; which location?</div>
-    <div class="picker-list">
-      ${locations.map((l,i) => `
-        <button class="picker-btn" onclick="chooseLocation(${i})">
-          <div><div class="picker-name">${esc(l.name)}</div><div class="picker-role">${esc(l.code)}</div></div>
-          <span class="picker-go">Enter &rarr;</span>
-        </button>
-      `).join('')}
-    </div>
-    <div class="logout-link" onclick="doLogout()">Sign out</div>
-  `);
+renderCard(`
+<div class="logo">${LOGO_SVG}</div>
+<div class="picker-title">${esc(chosenCompany.name)} &mdash; which location?</div>
+<div class="picker-list">
+${locations.map((l,i) => `
+<button class="picker-btn" onclick="chooseLocation(${i})">
+<div><div class="picker-name">${esc(l.name)}</div><div class="picker-role">${esc(l.code)}</div></div>
+<span class="picker-go">Enter &rarr;</span>
+</button>
+`).join('')}
+</div>
+<div class="logout-link" onclick="doLogout()">Sign out</div>
+`);
 }
 
 function moduleNav(active){
-  const avail = BUILT_MODULES.filter(m => (chosenCompany.enabled_modules||[]).includes(m.id));
-  return `
-    <div class="topline">
-      <div>
-        <div class="company-name">${esc(chosenCompany.name)}</div>
-        <div class="loc-name">${esc(chosenLocation.name)}</div>
-      </div>
-      <div>
-        ${isSuperAdmin ? `<span class="logout-link" onclick="renderCompanyPicker()" style="display:inline; margin-right:14px;">All Companies</span>` : ''}
-        <span class="logout-link" onclick="doLogout()" style="display:inline;">Sign out</span>
-      </div>
-    </div>
-    <div class="module-tabs">
-      ${avail.map(m => `<span class="module-tab ${m.id===active?'active':''}" onclick="switchModule('${m.id}')">${esc(m.label)}</span>`).join('')}
-    </div>
-  `;
+const avail = BUILT_MODULES.filter(m => userAccessibleModules.includes(m.id));
+return `
+<div class="topline">
+<div>
+<div class="company-name">${esc(chosenCompany.name)}</div>
+<div class="loc-name">${esc(chosenLocation.name)}</div>
+</div>
+<div>
+${isSuperAdmin ? `<span class="logout-link" onclick="renderCompanyPicker()" style="display:inline; margin-right:14px;">All Companies</span>` : ''}
+<span class="logout-link" onclick="doLogout()" style="display:inline;">Sign out</span>
+</div>
+</div>
+<div class="module-tabs">
+${avail.map(m => `<span class="module-tab ${m.id===active?'active':''}" onclick="switchModule('${m.id}')">${esc(m.label)}</span>`).join('')}
+</div>
+`;
 }
 
 async function switchModule(id){
-  currentModule = id;
-  if(id === 'inventory') return loadInventory();
-  if(id === 'sales') return loadSales();
-  if(id === 'accounts') return loadAccounts();
-  if(id === 'reports') return loadReports();
-  if(MODULE_DEFS[id]) return loadGenericModule(id);
+if(!await canAccessModule(id)){ alert('You do not have access to this module.'); return; }
+currentModule = id;
+if(id === 'inventory') return loadInventory();
+if(id === 'sales') return loadSales();
+if(id === 'accounts') return loadAccounts();
+if(id === 'reports') return loadReports();
+if(MODULE_DEFS[id]) return loadGenericModule(id);
 }
 
-/* ============================================================
-   GENERIC MODULE ENGINE — used for Purchase, Inward, Outward,
-   Logistics, Automation, Enquiry, Quotation, HR. Same underlying
-   pattern as Inventory/Sales (load / add / update status / delete),
-   just table-driven instead of hand-written per module, since
-   these all share the same simple shape.
-   ============================================================ */
+// ============================================================
+// GENERIC MODULE ENGINE
+// ============================================================
+
 const MODULE_DEFS = {
-  po: {
-    label:'Purchase', table:'vendor_pos',
-    fields: [
-      {name:'po_number', label:'PO Number', inExtra:false, type:'text'},
-      {name:'vendor', label:'Vendor', inExtra:false, type:'text'},
-      {name:'po_type', label:'Type', inExtra:false, type:'select', options:['internal','external']}
-    ],
-    status: {dbCol:'status', inExtra:false, options:['Non-Executed','Part Shipment','Executed','Cancelled'],
-      badge:s=> s==='Executed'?'green': s==='Cancelled'?'red': s==='Part Shipment'?'blue':'grey'}
-  },
-  inward: {
-    label:'Inward', table:'inward',
-    fields: [
-      {name:'item_name', label:'Item', inExtra:false, type:'text'},
-      {name:'quantity', label:'Qty', inExtra:false, type:'number'}
-    ],
-    status: null
-  },
-  outward: {
-    label:'Outward', table:'outward',
-    fields: [
-      {name:'item_name', label:'Item', inExtra:false, type:'text'},
-      {name:'quantity', label:'Qty', inExtra:false, type:'number'}
-    ],
-    status: null
-  },
-  logistics: {
-    label:'Logistics', table:'logistics',
-    fields: [ {name:'note', label:'Notes', inExtra:true, type:'text'} ],
-    status: {dbCol:'status', inExtra:false, options:['In Transit','Delivered'], badge:s=>s==='Delivered'?'green':'blue'}
-  },
-  automation: {
-    label:'Automation', table:'automation',
-    fields: [ {name:'task', label:'Task', inExtra:true, type:'text'} ],
-    status: {dbCol:'status', inExtra:true, options:['Pending','Done'], badge:s=>s==='Done'?'green':'grey'}
-  },
-  enquiry: {
-    label:'Enquiry', table:'enquiries',
-    fields: [ {name:'customer', label:'Customer', inExtra:false, type:'text'} ],
-    status: {dbCol:'action', inExtra:false, options:['Pending','Accepted','Rejected'], badge:s=>s==='Accepted'?'green':s==='Rejected'?'red':'blue'}
-  },
-  quotation: {
-    label:'Quotation', table:'quotations',
-    fields: [
-      {name:'quote_no', label:'Quote No', inExtra:false, type:'text'},
-      {name:'customer', label:'Customer', inExtra:false, type:'text'}
-    ],
-    status: {dbCol:'status', inExtra:false, options:['Pending','Won','Lost'], badge:s=>s==='Won'?'green':s==='Lost'?'red':'blue'}
-  },
-  hr: {
-    label:'HR', table:'employees',
-    fields: [
-      {name:'emp_code', label:'Emp Code', inExtra:false, type:'text'},
-      {name:'name', label:'Name', inExtra:false, type:'text'}
-    ],
-    status: {dbCol:'status', inExtra:true, options:['Active','Inactive'], badge:s=>s==='Active'?'green':'red'}
-  }
+po: {
+label:'Purchase', table:'vendor_pos',
+fields: [
+{name:'po_number', label:'PO Number', inExtra:false, type:'text'},
+{name:'vendor', label:'Vendor', inExtra:false, type:'text'},
+{name:'po_type', label:'Type', inExtra:false, type:'select', options:['internal','external']}
+],
+status: {dbCol:'status', inExtra:false, options:['Non-Executed','Part Shipment','Executed','Cancelled'],
+badge:s=> s==='Executed'?'green': s==='Cancelled'?'red': s==='Part Shipment'?'blue':'grey'}
+},
+
+inward: {
+label:'Inward', table:'inward',
+fields: [
+{name:'item_name', label:'Item', inExtra:false, type:'text'},
+{name:'quantity', label:'Qty', inExtra:false, type:'number'}
+],
+status: null
+},
+
+outward: {
+label:'Outward', table:'outward',
+fields: [
+{name:'item_name', label:'Item', inExtra:false, type:'text'},
+{name:'quantity', label:'Qty', inExtra:false, type:'number'}
+],
+status: null
+},
+
+logistics: {
+label:'Logistics', table:'logistics',
+fields: [ {name:'note', label:'Notes', inExtra:true, type:'text'} ],
+status: {dbCol:'status', inExtra:false, options:['In Transit','Delivered'], badge:s=>s==='Delivered'?'green':'blue'}
+},
+
+automation: {
+label:'Automation', table:'automation',
+fields: [ {name:'task', label:'Task', inExtra:true, type:'text'} ],
+status: {dbCol:'status', inExtra:true, options:['Pending','Done'], badge:s=>s==='Done'?'green':'grey'}
+},
+
+enquiry: {
+label:'Enquiry', table:'enquiries',
+fields: [ {name:'customer', label:'Customer', inExtra:false, type:'text'} ],
+status: {dbCol:'action', inExtra:false, options:['Pending','Accepted','Rejected'], badge:s=>s==='Accepted'?'green':s==='Rejected'?'red':'blue'}
+},
+
+quotation: {
+label:'Quotation', table:'quotations',
+fields: [
+{name:'quote_no', label:'Quote No', inExtra:false, type:'text'},
+{name:'customer', label:'Customer', inExtra:false, type:'text'}
+],
+status: {dbCol:'status', inExtra:false, options:['Pending','Won','Lost'], badge:s=>s==='Won'?'green':s==='Lost'?'red':'blue'}
+},
+
+hr: {
+label:'HR', table:'employees',
+fields: [
+{name:'emp_code', label:'Emp Code', inExtra:false, type:'text'},
+{name:'name', label:'Name', inExtra:false, type:'text'}
+],
+status: {dbCol:'status', inExtra:true, options:['Active','Inactive'], badge:s=>s==='Active'?'green':'red'}
+}
 };
-let genericRows = {}; // {moduleId: [rows]}
+
+let genericRows = {};
 
 function genericFieldValue(def, f, row){ return f.inExtra ? ((row.extra||{})[f.name]) : row[f.name]; }
 function genericStatusValue(def, row){ return def.status.inExtra ? ((row.extra||{})[def.status.dbCol]) : row[def.status.dbCol]; }
 
 async function loadGenericModule(id){
-  const def = MODULE_DEFS[id];
-  renderCard('Loading ' + def.label + '...');
-  const cols = ['id','created_at','extra'].concat(def.fields.filter(f=>!f.inExtra).map(f=>f.name));
-  if(def.status && !def.status.inExtra) cols.push(def.status.dbCol);
-  const { data, error } = await sb.from(def.table)
-    .select(cols.join(','))
-    .eq('tenant_id', chosenCompany.tenant_id)
-    .eq('location_id', chosenLocation.id)
-    .order('created_at', { ascending:false });
-  if(error){
-    renderCard(`<div class="msg err">Could not load ${esc(def.label)}: ${esc(error.message)}</div><div class="logout-link" onclick="doLogout()">Sign out</div>`);
-    return;
-  }
-  genericRows[id] = data || [];
-  renderGenericModule(id);
+const def = MODULE_DEFS[id];
+renderCard('Loading ' + def.label + '...');
+const cols = ['id','created_at','extra'].concat(def.fields.filter(f=>!f.inExtra).map(f=>f.name));
+if(def.status && !def.status.inExtra) cols.push(def.status.dbCol);
+
+const { data, error } = await sb.from(def.table)
+.select(cols.join(','))
+.eq('tenant_id', chosenCompany.tenant_id)
+.eq('location_id', chosenLocation.id)
+.order('created_at', { ascending:false });
+
+if(error){
+renderCard(`<div class="msg err">Could not load ${esc(def.label)}: ${esc(error.message)}</div><div class="logout-link" onclick="doLogout()">Sign out</div>`);
+return;
+}
+
+genericRows[id] = data || [];
+renderGenericModule(id);
 }
 
 function renderGenericModule(id){
-  const def = MODULE_DEFS[id];
-  const rows = genericRows[id] || [];
-  const colCount = def.fields.length + (def.status?1:0) + 2;
-  renderCard(`
-    ${moduleNav(id)}
-    <form id="genForm" style="margin:18px 0 8px;">
-      <div class="add-form-grid">
-        ${def.fields.map(f => `
-          <div class="field"><label>${esc(f.label)}</label>
-          ${f.type==='select'
-            ? `<select id="gf-${f.name}">${f.options.map(o=>`<option value="${esc(o)}">${esc(o)}</option>`).join('')}</select>`
-            : `<input type="${f.type}" id="gf-${f.name}" ${f.type==='number'?'step="any"':''}>`}
-          </div>
-        `).join('')}
-        <button type="submit" class="btn small-btn">Add</button>
-      </div>
-    </form>
-    <div class="table-wrap">
-      <table class="datatable">
-        <thead><tr>
-          ${def.fields.map(f=>`<th>${esc(f.label)}</th>`).join('')}
-          ${def.status ? `<th>Status</th>`:''}
-          <th>Added</th><th></th>
-        </tr></thead>
-        <tbody>
-          ${rows.length===0 ? `<tr><td colspan="${colCount}" style="color:var(--muted); text-align:center; padding:20px;">No entries yet &mdash; add your first one above.</td></tr>` :
-            rows.map(row => `
-            <tr>
-              ${def.fields.map(f=>`<td>${esc(genericFieldValue(def,f,row))}</td>`).join('')}
-              ${def.status ? `
-              <td>
-                <select class="inline-select" onchange="updateGenericStatus('${id}','${row.id}', this.value)">
-                  ${def.status.options.map(o=>`<option value="${esc(o)}" ${genericStatusValue(def,row)===o?'selected':''}>${esc(o)}</option>`).join('')}
-                </select>
-                <span class="badge ${def.status.badge(genericStatusValue(def,row)||def.status.options[0])}">${esc(genericStatusValue(def,row)||def.status.options[0])}</span>
-              </td>`:''}
-              <td>${esc((row.created_at||'').slice(0,10))}</td>
-              <td><span class="del-link" onclick="deleteGenericRow('${id}','${row.id}')">Delete</span></td>
-            </tr>`).join('')}
-        </tbody>
-      </table>
-    </div>
-  `, true);
-  document.getElementById('genForm').addEventListener('submit', (e)=>addGenericRow(id, e));
+const def = MODULE_DEFS[id];
+const rows = genericRows[id] || [];
+const colCount = def.fields.length + (def.status?1:0) + 2;
+
+renderCard(`
+${moduleNav(id)}
+<form id="genForm" style="margin:18px 0 8px;">
+<div class="add-form-grid">
+${def.fields.map(f => `
+<div class="field"><label>${esc(f.label)}</label>
+${f.type==='select'
+? `<select id="gf-${f.name}">${f.options.map(o=>`<option value="${esc(o)}">${esc(o)}</option>`).join('')}</select>`
+: `<input type="${f.type}" id="gf-${f.name}" ${f.type==='number'?'step="any"':''}>`}
+</div>
+`).join('')}
+<button type="submit" class="btn small-btn">Add</button>
+</div>
+</form>
+
+<div class="table-wrap">
+<table class="datatable">
+<thead><tr>
+${def.fields.map(f=>`<th>${esc(f.label)}</th>`).join('')}
+${def.status ? `<th>Status</th>`:''}
+<th>Added</th><th></th>
+</tr></thead>
+<tbody>
+${rows.length===0 ? `<tr><td colspan="${colCount}" style="color:var(--muted); text-align:center; padding:20px;">No entries yet &mdash; add your first one above.</td></tr>` :
+rows.map(row => `
+<tr>
+${def.fields.map(f=>`<td>${esc(genericFieldValue(def,f,row))}</td>`).join('')}
+${def.status ? `
+<td>
+<select class="inline-select" onchange="updateGenericStatus('${id}','${row.id}', this.value)">
+${def.status.options.map(o=>`<option value="${esc(o)}" ${genericStatusValue(def,row)===o?'selected':''}>${esc(o)}</option>`).join('')}
+</select>
+<span class="badge ${def.status.badge(genericStatusValue(def,row)||def.status.options[0])}">${esc(genericStatusValue(def,row)||def.status.options[0])}</span>
+</td>`:''}
+<td>${esc((row.created_at||'').slice(0,10))}</td>
+<td><span class="del-link" onclick="deleteGenericRow('${id}','${row.id}')">Delete</span></td>
+</tr>`).join('')}
+</tbody>
+</table>
+</div>
+`, true);
+
+document.getElementById('genForm').addEventListener('submit', (e)=>addGenericRow(id, e));
 }
 
 async function addGenericRow(id, e){
-  e.preventDefault();
-  const def = MODULE_DEFS[id];
-  const insertObj = { tenant_id: chosenCompany.tenant_id, location_id: chosenLocation.id, extra: {} };
-  def.fields.forEach(f=>{
-    const el = document.getElementById('gf-'+f.name);
-    const val = f.type==='number' ? (parseFloat(el.value)||0) : el.value.trim();
-    if(f.inExtra) insertObj.extra[f.name] = val; else insertObj[f.name] = val;
-  });
-  if(def.status){
-    const defaultStatus = def.status.options[0];
-    if(def.status.inExtra) insertObj.extra[def.status.dbCol] = defaultStatus; else insertObj[def.status.dbCol] = defaultStatus;
-  }
-  const { error } = await sb.from(def.table).insert(insertObj);
-  if(error){ alert('Could not add: ' + error.message); return; }
-  await loadGenericModule(id);
+e.preventDefault();
+const def = MODULE_DEFS[id];
+const insertObj = { tenant_id: chosenCompany.tenant_id, location_id: chosenLocation.id, extra: {} };
+
+def.fields.forEach(f=>{
+const el = document.getElementById('gf-'+f.name);
+const val = f.type==='number' ? (parseFloat(el.value)||0) : el.value.trim();
+if(f.inExtra) insertObj.extra[f.name] = val; else insertObj[f.name] = val;
+});
+
+if(def.status){
+const defaultStatus = def.status.options[0];
+if(def.status.inExtra) insertObj.extra[def.status.dbCol] = defaultStatus; else insertObj[def.status.dbCol] = defaultStatus;
+}
+
+const { error } = await sb.from(def.table).insert(insertObj);
+if(error){ alert('Could not add: ' + error.message); return; }
+await loadGenericModule(id);
 }
 
 async function updateGenericStatus(id, rowId, value){
-  const def = MODULE_DEFS[id];
-  const row = (genericRows[id]||[]).find(r=>r.id===rowId);
-  const updateObj = {};
-  if(def.status.inExtra){
-    updateObj.extra = Object.assign({}, row?row.extra:{}, {[def.status.dbCol]: value});
-  } else {
-    updateObj[def.status.dbCol] = value;
-  }
-  const { error } = await sb.from(def.table).update(updateObj).eq('id', rowId);
-  if(error){ alert('Could not update: ' + error.message); return; }
-  await loadGenericModule(id);
+const def = MODULE_DEFS[id];
+const row = (genericRows[id]||[]).find(r=>r.id===rowId);
+const updateObj = {};
+
+if(def.status.inExtra){
+updateObj.extra = Object.assign({}, row?row.extra:{}, {[def.status.dbCol]: value});
+} else {
+updateObj[def.status.dbCol] = value;
+}
+
+const { error } = await sb.from(def.table).update(updateObj).eq('id', rowId);
+if(error){ alert('Could not update: ' + error.message); return; }
+await loadGenericModule(id);
 }
 
 async function deleteGenericRow(id, rowId){
-  if(!confirm('Delete this entry?')) return;
-  const def = MODULE_DEFS[id];
-  const { error } = await sb.from(def.table).delete().eq('id', rowId);
-  if(error){ alert('Could not delete: ' + error.message); return; }
-  await loadGenericModule(id);
+if(!confirm('Delete this entry?')) return;
+const def = MODULE_DEFS[id];
+const { error } = await sb.from(def.table).delete().eq('id', rowId);
+if(error){ alert('Could not delete: ' + error.message); return; }
+await loadGenericModule(id);
 }
 
-/* ============================================================
-   ACCOUNTS — two sub-tables (Purchase / Sales), matching your
-   real app's Accounts tab structure.
-   ============================================================ */
+// ============================================================
+// ACCOUNTS
+// ============================================================
+
 let accountsSection = 'purchase';
 let purchaseAccounts = [];
 let salesAccountsRows = [];
@@ -479,404 +544,439 @@ let salesAccountsRows = [];
 function switchAccountsSection(sec){ accountsSection = sec; loadAccounts(); }
 
 async function loadAccounts(){
-  renderCard('Loading accounts...');
-  if(accountsSection === 'purchase'){
-    const { data, error } = await sb.from('purchase_accounts')
-      .select('id, vendor, invoice_value, created_at')
-      .eq('tenant_id', chosenCompany.tenant_id).eq('location_id', chosenLocation.id)
-      .order('created_at', { ascending:false });
-    if(error){ renderCard(`<div class="msg err">${esc(error.message)}</div>`); return; }
-    purchaseAccounts = data || [];
-  } else {
-    const { data, error } = await sb.from('sales_accounts')
-      .select('id, customer, invoice_value, amount_received, payment_status, created_at')
-      .eq('tenant_id', chosenCompany.tenant_id).eq('location_id', chosenLocation.id)
-      .order('created_at', { ascending:false });
-    if(error){ renderCard(`<div class="msg err">${esc(error.message)}</div>`); return; }
-    salesAccountsRows = data || [];
-  }
-  renderAccounts();
+renderCard('Loading accounts...');
+if(accountsSection === 'purchase'){
+const { data, error } = await sb.from('purchase_accounts')
+.select('id, vendor, invoice_value, created_at')
+.eq('tenant_id', chosenCompany.tenant_id).eq('location_id', chosenLocation.id)
+.order('created_at', { ascending:false });
+
+if(error){ renderCard(`<div class="msg err">${esc(error.message)}</div>`); return; }
+purchaseAccounts = data || [];
+} else {
+const { data, error } = await sb.from('sales_accounts')
+.select('id, customer, invoice_value, amount_received, payment_status, created_at')
+.eq('tenant_id', chosenCompany.tenant_id).eq('location_id', chosenLocation.id)
+.order('created_at', { ascending:false });
+
+if(error){ renderCard(`<div class="msg err">${esc(error.message)}</div>`); return; }
+salesAccountsRows = data || [];
+}
+
+renderAccounts();
 }
 
 function renderAccounts(){
-  renderCard(`
-    ${moduleNav('accounts')}
-    <div style="display:flex; gap:8px; margin:14px 0 4px;">
-      <span class="module-tab ${accountsSection==='purchase'?'active':''}" onclick="switchAccountsSection('purchase')">Purchase</span>
-      <span class="module-tab ${accountsSection==='sales'?'active':''}" onclick="switchAccountsSection('sales')">Sales</span>
-    </div>
-    ${accountsSection==='purchase' ? `
-      <form id="paForm" style="margin:10px 0;">
-        <div class="add-form-grid">
-          <div class="field"><label>Vendor</label><input type="text" id="pa-vendor" required></div>
-          <div class="field"><label>Invoice Value</label><input type="number" step="any" id="pa-value" required></div>
-          <button type="submit" class="btn small-btn">Add</button>
-        </div>
-      </form>
-      <div class="table-wrap"><table class="datatable">
-        <thead><tr><th>Vendor</th><th>Invoice Value</th><th>Added</th><th></th></tr></thead>
-        <tbody>
-          ${purchaseAccounts.length===0?`<tr><td colspan="4" style="color:var(--muted); text-align:center; padding:20px;">No entries yet.</td></tr>`:
-          purchaseAccounts.map(r=>`<tr><td>${esc(r.vendor)}</td><td>${esc(r.invoice_value)}</td><td>${esc((r.created_at||'').slice(0,10))}</td><td><span class="del-link" onclick="deletePurchaseAccount('${r.id}')">Delete</span></td></tr>`).join('')}
-        </tbody>
-      </table></div>
-    ` : `
-      <form id="saForm" style="margin:10px 0;">
-        <div class="add-form-grid">
-          <div class="field"><label>Customer</label><input type="text" id="sa-customer" required></div>
-          <div class="field"><label>Invoice Value</label><input type="number" step="any" id="sa-value" required></div>
-          <div class="field"><label>Amount Received</label><input type="number" step="any" id="sa-received"></div>
-          <button type="submit" class="btn small-btn">Add</button>
-        </div>
-      </form>
-      <div class="table-wrap"><table class="datatable">
-        <thead><tr><th>Customer</th><th>Invoice Value</th><th>Received</th><th>Status</th><th>Added</th><th></th></tr></thead>
-        <tbody>
-          ${salesAccountsRows.length===0?`<tr><td colspan="6" style="color:var(--muted); text-align:center; padding:20px;">No entries yet.</td></tr>`:
-          salesAccountsRows.map(r=>`<tr><td>${esc(r.customer)}</td><td>${esc(r.invoice_value)}</td><td>${esc(r.amount_received||0)}</td>
-          <td><select class="inline-select" onchange="updateSalesAccountStatus('${r.id}', this.value)">
-            ${['Pending','Partial','Paid'].map(s=>`<option value="${s}" ${(r.payment_status||'Pending')===s?'selected':''}>${s}</option>`).join('')}
-          </select> <span class="badge ${r.payment_status==='Paid'?'green':(r.payment_status==='Partial'?'blue':'grey')}">${esc(r.payment_status||'Pending')}</span></td>
-          <td>${esc((r.created_at||'').slice(0,10))}</td><td><span class="del-link" onclick="deleteSalesAccount('${r.id}')">Delete</span></td></tr>`).join('')}
-        </tbody>
-      </table></div>
-    `}
-  `, true);
-  if(accountsSection==='purchase') document.getElementById('paForm').addEventListener('submit', addPurchaseAccount);
-  else document.getElementById('saForm').addEventListener('submit', addSalesAccount);
+renderCard(`
+${moduleNav('accounts')}
+
+<div style="display:flex; gap:8px; margin:14px 0 4px;">
+<span class="module-tab ${accountsSection==='purchase'?'active':''}" onclick="switchAccountsSection('purchase')">Purchase</span>
+<span class="module-tab ${accountsSection==='sales'?'active':''}" onclick="switchAccountsSection('sales')">Sales</span>
+</div>
+
+${accountsSection==='purchase' ? `
+<form id="paForm" style="margin:10px 0;">
+<div class="add-form-grid">
+<div class="field"><label>Vendor</label><input type="text" id="pa-vendor" required></div>
+<div class="field"><label>Invoice Value</label><input type="number" step="any" id="pa-value" required></div>
+<button type="submit" class="btn small-btn">Add</button>
+</div>
+</form>
+<div class="table-wrap"><table class="datatable">
+<thead><tr><th>Vendor</th><th>Invoice Value</th><th>Added</th><th></th></tr></thead>
+<tbody>
+${purchaseAccounts.length===0?`<tr><td colspan="4" style="color:var(--muted); text-align:center; padding:20px;">No entries yet.</td></tr>`:
+purchaseAccounts.map(r=>`<tr><td>${esc(r.vendor)}</td><td>${esc(r.invoice_value)}</td><td>${esc((r.created_at||'').slice(0,10))}</td><td><span class="del-link" onclick="deletePurchaseAccount('${r.id}')">Delete</span></td></tr>`).join('')}
+</tbody>
+</table></div>
+` : `
+<form id="saForm" style="margin:10px 0;">
+<div class="add-form-grid">
+<div class="field"><label>Customer</label><input type="text" id="sa-customer" required></div>
+<div class="field"><label>Invoice Value</label><input type="number" step="any" id="sa-value" required></div>
+<div class="field"><label>Amount Received</label><input type="number" step="any" id="sa-received"></div>
+<button type="submit" class="btn small-btn">Add</button>
+</div>
+</form>
+<div class="table-wrap"><table class="datatable">
+<thead><tr><th>Customer</th><th>Invoice Value</th><th>Received</th><th>Status</th><th>Added</th><th></th></tr></thead>
+<tbody>
+${salesAccountsRows.length===0?`<tr><td colspan="6" style="color:var(--muted); text-align:center; padding:20px;">No entries yet.</td></tr>`:
+salesAccountsRows.map(r=>`<tr><td>${esc(r.customer)}</td><td>${esc(r.invoice_value)}</td><td>${esc(r.amount_received||0)}</td>
+<td><select class="inline-select" onchange="updateSalesAccountStatus('${r.id}', this.value)">
+${['Pending','Partial','Paid'].map(s=>`<option value="${s}" ${(r.payment_status||'Pending')===s?'selected':''}>${s}</option>`).join('')}
+</select> <span class="badge ${r.payment_status==='Paid'?'green':(r.payment_status==='Partial'?'blue':'grey')}">${esc(r.payment_status||'Pending')}</span></td>
+<td>${esc((r.created_at||'').slice(0,10))}</td><td><span class="del-link" onclick="deleteSalesAccount('${r.id}')">Delete</span></td></tr>`).join('')}
+</tbody>
+</table></div>
+`}
+`, true);
+
+if(accountsSection==='purchase') document.getElementById('paForm').addEventListener('submit', addPurchaseAccount);
+else document.getElementById('saForm').addEventListener('submit', addSalesAccount);
 }
 
 async function addPurchaseAccount(e){
-  e.preventDefault();
-  const vendor = document.getElementById('pa-vendor').value.trim();
-  const invoice_value = parseFloat(document.getElementById('pa-value').value)||0;
-  const { error } = await sb.from('purchase_accounts').insert({ tenant_id: chosenCompany.tenant_id, location_id: chosenLocation.id, vendor, invoice_value });
-  if(error){ alert('Could not add: '+error.message); return; }
-  await loadAccounts();
-}
-async function deletePurchaseAccount(id){
-  if(!confirm('Delete this entry?')) return;
-  const { error } = await sb.from('purchase_accounts').delete().eq('id', id);
-  if(error){ alert('Could not delete: '+error.message); return; }
-  await loadAccounts();
-}
-async function addSalesAccount(e){
-  e.preventDefault();
-  const customer = document.getElementById('sa-customer').value.trim();
-  const invoice_value = parseFloat(document.getElementById('sa-value').value)||0;
-  const amount_received = parseFloat(document.getElementById('sa-received').value)||0;
-  const { error } = await sb.from('sales_accounts').insert({ tenant_id: chosenCompany.tenant_id, location_id: chosenLocation.id, customer, invoice_value, amount_received, payment_status:'Pending' });
-  if(error){ alert('Could not add: '+error.message); return; }
-  await loadAccounts();
-}
-async function updateSalesAccountStatus(id, value){
-  const { error } = await sb.from('sales_accounts').update({ payment_status: value }).eq('id', id);
-  if(error){ alert('Could not update: '+error.message); return; }
-  await loadAccounts();
-}
-async function deleteSalesAccount(id){
-  if(!confirm('Delete this entry?')) return;
-  const { error } = await sb.from('sales_accounts').delete().eq('id', id);
-  if(error){ alert('Could not delete: '+error.message); return; }
-  await loadAccounts();
+e.preventDefault();
+const vendor = document.getElementById('pa-vendor').value.trim();
+const invoice_value = parseFloat(document.getElementById('pa-value').value)||0;
+const { error } = await sb.from('purchase_accounts').insert({ tenant_id: chosenCompany.tenant_id, location_id: chosenLocation.id, vendor, invoice_value });
+if(error){ alert('Could not add: '+error.message); return; }
+await loadAccounts();
 }
 
-/* ============================================================
-   REPORTS — simple record-count summary for now. A full report
-   builder with filters/charts/Excel export (matching your real
-   app) is a later phase built on top of this same data.
-   ============================================================ */
+async function deletePurchaseAccount(id){
+if(!confirm('Delete this entry?')) return;
+const { error } = await sb.from('purchase_accounts').delete().eq('id', id);
+if(error){ alert('Could not delete: '+error.message); return; }
+await loadAccounts();
+}
+
+async function addSalesAccount(e){
+e.preventDefault();
+const customer = document.getElementById('sa-customer').value.trim();
+const invoice_value = parseFloat(document.getElementById('sa-value').value)||0;
+const amount_received = parseFloat(document.getElementById('sa-received').value)||0;
+const { error } = await sb.from('sales_accounts').insert({ tenant_id: chosenCompany.tenant_id, location_id: chosenLocation.id, customer, invoice_value, amount_received, payment_status:'Pending' });
+if(error){ alert('Could not add: '+error.message); return; }
+await loadAccounts();
+}
+
+async function updateSalesAccountStatus(id, value){
+const { error } = await sb.from('sales_accounts').update({ payment_status: value }).eq('id', id);
+if(error){ alert('Could not update: '+error.message); return; }
+await loadAccounts();
+}
+
+async function deleteSalesAccount(id){
+if(!confirm('Delete this entry?')) return;
+const { error } = await sb.from('sales_accounts').delete().eq('id', id);
+if(error){ alert('Could not delete: '+error.message); return; }
+await loadAccounts();
+}
+
+// ============================================================
+// REPORTS
+// ============================================================
+
 async function loadReports(){
-  renderCard('Loading report...');
-  const tables = [
-    {table:'inventory', label:'Inventory Items'},
-    {table:'sales', label:'Sales Orders'},
-    {table:'vendor_pos', label:'Purchase Orders'},
-    {table:'inward', label:'Inward Entries'},
-    {table:'outward', label:'Outward Entries'},
-    {table:'logistics', label:'Logistics Entries'},
-    {table:'automation', label:'Automation Entries'},
-    {table:'enquiries', label:'Enquiries'},
-    {table:'purchase_accounts', label:'Purchase Accounts'},
-    {table:'sales_accounts', label:'Sales Accounts'},
-    {table:'quotations', label:'Quotations'},
-    {table:'employees', label:'Employees'}
-  ];
-  const counts = await Promise.all(tables.map(async t=>{
-    const { count, error } = await sb.from(t.table).select('id', {count:'exact', head:true})
-      .eq('tenant_id', chosenCompany.tenant_id).eq('location_id', chosenLocation.id);
-    return { label: t.label, count: error ? '—' : count };
-  }));
-  renderCard(`
-    ${moduleNav('reports')}
-    <div class="table-wrap" style="margin-top:16px;">
-      <table class="datatable">
-        <thead><tr><th>Module</th><th>Records</th></tr></thead>
-        <tbody>
-          ${counts.map(c=>`<tr><td>${esc(c.label)}</td><td>${esc(c.count)}</td></tr>`).join('')}
-        </tbody>
-      </table>
-    </div>
-    <div style="font-size:12px; color:var(--muted); margin-top:14px;">Simple record-count summary for now. Filters, charts, and Excel export (matching your real report builder) are a later phase on top of this same data.</div>
-  `, true);
+renderCard('Loading report...');
+const tables = [
+{table:'inventory', label:'Inventory Items'},
+{table:'sales', label:'Sales Orders'},
+{table:'vendor_pos', label:'Purchase Orders'},
+{table:'inward', label:'Inward Entries'},
+{table:'outward', label:'Outward Entries'},
+{table:'logistics', label:'Logistics Entries'},
+{table:'automation', label:'Automation Entries'},
+{table:'enquiries', label:'Enquiries'},
+{table:'purchase_accounts', label:'Purchase Accounts'},
+{table:'sales_accounts', label:'Sales Accounts'},
+{table:'quotations', label:'Quotations'},
+{table:'employees', label:'Employees'}
+];
+
+const counts = await Promise.all(tables.map(async t=>{
+const { count, error } = await sb.from(t.table).select('id', {count:'exact', head:true})
+.eq('tenant_id', chosenCompany.tenant_id).eq('location_id', chosenLocation.id);
+return { label: t.label, count: error ? '—' : count };
+}));
+
+renderCard(`
+${moduleNav('reports')}
+<div class="table-wrap" style="margin-top:16px;">
+<table class="datatable">
+<thead><tr><th>Module</th><th>Records</th></tr></thead>
+<tbody>
+${counts.map(c=>`<tr><td>${esc(c.label)}</td><td>${esc(c.count)}</td></tr>`).join('')}
+</tbody>
+</table>
+</div>
+<div style="font-size:12px; color:var(--muted); margin-top:14px;">Simple record-count summary for now. Filters, charts, and Excel export (matching your real report builder) are a later phase on top of this same data.</div>
+`, true);
 }
 
 function lowStockBadge(action){
-  if(action==='Ordering') return `<span class="badge green">Ordering</span>`;
-  if(action==='NA') return `<span class="badge red">N/A</span>`;
-  return `<span class="badge grey">&mdash;</span>`;
+if(action==='Ordering') return `<span class="badge green">Ordering</span>`;
+if(action==='NA') return `<span class="badge red">N/A</span>`;
+return `<span class="badge grey">&mdash;</span>`;
 }
 
 function renderInventory(){
-  renderCard(`
-    ${moduleNav('inventory')}
+renderCard(`
+${moduleNav('inventory')}
 
-    <form id="addForm" style="margin:18px 0 8px;">
-      <div class="add-form-grid">
-        <div class="field"><label>Item name</label><input type="text" id="f-name" required></div>
-        <div class="field"><label>Quantity</label><input type="number" id="f-qty" step="any" required></div>
-        <div class="field"><label>Category</label><input type="text" id="f-cat"></div>
-        <button type="submit" class="btn small-btn">Add Item</button>
-      </div>
-    </form>
+<form id="addForm" style="margin:18px 0 8px;">
+<div class="add-form-grid">
+<div class="field"><label>Item name</label><input type="text" id="f-name" required></div>
+<div class="field"><label>Quantity</label><input type="number" id="f-qty" step="any" required></div>
+<div class="field"><label>Category</label><input type="text" id="f-cat"></div>
+<button type="submit" class="btn small-btn">Add Item</button>
+</div>
+</form>
 
-    <div class="table-wrap">
-      <table class="datatable">
-        <thead><tr><th>Item</th><th>Qty</th><th>Category</th><th>Low Stock Action</th><th>Added</th><th></th></tr></thead>
-        <tbody>
-          ${inventory.length===0 ? `<tr><td colspan="6" style="color:var(--muted); text-align:center; padding:20px;">No items yet &mdash; add your first one above.</td></tr>` :
-            inventory.map(row => `
-            <tr>
-              <td>${esc(row.item_name)}</td>
-              <td>${esc(row.quantity)}</td>
-              <td>${esc((row.extra&&row.extra.category)||'')}</td>
-              <td>
-                <select class="inline-select" onchange="updateLowStockAction('${row.id}', this.value)">
-                  <option value="" ${!(row.extra&&row.extra.lowStockAction) ? 'selected':''}>&mdash; Select &mdash;</option>
-                  <option value="Ordering" ${(row.extra&&row.extra.lowStockAction)==='Ordering'?'selected':''}>Ordering</option>
-                  <option value="NA" ${(row.extra&&row.extra.lowStockAction)==='NA'?'selected':''}>N/A</option>
-                </select>
-                ${lowStockBadge(row.extra&&row.extra.lowStockAction)}
-              </td>
-              <td>${esc(row.added_on||'')}</td>
-              <td><span class="del-link" onclick="deleteItem('${row.id}')">Delete</span></td>
-            </tr>`).join('')}
-        </tbody>
-      </table>
-    </div>
-  `, true);
-  document.getElementById('addForm').addEventListener('submit', addItem);
+<div class="table-wrap">
+<table class="datatable">
+<thead><tr><th>Item</th><th>Qty</th><th>Category</th><th>Low Stock Action</th><th>Added</th><th></th></tr></thead>
+<tbody>
+${inventory.length===0 ? `<tr><td colspan="6" style="color:var(--muted); text-align:center; padding:20px;">No items yet &mdash; add your first one above.</td></tr>` :
+inventory.map(row => `
+<tr>
+<td>${esc(row.item_name)}</td>
+<td>${esc(row.quantity)}</td>
+<td>${esc((row.extra&&row.extra.category)||'')}</td>
+<td>
+<select class="inline-select" onchange="updateLowStockAction('${row.id}', this.value)">
+<option value="" ${!(row.extra&&row.extra.lowStockAction) ? 'selected':''}>&mdash; Select &mdash;</option>
+<option value="Ordering" ${(row.extra&&row.extra.lowStockAction)==='Ordering'?'selected':''}>Ordering</option>
+<option value="NA" ${(row.extra&&row.extra.lowStockAction)==='NA'?'selected':''}>N/A</option>
+</select>
+${lowStockBadge(row.extra&&row.extra.lowStockAction)}
+</td>
+<td>${esc(row.added_on||'')}</td>
+<td><span class="del-link" onclick="deleteItem('${row.id}')">Delete</span></td>
+</tr>`).join('')}
+</tbody>
+</table>
+</div>
+`, true);
+
+document.getElementById('addForm').addEventListener('submit', addItem);
 }
 
 const ORDER_STATUSES = ['New','Confirmed','On Hold','Completed','Cancelled'];
+
 function orderStatusBadgeClass(s){
-  if(s === 'Completed') return 'green';
-  if(s === 'Cancelled') return 'red';
-  return 'blue';
+if(s === 'Completed') return 'green';
+if(s === 'Cancelled') return 'red';
+return 'blue';
 }
 
 function renderSalesModule(){
-  renderCard(`
-    ${moduleNav('sales')}
+renderCard(`
+${moduleNav('sales')}
 
-    <form id="salesAddForm" style="margin:18px 0 8px;">
-      <div class="add-form-grid">
-        <div class="field"><label>Customer</label><input type="text" id="s-customer" required></div>
-        <div class="field"><label>Item</label><input type="text" id="s-item" required></div>
-        <div class="field"><label>Qty</label><input type="number" id="s-qty" step="any" required></div>
-        <div class="field"><label>Unit Price</label><input type="number" id="s-price" step="any"></div>
-      </div>
-      <button type="submit" class="btn small-btn" style="width:auto; padding:9px 20px; margin-top:12px;">Add Sales Order</button>
-    </form>
+<form id="salesAddForm" style="margin:18px 0 8px;">
+<div class="add-form-grid">
+<div class="field"><label>Customer</label><input type="text" id="s-customer" required></div>
+<div class="field"><label>Item</label><input type="text" id="s-item" required></div>
+<div class="field"><label>Qty</label><input type="number" id="s-qty" step="any" required></div>
+<div class="field"><label>Unit Price</label><input type="number" id="s-price" step="any"></div>
+</div>
+<button type="submit" class="btn small-btn" style="width:auto; padding:9px 20px; margin-top:12px;">Add Sales Order</button>
+</form>
 
-    <div class="table-wrap">
-      <table class="datatable">
-        <thead><tr><th>Customer</th><th>Item</th><th>Qty</th><th>Value</th><th>Status</th><th>Date</th><th></th></tr></thead>
-        <tbody>
-          ${salesOrders.length===0 ? `<tr><td colspan="7" style="color:var(--muted); text-align:center; padding:20px;">No sales orders yet &mdash; add your first one above.</td></tr>` :
-            salesOrders.map(row => `
-            <tr>
-              <td>${esc(row.customer)}</td>
-              <td>${esc((row.extra&&row.extra.item)||'')}</td>
-              <td>${esc((row.extra&&row.extra.qty)||'')}</td>
-              <td>${esc(row.total_value!=null?row.total_value:'')}</td>
-              <td>
-                <select class="inline-select" onchange="updateSaleStatus('${row.id}', this.value)">
-                  ${ORDER_STATUSES.map(s=>`<option value="${s}" ${((row.extra&&row.extra.orderStatus)||'New')===s?'selected':''}>${s}</option>`).join('')}
-                </select>
-                <span class="badge ${orderStatusBadgeClass((row.extra&&row.extra.orderStatus)||'New')}">${esc((row.extra&&row.extra.orderStatus)||'New')}</span>
-              </td>
-              <td>${esc(row.entry_date||'')}</td>
-              <td><span class="del-link" onclick="deleteSale('${row.id}')">Delete</span></td>
-            </tr>`).join('')}
-        </tbody>
-      </table>
-    </div>
-  `, true);
-  document.getElementById('salesAddForm').addEventListener('submit', addSale);
+<div class="table-wrap">
+<table class="datatable">
+<thead><tr><th>Customer</th><th>Item</th><th>Qty</th><th>Value</th><th>Status</th><th>Date</th><th></th></tr></thead>
+<tbody>
+${salesOrders.length===0 ? `<tr><td colspan="7" style="color:var(--muted); text-align:center; padding:20px;">No sales orders yet &mdash; add your first one above.</td></tr>` :
+salesOrders.map(row => `
+<tr>
+<td>${esc(row.customer)}</td>
+<td>${esc((row.extra&&row.extra.item)||'')}</td>
+<td>${esc((row.extra&&row.extra.qty)||'')}</td>
+<td>${esc(row.total_value!=null?row.total_value:'')}</td>
+<td>
+<select class="inline-select" onchange="updateSaleStatus('${row.id}', this.value)">
+${ORDER_STATUSES.map(s=>`<option value="${s}" ${((row.extra&&row.extra.orderStatus)||'New')===s?'selected':''}>${s}</option>`).join('')}
+</select>
+<span class="badge ${orderStatusBadgeClass((row.extra&&row.extra.orderStatus)||'New')}">${esc((row.extra&&row.extra.orderStatus)||'New')}</span>
+</td>
+<td>${esc(row.entry_date||'')}</td>
+<td><span class="del-link" onclick="deleteSale('${row.id}')">Delete</span></td>
+</tr>`).join('')}
+</tbody>
+</table>
+</div>
+`, true);
+
+document.getElementById('salesAddForm').addEventListener('submit', addSale);
 }
 
 async function handleLogin(e){
-  e.preventDefault();
-  loginError = '';
-  const email = document.getElementById('email').value.trim();
-  const password = document.getElementById('password').value;
-  document.getElementById('loginBtn').disabled = true;
+e.preventDefault();
+loginError = '';
 
-  const { data, error } = await sb.auth.signInWithPassword({ email, password });
-  if(error){ loginError = error.message; renderLoginForm(); return; }
+const email = document.getElementById('email').value.trim();
+const password = document.getElementById('password').value;
 
-  const userId = data.user.id;
-  const { data: isAdmin } = await sb.rpc('is_platform_admin');
-  isSuperAdmin = !!isAdmin;
+document.getElementById('loginBtn').disabled = true;
 
-  if(isSuperAdmin){
-    const { data: tenants, error: tErr } = await sb.from('tenants').select('id, name, enabled_modules').order('name');
-    if(tErr){ loginError = 'Could not load companies: ' + tErr.message; renderLoginForm(); return; }
-    companies = (tenants||[]).map(t => ({ tenant_id: t.id, name: t.name, role: 'Super Admin', enabled_modules: t.enabled_modules||[] }));
-  } else {
-    const { data: memberships, error: mErr } = await sb
-      .from('memberships').select('tenant_id, role, tenants(name, enabled_modules)').eq('user_id', userId);
-    if(mErr){ loginError = 'Could not load your companies: ' + mErr.message; renderLoginForm(); return; }
-    companies = (memberships||[]).map(m => ({ tenant_id: m.tenant_id, name: m.tenants ? m.tenants.name : m.tenant_id, role: m.role, enabled_modules: (m.tenants && m.tenants.enabled_modules)||[] }));
-  }
+const { data, error } = await sb.auth.signInWithPassword({ email, password });
+if(error){ loginError = error.message; renderLoginForm(); return; }
 
-  if(companies.length === 0 && !isSuperAdmin){
-    loginError = 'Signed in, but this account is not linked to any company yet.';
-    renderLoginForm();
-    return;
-  }
+currentUser = data.user;
+const userId = currentUser.id;
 
-  if(companies.length === 1 && !isSuperAdmin){ await chooseCompany(0); }
-  else { renderCompanyPicker(); }
+const { data: isAdmin } = await sb.rpc('is_platform_admin');
+isSuperAdmin = !!isAdmin;
+
+if(isSuperAdmin){
+const { data: tenants, error: tErr } = await sb.from('tenants').select('id, name, enabled_modules').order('name');
+if(tErr){ loginError = 'Could not load companies: ' + tErr.message; renderLoginForm(); return; }
+companies = (tenants||[]).map(t => ({ tenant_id: t.id, name: t.name, role: 'Super Admin', enabled_modules: t.enabled_modules||[] }));
+} else {
+const { data: memberships, error: mErr } = await sb
+.from('memberships').select('tenant_id, role, tenants(name, enabled_modules)').eq('user_id', userId);
+if(mErr){ loginError = 'Could not load your companies: ' + mErr.message; renderLoginForm(); return; }
+companies = (memberships||[]).map(m => ({ tenant_id: m.tenant_id, name: m.tenants ? m.tenants.name : m.tenant_id, role: m.role, enabled_modules: (m.tenants && m.tenants.enabled_modules)||[] }));
+}
+
+if(companies.length === 0 && !isSuperAdmin){
+loginError = 'Signed in, but this account is not linked to any company yet.';
+renderLoginForm();
+return;
+}
+
+if(companies.length === 1 && !isSuperAdmin){ await chooseCompany(0); }
+else { renderCompanyPicker(); }
 }
 
 async function chooseCompany(i){
-  chosenCompany = companies[i];
-  const { data: locs, error } = await sb.from('locations').select('id, code, name').eq('tenant_id', chosenCompany.tenant_id).order('name');
-  if(error){ loginError = 'Could not load locations: ' + error.message; renderLoginForm(); return; }
-  locations = locs || [];
-  if(locations.length === 0){
-    loginError = chosenCompany.name + ' has no locations set up yet.';
-    renderLoginForm();
-    return;
-  }
-  if(locations.length === 1){ await chooseLocation(0); }
-  else { renderLocationPicker(); }
+chosenCompany = companies[i];
+const { data: locs, error } = await sb.from('locations').select('id, code, name').eq('tenant_id', chosenCompany.tenant_id).order('name');
+if(error){ loginError = 'Could not load locations: ' + error.message; renderLoginForm(); return; }
+locations = locs || [];
+
+if(locations.length === 0){
+loginError = chosenCompany.name + ' has no locations set up yet.';
+renderLoginForm();
+return;
+}
+
+if(locations.length === 1){ await chooseLocation(0); }
+else { renderLocationPicker(); }
 }
 
 async function chooseLocation(i){
-  chosenLocation = locations[i];
-  const firstAvailable = BUILT_MODULES.find(m => (chosenCompany.enabled_modules||[]).includes(m.id));
-  if(!firstAvailable){
-    renderCard(`<div class="msg err">${esc(chosenCompany.name)} doesn't have any built modules enabled yet.</div>${isSuperAdmin?`<div class="logout-link" onclick="renderCompanyPicker()">All Companies</div>`:''}<div class="logout-link" onclick="doLogout()">Sign out</div>`);
-    return;
-  }
-  await switchModule(firstAvailable.id);
+chosenLocation = locations[i];
+
+// Load user's accessible modules via templates
+await loadUserAccessibleModules();
+
+const firstAvailable = BUILT_MODULES.find(m => userAccessibleModules.includes(m.id));
+if(!firstAvailable){
+renderCard(`<div class="msg err">You don't have access to any modules in ${esc(chosenCompany.name)}.</div>${isSuperAdmin?`<div class="logout-link" onclick="renderCompanyPicker()">All Companies</div>`:''}<div class="logout-link" onclick="doLogout()">Sign out</div>`);
+return;
+}
+
+await switchModule(firstAvailable.id);
 }
 
 async function loadInventory(){
-  renderCard('Loading inventory...');
-  const { data, error } = await sb.from('inventory')
-    .select('id, item_name, quantity, added_on, extra')
-    .eq('tenant_id', chosenCompany.tenant_id)
-    .eq('location_id', chosenLocation.id)
-    .order('created_at', { ascending: false });
-  if(error){
-    renderCard(`<div class="msg err">Could not load inventory: ${esc(error.message)}</div><div class="logout-link" onclick="doLogout()">Sign out</div>`);
-    return;
-  }
-  inventory = data || [];
-  renderInventory();
+renderCard('Loading inventory...');
+const { data, error } = await sb.from('inventory')
+.select('id, item_name, quantity, added_on, extra')
+.eq('tenant_id', chosenCompany.tenant_id)
+.eq('location_id', chosenLocation.id)
+.order('created_at', { ascending: false });
+
+if(error){
+renderCard(`<div class="msg err">Could not load inventory: ${esc(error.message)}</div><div class="logout-link" onclick="doLogout()">Sign out</div>`);
+return;
+}
+
+inventory = data || [];
+renderInventory();
 }
 
 async function addItem(e){
-  e.preventDefault();
-  const item_name = document.getElementById('f-name').value.trim();
-  const quantity = document.getElementById('f-qty').value;
-  const category = document.getElementById('f-cat').value.trim();
-  const { error } = await sb.from('inventory').insert({
-    tenant_id: chosenCompany.tenant_id,
-    location_id: chosenLocation.id,
-    item_name, quantity,
-    added_on: new Date().toISOString().slice(0,10),
-    extra: { category }
-  });
-  if(error){ alert('Could not add item: ' + error.message); return; }
-  await loadInventory();
+e.preventDefault();
+const item_name = document.getElementById('f-name').value.trim();
+const quantity = document.getElementById('f-qty').value;
+const category = document.getElementById('f-cat').value.trim();
+
+const { error } = await sb.from('inventory').insert({
+tenant_id: chosenCompany.tenant_id,
+location_id: chosenLocation.id,
+item_name, quantity,
+added_on: new Date().toISOString().slice(0,10),
+extra: { category }
+});
+
+if(error){ alert('Could not add item: ' + error.message); return; }
+await loadInventory();
 }
 
 async function updateLowStockAction(id, value){
-  const row = inventory.find(r => r.id === id);
-  const newExtra = Object.assign({}, row ? row.extra : {}, { lowStockAction: value });
-  const { error } = await sb.from('inventory').update({ extra: newExtra }).eq('id', id);
-  if(error){ alert('Could not update: ' + error.message); return; }
-  await loadInventory();
+const row = inventory.find(r => r.id === id);
+const newExtra = Object.assign({}, row ? row.extra : {}, { lowStockAction: value });
+const { error } = await sb.from('inventory').update({ extra: newExtra }).eq('id', id);
+if(error){ alert('Could not update: ' + error.message); return; }
+await loadInventory();
 }
 
 async function loadSales(){
-  renderCard('Loading sales...');
-  const { data, error } = await sb.from('sales')
-    .select('id, entry_date, customer, total_value, extra')
-    .eq('tenant_id', chosenCompany.tenant_id)
-    .eq('location_id', chosenLocation.id)
-    .order('created_at', { ascending: false });
-  if(error){
-    renderCard(`<div class="msg err">Could not load sales: ${esc(error.message)}</div><div class="logout-link" onclick="doLogout()">Sign out</div>`);
-    return;
-  }
-  salesOrders = data || [];
-  renderSalesModule();
+renderCard('Loading sales...');
+const { data, error } = await sb.from('sales')
+.select('id, entry_date, customer, total_value, extra')
+.eq('tenant_id', chosenCompany.tenant_id)
+.eq('location_id', chosenLocation.id)
+.order('created_at', { ascending: false });
+
+if(error){
+renderCard(`<div class="msg err">Could not load sales: ${esc(error.message)}</div><div class="logout-link" onclick="doLogout()">Sign out</div>`);
+return;
+}
+
+salesOrders = data || [];
+renderSalesModule();
 }
 
 async function addSale(e){
-  e.preventDefault();
-  const customer = document.getElementById('s-customer').value.trim();
-  const item = document.getElementById('s-item').value.trim();
-  const qty = parseFloat(document.getElementById('s-qty').value) || 0;
-  const unitPrice = parseFloat(document.getElementById('s-price').value) || 0;
-  const total_value = (qty && unitPrice) ? qty * unitPrice : null;
-  const { error } = await sb.from('sales').insert({
-    tenant_id: chosenCompany.tenant_id,
-    location_id: chosenLocation.id,
-    entry_date: new Date().toISOString().slice(0,10),
-    customer, total_value,
-    extra: { item, qty, unitPrice, orderStatus: 'New' }
-  });
-  if(error){ alert('Could not add sales order: ' + error.message); return; }
-  await loadSales();
+e.preventDefault();
+const customer = document.getElementById('s-customer').value.trim();
+const item = document.getElementById('s-item').value.trim();
+const qty = parseFloat(document.getElementById('s-qty').value) || 0;
+const unitPrice = parseFloat(document.getElementById('s-price').value) || 0;
+const total_value = (qty && unitPrice) ? qty * unitPrice : null;
+
+const { error } = await sb.from('sales').insert({
+tenant_id: chosenCompany.tenant_id,
+location_id: chosenLocation.id,
+entry_date: new Date().toISOString().slice(0,10),
+customer, total_value,
+extra: { item, qty, unitPrice, orderStatus: 'New' }
+});
+
+if(error){ alert('Could not add sales order: ' + error.message); return; }
+await loadSales();
 }
 
 async function updateSaleStatus(id, value){
-  const row = salesOrders.find(r => r.id === id);
-  const newExtra = Object.assign({}, row ? row.extra : {}, { orderStatus: value });
-  const { error } = await sb.from('sales').update({ extra: newExtra }).eq('id', id);
-  if(error){ alert('Could not update: ' + error.message); return; }
-  await loadSales();
+const row = salesOrders.find(r => r.id === id);
+const newExtra = Object.assign({}, row ? row.extra : {}, { orderStatus: value });
+const { error } = await sb.from('sales').update({ extra: newExtra }).eq('id', id);
+if(error){ alert('Could not update: ' + error.message); return; }
+await loadSales();
 }
 
 async function deleteSale(id){
-  if(!confirm('Delete this sales order?')) return;
-  const { error } = await sb.from('sales').delete().eq('id', id);
-  if(error){ alert('Could not delete: ' + error.message); return; }
-  await loadSales();
+if(!confirm('Delete this sales order?')) return;
+const { error } = await sb.from('sales').delete().eq('id', id);
+if(error){ alert('Could not delete: ' + error.message); return; }
+await loadSales();
 }
 
 async function deleteItem(id){
-  if(!confirm('Delete this item?')) return;
-  const { error } = await sb.from('inventory').delete().eq('id', id);
-  if(error){ alert('Could not delete: ' + error.message); return; }
-  await loadInventory();
+if(!confirm('Delete this item?')) return;
+const { error } = await sb.from('inventory').delete().eq('id', id);
+if(error){ alert('Could not delete: ' + error.message); return; }
+await loadInventory();
 }
 
 async function doLogout(){
-  await sb.auth.signOut();
-  companies = []; chosenCompany = null; locations = []; chosenLocation = null; inventory = [];
-  loginError = '';
-  renderLoginForm();
+await sb.auth.signOut();
+companies = []; chosenCompany = null; locations = []; chosenLocation = null; inventory = [];
+currentUser = null; userAccessibleModules = [];
+loginError = '';
+renderLoginForm();
 }
 
 renderLoginForm();
 </script>
+
 </body>
 </html>
