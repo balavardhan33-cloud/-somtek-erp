@@ -7,6 +7,8 @@
 <link rel="icon" id="favicon-link" href="">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.5/JsBarcode.all.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 
@@ -760,7 +762,7 @@ const TABS = [
   {id:'quotation', num:'10', label:'Quotation', icon:'&#128221;'},
   {id:'hr', num:'11', label:'HR', icon:'&#128101;'},
   {id:'reports', num:'12', label:'Reports', icon:'&#128203;'},
-  {id:'users', num:'', label:'Users', icon:'&#128100;'}
+  {id:'users', num:'', label:'ADMIN', icon:'&#128100;'}
 ];
 
 const ROLE_TABS = {
@@ -6038,6 +6040,397 @@ function isLowStock(i){
 }
 let invSection = 'stock';
 function switchInvSection(s){ invSection = s; render(); }
+
+
+/* ===== ASSEMBLY / BOM SYSTEM ===== */
+let asmComponents = [];
+let asmDraft = {name:'', qty:'1'};
+
+function asmSaveDraft(){
+  const n = document.getElementById('asm-fg-name');
+  const q = document.getElementById('asm-fg-qty');
+  if(n) asmDraft.name = n.value;
+  if(q) asmDraft.qty = q.value;
+}
+
+function asmHandleKey(ev){
+  if(ev.key === 'Enter'){ ev.preventDefault(); asmAddComponent(); }
+}
+
+function asmAddComponent(){
+  const d = DATA[currentLocation];
+  if(!d) return;
+  const inputEl = document.getElementById('asm-scan');
+  const code = String(inputEl ? inputEl.value : '').trim().toUpperCase();
+  if(!code) return;
+  const item = findItemByCode(d, code);
+  if(!item){ alert('No item found for code: ' + code); if(inputEl) inputEl.select(); return; }
+  if(asmComponents.find(function(c){ return c.itemId === item.id; })){ alert('Component already added: ' + item.name); if(inputEl) inputEl.select(); return; }
+  asmComponents.push({itemId: item.id, itemCode: item.itemCode, name: item.name, qty: 1, available: item.qty, cost: item.cost});
+  asmSaveDraft();
+  render();
+  setTimeout(function(){ const el = document.getElementById('asm-scan'); if(el) el.focus(); }, 50);
+}
+
+function asmSetQty(idx, val){
+  if(asmComponents[idx]) asmComponents[idx].qty = parseFloat(val) || 0;
+}
+
+function asmRemoveComponent(idx){
+  asmSaveDraft();
+  asmComponents.splice(idx, 1);
+  render();
+}
+
+function asmClear(){
+  asmComponents = [];
+  asmDraft = {name:'', qty:'1'};
+  render();
+}
+
+async function submitAssembly(){
+  const d = DATA[currentLocation];
+  if(!d) return;
+  asmSaveDraft();
+  const fgName = String(asmDraft.name || '').trim();
+  const produceQty = parseInt(asmDraft.qty) || 0;
+  if(!fgName){ alert('Enter finished good name.'); return; }
+  if(produceQty < 1){ alert('Produce quantity must be at least 1.'); return; }
+  if(asmComponents.length < 1){ alert('Add at least one component (scan item codes).'); return; }
+  const bad = asmComponents.find(function(c){ return !(c.qty > 0); });
+  if(bad){ alert('Component "' + bad.name + '" has invalid quantity.'); return; }
+
+  /* Stock check */
+  const shortages = [];
+  asmComponents.forEach(function(c){
+    const item = (d.inventory || []).find(function(i){ return i.id === c.itemId; });
+    const avail = item ? (parseFloat(item.qty) || 0) : 0;
+    const need = c.qty * produceQty;
+    if(need > avail) shortages.push(c.name + ' (need ' + need + ', have ' + avail + ')');
+  });
+  if(shortages.length){ alert('Insufficient stock:\n' + shortages.join('\n')); return; }
+
+  /* Deduct components */
+  asmComponents.forEach(function(c){
+    const item = (d.inventory || []).find(function(i){ return i.id === c.itemId; });
+    if(item){
+      const avail = parseFloat(item.qty) || 0;
+      item.qty = String(avail - (c.qty * produceQty));
+    }
+  });
+
+  /* Per-unit BOM + auto cost */
+  const bom = asmComponents.map(function(c){ return {itemCode: c.itemCode, name: c.name, qty: c.qty}; });
+  let unitCost = 0;
+  asmComponents.forEach(function(c){ unitCost += (parseFloat(c.cost) || 0) * c.qty; });
+
+  /* Create or update finished good */
+  let fg = (d.inventory || []).find(function(i){ return i.isFinishedGood && String(i.name || '').trim().toLowerCase() === fgName.toLowerCase(); });
+  if(fg){
+    fg.qty = String((parseFloat(fg.qty) || 0) + produceQty);
+    fg.components = bom;
+    if(unitCost > 0) fg.cost = String(unitCost.toFixed(2));
+  } else {
+    fg = {
+      id: uid(),
+      name: fgName,
+      qty: String(produceQty),
+      minQty: '',
+      specs: 'Assembled product',
+      cost: unitCost > 0 ? String(unitCost.toFixed(2)) : '',
+      category: 'Finished Goods',
+      deadStock: 'No',
+      itemCode: nextItemCode(d),
+      isFinishedGood: true,
+      components: bom,
+      addedOn: today(),
+      addedBy: actorName()
+    };
+    d.inventory.push(fg);
+  }
+
+  /* Assembly history record */
+  if(!d.assemblies) d.assemblies = [];
+  d.assemblies.push({
+    id: uid(),
+    fgItemCode: fg.itemCode,
+    fgName: fgName,
+    producedQty: produceQty,
+    components: asmComponents.map(function(c){ return {itemCode: c.itemCode, name: c.name, qtyUsed: c.qty * produceQty}; }),
+    date: today(),
+    by: actorName()
+  });
+
+  logAudit('DATA CHANGE', 'Assembly: ' + produceQty + ' x ' + fgName + ' (' + fg.itemCode + ') from ' + asmComponents.length + ' components');
+  asmComponents = [];
+  asmDraft = {name:'', qty:'1'};
+  await saveLocation(currentLocation);
+  render();
+  alert('Assembly complete!\nFinished good: ' + fgName + '\nBarcode / Item code: ' + fg.itemCode + '\n\nPrint its label from the Barcode tab.');
+}
+
+function inventoryAssemblySection(d){
+  if(!d) return '<p style="color:var(--muted);">No data available</p>';
+  if(!d.assemblies) d.assemblies = [];
+
+  let html = secHead('&#128295;', 'Assemble Finished Good');
+  html += '<div class="panel"><div class="panel-head"><h3>New assembly</h3></div><div class="panel-body">';
+  html += '<div class="form-grid">';
+  html += '<div class="field"><label>Finished good name *</label><input type="text" id="asm-fg-name" value="' + esc(asmDraft.name) + '" placeholder="e.g. Pump Assembly 2HP" oninput="asmSaveDraft()"></div>';
+  html += '<div class="field"><label>Quantity to produce *</label><input type="number" id="asm-fg-qty" min="1" value="' + esc(asmDraft.qty) + '" oninput="asmSaveDraft()"></div>';
+  html += '<div class="field"><label>Scan / type component code + Enter</label><input type="text" id="asm-scan" placeholder="e.g. ' + esc(itemCodePrefix(currentLocation)) + '-0001" autocomplete="off" onkeydown="asmHandleKey(event)" style="font-family:monospace;"></div>';
+  html += '<button type="button" class="btn" onclick="asmAddComponent()">Add Component</button>';
+  html += '</div>';
+
+  if(asmComponents.length){
+    html += '<table style="font-size:12px; margin-top:14px;"><thead><tr><th>Code</th><th>Component</th><th>In Stock</th><th>Qty per unit</th><th></th></tr></thead><tbody>';
+    asmComponents.forEach(function(c, idx){
+      html += '<tr>';
+      html += '<td style="font-family:monospace;">' + esc(c.itemCode || '') + '</td>';
+      html += '<td>' + esc(c.name || '') + '</td>';
+      html += '<td>' + esc(c.available) + '</td>';
+      html += '<td><input type="number" min="0.01" step="any" value="' + esc(c.qty) + '" style="width:80px;" oninput="asmSetQty(' + idx + ', this.value)"></td>';
+      html += '<td><button type="button" class="icon-btn" onclick="asmRemoveComponent(' + idx + ')">&#10060;</button></td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+    html += '<div style="margin-top:14px; display:flex; gap:10px;">';
+    html += '<button type="button" class="btn" onclick="submitAssembly()">&#128295; Assemble &amp; Create Finished Good</button>';
+    html += '<button type="button" class="icon-btn" onclick="asmClear()">Clear</button>';
+    html += '</div>';
+    html += '<p style="font-size:11px; color:var(--muted); margin-top:8px;">On assemble: component stock is deducted, finished good gets its own barcode (item code), and the component list (BOM) is saved to it.</p>';
+  } else {
+    html += '<p style="color:var(--muted); margin-top:12px; font-size:12px;">Scan component barcodes (or type codes) to add them to this assembly.</p>';
+  }
+  html += '</div></div>';
+
+  /* History */
+  html += secHead('&#128220;', 'Assembly History');
+  html += '<div class="panel"><div class="panel-head"><h3>Past assemblies (' + d.assemblies.length + ')</h3></div><div class="panel-body">';
+  if(d.assemblies.length === 0){
+    html += '<p style="color:var(--muted); text-align:center; padding:20px;">No assemblies yet.</p>';
+  } else {
+    html += '<table style="font-size:12px;"><thead><tr><th>Date</th><th>FG Code</th><th>Finished Good</th><th>Qty</th><th>Components Used</th><th>By</th></tr></thead><tbody>';
+    d.assemblies.slice().reverse().forEach(function(a){
+      let compStr = (a.components || []).map(function(c){ return esc(c.name) + ' x' + esc(c.qtyUsed); }).join(', ');
+      html += '<tr>';
+      html += '<td>' + esc(a.date || '') + '</td>';
+      html += '<td style="font-family:monospace; font-weight:600;">' + esc(a.fgItemCode || '') + '</td>';
+      html += '<td>' + esc(a.fgName || '') + '</td>';
+      html += '<td style="text-align:center;">' + esc(a.producedQty) + '</td>';
+      html += '<td style="max-width:340px; white-space:normal;">' + compStr + '</td>';
+      html += '<td>' + esc(a.by || '') + '</td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+  }
+  html += '</div></div>';
+  return html;
+}
+
+/* ===== BARCODE SYSTEM ===== */
+let bcScanner = null;
+
+function findItemByCode(d, code){
+  const c = String(code || '').trim().toUpperCase();
+  if(!c) return null;
+  return (d.inventory || []).find(function(i){
+    if(!i) return false;
+    if(String(i.itemCode || '').trim().toUpperCase() === c) return true;
+    if(String(i.barcode || '').trim().toUpperCase() === c) return true;
+    return false;
+  }) || null;
+}
+
+async function assignBarcode(itemId){
+  const d = DATA[currentLocation];
+  if(!d) return;
+  const item = (d.inventory || []).find(function(i){ return i.id === itemId; });
+  if(!item) return;
+  const current = item.barcode || '';
+  const val = prompt('Scan or type barcode for:\n' + item.name + '\n\n(Leave empty to remove)', current);
+  if(val === null) return;
+  const code = String(val).trim();
+  if(code){
+    const dup = (d.inventory || []).find(function(i){
+      return i.id !== itemId && (String(i.barcode || '').trim().toUpperCase() === code.toUpperCase() || String(i.itemCode || '').trim().toUpperCase() === code.toUpperCase());
+    });
+    if(dup){ alert('This barcode is already used by: ' + dup.name + ' (' + (dup.barcode || dup.itemCode) + ')'); return; }
+  }
+  item.barcode = code;
+  logAudit('DATA CHANGE', 'Barcode ' + (code ? 'assigned to' : 'removed from') + ' ' + item.name + (code ? ': ' + code : ''));
+  await saveLocation(currentLocation);
+  render();
+}
+
+function inventoryBarcodeSection(d){
+  if(!d) return '<p style="color:var(--muted);">No data available</p>';
+  const items = d.inventory || [];
+
+  let html = secHead('&#128290;', 'Barcode - Scan Lookup');
+  html += '<div class="panel"><div class="panel-head"><h3>Scan or type item code</h3></div><div class="panel-body">';
+  html += '<div style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;">';
+  html += '<div class="field" style="flex:1; min-width:220px;"><label>Item Code (USB scanner types here + Enter)</label>';
+  html += '<input type="text" id="bc-scan-input" placeholder="e.g. ' + esc(itemCodePrefix(currentLocation)) + '-0001" autocomplete="off" onkeydown="bcHandleKey(event)" style="font-size:16px; font-family:monospace;"></div>';
+  html += '<button type="button" class="btn" onclick="barcodeLookup()">Lookup</button>';
+  html += '<button type="button" class="btn" id="bc-cam-btn" onclick="startCameraScan()">&#128247; Camera Scan</button>';
+  html += '</div>';
+  html += '<div id="bc-camera-wrap" style="display:none; margin-top:14px;">';
+  html += '<div id="bc-camera" style="max-width:360px;"></div>';
+  html += '<button type="button" class="btn" style="margin-top:8px;" onclick="stopCameraScan()">Stop Camera</button>';
+  html += '</div>';
+  html += '<div id="bc-result" style="margin-top:14px;"></div>';
+  html += '</div></div>';
+
+  html += secHead('&#128424;&#65039;', 'Barcode Labels');
+  html += '<div class="panel"><div class="panel-head"><h3>Print labels (' + items.length + ' items)</h3>';
+  html += '<div class="panel-head-actions"><button type="button" class="export-btn" onclick="printBarcodeLabels(null)">&#128424;&#65039; Print All Labels</button></div></div>';
+  html += '<div class="panel-body">';
+  if(items.length === 0){
+    html += '<p style="color:var(--muted); text-align:center; padding:20px;">No inventory items yet.</p>';
+  } else {
+    html += '<table style="font-size:12px;"><thead><tr><th>Item Code</th><th>Barcode</th><th>Item</th><th>Qty</th><th>Category</th><th></th></tr></thead><tbody>';
+    items.forEach(function(i){
+      html += '<tr>';
+      html += '<td style="font-family:monospace; font-weight:600;">' + esc(i.itemCode || '') + '</td>';
+      html += '<td style="font-family:monospace;">' + (i.barcode ? esc(i.barcode) : '<span style="color:var(--muted);">-</span>') + '</td>';
+      html += '<td style="max-width:300px; white-space:normal;">' + esc(i.name || '') + '</td>';
+      html += '<td>' + esc(i.qty) + '</td>';
+      html += '<td>' + esc(i.category || '') + '</td>';
+      html += '<td><button type="button" class="icon-btn" onclick="assignBarcode(' + "'" + i.id + "'" + ')" title="Assign or edit barcode">&#128290; Assign</button> <button type="button" class="icon-btn" onclick="printBarcodeLabels(' + "'" + i.id + "'" + ')" title="Print label">&#128424;&#65039; Label</button></td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+  }
+  html += '</div></div>';
+  return html;
+}
+
+function bcHandleKey(ev){
+  if(ev.key === 'Enter'){ ev.preventDefault(); barcodeLookup(); }
+}
+
+function barcodeLookup(codeArg){
+  const d = DATA[currentLocation];
+  if(!d) return;
+  const inputEl = document.getElementById('bc-scan-input');
+  const code = String(codeArg != null ? codeArg : (inputEl ? inputEl.value : '')).trim().toUpperCase();
+  const out = document.getElementById('bc-result');
+  if(!out) return;
+  if(!code){ out.innerHTML = ''; return; }
+  const item = findItemByCode(d, code);
+  if(!item){
+    out.innerHTML = '<div class="panel" style="border-color:var(--danger);"><div class="panel-body" style="color:var(--danger);">No item found for code <b>' + esc(code) + '</b></div></div>';
+    if(inputEl){ inputEl.select(); }
+    return;
+  }
+  const low = isLowStockFlag(item) ? ' <span style="color:var(--danger); font-weight:700;">(LOW STOCK)</span>' : '';
+  let h = '<div class="panel" style="border-color:var(--accent-2);"><div class="panel-body">';
+  h += '<div style="display:flex; gap:20px; flex-wrap:wrap; align-items:center;">';
+  h += '<svg id="bc-result-svg"></svg>';
+  h += '<div>';
+  h += '<div style="font-size:16px; font-weight:700;">' + esc(item.name) + '</div>';
+  h += '<div style="font-family:monospace; color:var(--muted); margin:4px 0;">' + esc(item.itemCode || '') + (item.barcode ? ' &middot; Barcode: ' + esc(item.barcode) : '') + '</div>';
+  h += '<div>Qty: <b style="font-size:15px;">' + esc(item.qty) + '</b>' + low + '</div>';
+  h += '<div style="font-size:12px; color:var(--muted); margin-top:4px;">Cost: ' + esc(item.cost || '-') + ' &middot; Category: ' + esc(item.category || '-') + (item.specs ? ' &middot; ' + esc(item.specs) : '') + '</div>';
+  if(item.isFinishedGood && item.components && item.components.length){
+    h += '<div style="margin-top:10px;"><span style="background:var(--accent-2); color:#fff; padding:2px 10px; border-radius:10px; font-size:11px; font-weight:700;">FINISHED GOOD</span></div>';
+    h += '<div style="margin-top:8px; font-size:12px; font-weight:700;">Components used per unit:</div>';
+    h += '<table style="font-size:12px; margin-top:4px;"><thead><tr><th>Code</th><th>Component</th><th>Qty</th></tr></thead><tbody>';
+    item.components.forEach(function(c){
+      h += '<tr><td style="font-family:monospace;">' + esc(c.itemCode || '') + '</td><td>' + esc(c.name || '') + '</td><td>' + esc(c.qty) + '</td></tr>';
+    });
+    h += '</tbody></table>';
+  }
+  h += '<button type="button" class="icon-btn" style="margin-top:8px;" onclick="printBarcodeLabels(' + "'" + item.id + "'" + ')">&#128424;&#65039; Print Label</button>';
+  h += '</div></div></div></div>';
+  out.innerHTML = h;
+  try {
+    if(typeof JsBarcode !== 'undefined' && (item.barcode || item.itemCode)){
+      JsBarcode('#bc-result-svg', item.barcode || item.itemCode, {format:'CODE128', width:2, height:50, fontSize:12, margin:4});
+    }
+  } catch(e){ console.error('Barcode render error:', e); }
+  if(inputEl){ inputEl.select(); }
+}
+
+function startCameraScan(){
+  if(typeof Html5Qrcode === 'undefined'){ alert('Camera scan library not loaded. Check internet connection and refresh.'); return; }
+  const wrap = document.getElementById('bc-camera-wrap');
+  if(wrap) wrap.style.display = 'block';
+  if(bcScanner) return;
+  bcScanner = new Html5Qrcode('bc-camera');
+  bcScanner.start(
+    {facingMode: 'environment'},
+    {fps: 10, qrbox: {width: 260, height: 140}},
+    function(decodedText){
+      const inputEl = document.getElementById('bc-scan-input');
+      if(inputEl) inputEl.value = decodedText;
+      stopCameraScan();
+      barcodeLookup(decodedText);
+    },
+    function(){ /* per-frame decode misses are normal; ignore */ }
+  ).catch(function(err){
+    alert('Unable to start camera: ' + err);
+    bcScanner = null;
+    if(wrap) wrap.style.display = 'none';
+  });
+}
+
+function stopCameraScan(){
+  const wrap = document.getElementById('bc-camera-wrap');
+  if(bcScanner){
+    bcScanner.stop().then(function(){
+      bcScanner.clear();
+      bcScanner = null;
+      if(wrap) wrap.style.display = 'none';
+    }).catch(function(){
+      bcScanner = null;
+      if(wrap) wrap.style.display = 'none';
+    });
+  } else {
+    if(wrap) wrap.style.display = 'none';
+  }
+}
+
+function printBarcodeLabels(itemId){
+  if(typeof JsBarcode === 'undefined'){ alert('Barcode library not loaded. Check internet connection and refresh.'); return; }
+  const d = DATA[currentLocation];
+  if(!d) return;
+  let items = (d.inventory || []).filter(function(i){ return i && (i.barcode || i.itemCode); });
+  if(itemId) items = items.filter(function(i){ return i.id === itemId; });
+  if(items.length === 0){ alert('No items with item codes to print.'); return; }
+
+  /* Render barcodes to SVG in a hidden container, then copy HTML into print window */
+  let labelsHtml = '';
+  const tmp = document.createElement('div');
+  tmp.style.position = 'fixed';
+  tmp.style.left = '-9999px';
+  document.body.appendChild(tmp);
+  items.forEach(function(i, idx){
+    const svgId = 'bc-tmp-' + idx;
+    tmp.innerHTML = '<svg id="' + svgId + '"></svg>';
+    try {
+      JsBarcode('#' + svgId, i.barcode || i.itemCode, {format:'CODE128', width:1.6, height:44, fontSize:11, margin:2});
+      const svgHtml = tmp.innerHTML;
+      labelsHtml += '<div class="lbl"><div class="lbl-name">' + esc(i.name || '').substring(0, 48) + '</div>' + svgHtml + '</div>';
+    } catch(e){ console.error('Label error for', i.itemCode, e); }
+  });
+  document.body.removeChild(tmp);
+
+  const w = window.open('', '_blank');
+  if(!w){ alert('Popup blocked. Please allow popups for label printing.'); return; }
+  w.document.write('<html><head><title>Barcode Labels - ' + esc(currentLocation) + '</title><style>' +
+    'body{font-family:Arial,sans-serif; margin:8mm;}' +
+    '.sheet{display:flex; flex-wrap:wrap; gap:4mm;}' +
+    '.lbl{width:63mm; height:34mm; border:1px dashed #bbb; padding:2mm; box-sizing:border-box; text-align:center; overflow:hidden; page-break-inside:avoid;}' +
+    '.lbl-name{font-size:9pt; font-weight:bold; margin-bottom:1mm; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}' +
+    '.lbl svg{max-width:100%; height:auto;}' +
+    '@media print{.lbl{border:none;}}' +
+    '</style></head><body><div class="sheet">' + labelsHtml + '</div>' +
+    '<scr' + 'ipt>window.onload=function(){window.print();}</scr' + 'ipt></body></html>');
+  w.document.close();
+}
+
 function renderInventory(){
   const d = DATA[currentLocation];
   invStampDates(d);
@@ -6053,6 +6446,8 @@ function renderInventory(){
     <button type="button" class="acct-switch-btn ${invSection==='aging'?'active':''}" onclick="switchInvSection('aging')">&#9203; Aging Stock${agingStock.length?` (${agingStock.length})`:''}</button>
     <button type="button" class="acct-switch-btn ${invSection==='low'?'active':''}" onclick="switchInvSection('low')">&#128683; Low Stock${lowStockList.length?` (${lowStockList.length})`:''}</button>
     <button type="button" class="acct-switch-btn ${invSection==='dead'?'active':''}" onclick="switchInvSection('dead')">&#9888;&#65039; Dead Stock${deadStockList.length?` (${deadStockList.length})`:''}</button>
+    <button type="button" class="acct-switch-btn ${invSection==='barcode'?'active':''}" onclick="switchInvSection('barcode')">&#128290; Barcode</button>
+    <button type="button" class="acct-switch-btn ${invSection==='assembly'?'active':''}" onclick="switchInvSection('assembly')">&#128295; Assembly</button>
   </div>`;
   const stockSection = `
   ${secHead('&#10133;', 'New Entry')}
@@ -6066,6 +6461,7 @@ function renderInventory(){
       <div class="field"><label>Specifications</label><input type="text" id="inv-specs" placeholder="Optional"></div>
       <div class="field"><label>Cost</label><input type="number" step="0.01" id="inv-cost" placeholder="Cost per item"></div>
       <div class="field"><label>Category</label><input type="text" id="inv-cat" placeholder="Optional"></div>
+      <div class="field"><label>Barcode <span style="color:var(--muted); font-weight:400;">(scan product barcode)</span></label><input type="text" id="inv-barcode" placeholder="Optional - scan or type" autocomplete="off"></div>
       <div class="field"><label>Low Stock</label>
         <select id="inv-deadstock">
           <option value="No" selected>No</option>
@@ -6156,7 +6552,7 @@ function renderInventory(){
   </tbody>${totalFootRow(8, 'Total Aging Stock Value (all items)', sumTotal(agingSorted,'qty','cost'))}</table>
   ${showMoreBar('inventoryAging', agingSorted.length)}
   </div></div>`;
-  const sectionMap = { aging: agingSection, low: lowSection, dead: deadSection };
+  const sectionMap = { aging: agingSection, low: lowSection, dead: deadSection, barcode: inventoryBarcodeSection(d), assembly: inventoryAssemblySection(d) };
   return `
   ${tabHeader(currentLocation, 'Inventory')}
   ${switcher}
@@ -6185,6 +6581,7 @@ async function addInventory(e){
     specs: document.getElementById('inv-specs').value.trim(),
     cost: document.getElementById('inv-cost').value.trim(),
     category: document.getElementById('inv-cat').value.trim(),
+    barcode: document.getElementById('inv-barcode').value.trim(),
     deadStock: document.getElementById('inv-deadstock').value || 'No',
     itemCode: nextItemCode(DATA[currentLocation]),
     addedOn: today(),
@@ -7152,12 +7549,17 @@ async function deleteSales(id){
 
 /* ---------------- HR ---------------- */
 let hrSection = 'employees';
-function switchHrSection(sec){ hrSection = sec; render(); }
+function switchHrSection(sec){ 
+  if(sec) hrSection = sec;
+  render(); 
+}
 function hrEnsure(d){
   d.employees = d.employees || [];
   d.attendance = d.attendance || [];
   d.leaves = d.leaves || [];
   d.salaries = d.salaries || [];
+  d.leave_balance = d.leave_balance || [];
+  d.leave_requests = d.leave_requests || [];
   if(!d.hrInfo || typeof d.hrInfo !== 'object' || Array.isArray(d.hrInfo)) d.hrInfo = {};
   ['shifts','holidays','leavePolicies'].forEach(k=>{ if(typeof d.hrInfo[k] !== 'string') d.hrInfo[k] = ''; });
 }
@@ -7249,25 +7651,37 @@ function hrEmployeeOptions(selected){
     active.map(e=>`<option value="${esc(e.name)}" ${selected===e.name?'selected':''}>${esc(e.name)}${e.designation?' ('+esc(e.designation)+')':''}</option>`).join('');
 }
 function renderHR(){
-  const d = DATA[currentLocation];
-  hrEnsure(d);
-  const sections = {
-    employees: hrEmployeesSection(d),
-    attendance: hrAttendanceSection(d),
-    leave: hrLeaveSection(d),
-    salary: hrSalarySection(d),
-    info: hrInfoSection(d)
-  };
-  return `
-  ${tabHeader(currentLocation, 'HR')}
-  <div style="display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap;">
-    <button type="button" class="acct-switch-btn ${hrSection==='employees'?'active':''}" onclick="switchHrSection('employees')">&#128101; Employees</button>
-    <button type="button" class="acct-switch-btn ${hrSection==='attendance'?'active':''}" onclick="switchHrSection('attendance')">&#128197; Attendance</button>
-    <button type="button" class="acct-switch-btn ${hrSection==='leave'?'active':''}" onclick="switchHrSection('leave')">&#127796; Leave</button>
-    <button type="button" class="acct-switch-btn ${hrSection==='salary'?'active':''}" onclick="switchHrSection('salary')">&#128181; Salary</button>
-    <button type="button" class="acct-switch-btn ${hrSection==='info'?'active':''}" onclick="switchHrSection('info')">&#8505;&#65039; Company Info</button>
-  </div>
-  ${sections[hrSection] || sections.employees}`;
+  try {
+    const d = DATA[currentLocation];
+    if(!d) return '<p style="color:var(--muted);">No data available</p>';
+    hrEnsure(d);
+    
+    const sections = {
+      employees: (() => { try { return hrEmployeesSection(d); } catch(e) { console.error('Error rendering Employees:', e); return '<p style="color:var(--danger);">Error loading Employees section</p>'; }})(),
+      balance: (() => { try { return hrLeaveBalanceSection(d); } catch(e) { console.error('Error rendering Leave Balance:', e); return '<p style="color:var(--danger);">Error loading Leave Balance section</p>'; }})(),
+      requests: (() => { try { return hrLeaveRequestsSection(d); } catch(e) { console.error('Error rendering Leave Requests:', e); return '<p style="color:var(--danger);">Error loading Leave Requests section</p>'; }})(),
+      attendance: (() => { try { return hrAttendanceSection(d); } catch(e) { console.error('Error rendering Attendance:', e); return '<p style="color:var(--danger);">Error loading Attendance section</p>'; }})(),
+      leave: (() => { try { return hrLeaveSection(d); } catch(e) { console.error('Error rendering Leave:', e); return '<p style="color:var(--danger);">Error loading Leave section</p>'; }})(),
+      salary: (() => { try { return hrSalarySection(d); } catch(e) { console.error('Error rendering Salary:', e); return '<p style="color:var(--danger);">Error loading Salary section</p>'; }})(),
+      info: (() => { try { return hrInfoSection(d); } catch(e) { console.error('Error rendering Company Info:', e); return '<p style="color:var(--danger);">Error loading Company Info section</p>'; }})()
+    };
+    
+    return `
+    ${tabHeader(currentLocation, 'HR')}
+    <div style="display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap;">
+      <button type="button" class="acct-switch-btn ${hrSection==='employees'?'active':''}" onclick="switchHrSection('employees')">&#128101; Employees</button>
+      <button type="button" class="acct-switch-btn ${hrSection==='balance'?'active':''}" onclick="switchHrSection('balance')">💰 Leave Balance</button>
+      <button type="button" class="acct-switch-btn ${hrSection==='requests'?'active':''}" onclick="switchHrSection('requests')">📋 Leave Requests</button>
+      <button type="button" class="acct-switch-btn ${hrSection==='attendance'?'active':''}" onclick="switchHrSection('attendance')">📅 Attendance</button>
+      <button type="button" class="acct-switch-btn ${hrSection==='leave'?'active':''}" onclick="switchHrSection('leave')">🏖️ Leave</button>
+      <button type="button" class="acct-switch-btn ${hrSection==='salary'?'active':''}" onclick="switchHrSection('salary')">&#128181; Salary</button>
+      <button type="button" class="acct-switch-btn ${hrSection==='info'?'active':''}" onclick="switchHrSection('info')">&#8505;&#65039; Company Info</button>
+    </div>
+    ${sections[hrSection] || sections.employees}`;
+  } catch(e) {
+    console.error('Error rendering HR tab:', e);
+    return `<p style="color:var(--danger); padding:20px;">Error loading HR tab. Check console for details.</p>`;
+  }
 }
 
 /* ----- Employees ----- */
@@ -7283,6 +7697,8 @@ function hrEmployeesSection(d){
       <div class="field"><label>Employee code</label><input type="text" id="hr-emp-code" value="${nextEmpCode(d)}" readonly style="background:var(--panel-2);"></div>
       <div class="field"><label>Name</label><input type="text" id="hr-emp-name" required></div>
       <div class="field"><label>Designation</label><input type="text" id="hr-emp-desig" placeholder="Optional"></div>
+      <div class="field"><label>Department</label><input type="text" id="hr-emp-dept" placeholder="Optional"></div>
+      <div class="field"><label>Reporting Manager</label><input type="text" id="hr-emp-mgr" placeholder="Optional"></div>
       <div class="field"><label>Mobile</label><input type="text" id="hr-emp-mobile" placeholder="Optional"></div>
       <div class="field"><label>Email</label><input type="email" id="hr-emp-email" placeholder="Optional"></div>
       <div class="field"><label>Date of Birth</label><input type="date" id="hr-emp-dob"></div>
@@ -7297,10 +7713,10 @@ function hrEmployeesSection(d){
   <div class="panel"><div class="panel-head"><h3>Employee register</h3><div class="panel-head-actions">${importBtn('employees')}${exportBtn('exportEmployees')}</div></div>
   <div class="panel-body">
   ${tableToolbar('employees', d.employees)}
-  <table><thead><tr><th>Code</th><th>Name</th><th>Designation</th><th>Mobile</th><th>Email</th><th>DOB</th><th>Join Date</th><th>Status</th>${cfHeaders('employees')}<th>Added By</th><th></th></tr></thead><tbody>
+  <table><thead><tr><th>Code</th><th>Name</th><th>Designation</th><th>Department</th><th>Reporting Manager</th><th>Mobile</th><th>Join Date</th><th>Status</th>${cfHeaders('employees')}<th>Added By</th><th></th></tr></thead><tbody>
   ${rows.length===0 ? noMatchRow(10, d.employees.length) :
     rows.map(r=>`<tr>
-      <td>${esc(r.code)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.name)}</td><td>${esc(r.designation||'')}</td><td>${esc(r.mobile||'')}</td><td>${esc(r.email||'')}</td><td>${fd(r.dob)}</td><td>${fd(r.joinDate)}</td>
+      <td>${esc(r.code)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.name)}</td><td>${esc(r.designation||'')}</td><td>${esc(r.department||'')}</td><td>${esc(r.reporting_manager||'')}</td><td>${esc(r.mobile||'')}</td><td>${fd(r.joinDate)}</td>
       <td>
         <select class="status-select ${(r.status||'Active')==='Active'?'st-delivered':'st-rejected'}" onchange="updateEmployeeStatus('${r.id}', this.value)">
           <option value="Active" ${(r.status||'Active')==='Active'?'selected':''}>Active</option>
@@ -7322,6 +7738,8 @@ async function addEmployee(e){
     code: document.getElementById('hr-emp-code').value,
     name: document.getElementById('hr-emp-name').value.trim(),
     designation: document.getElementById('hr-emp-desig').value.trim(),
+    department: document.getElementById('hr-emp-dept').value.trim(),
+    reporting_manager: document.getElementById('hr-emp-mgr').value.trim(),
     mobile: document.getElementById('hr-emp-mobile').value.trim(),
     email: document.getElementById('hr-emp-email').value.trim(),
     dob: document.getElementById('hr-emp-dob').value,
@@ -7349,8 +7767,8 @@ async function deleteEmployee(id){
 }
 function exportEmployees(){
   const d = DATA[currentLocation];
-  const headers = ['Code','Name','Designation','Mobile','Email','DOB','Join Date','Monthly Salary','Address','Status','Added By'];
-  const rows = (d.employees||[]).map(r=>[r.code, r.name, r.designation||'', r.mobile||'', r.email||'', r.dob||'', r.joinDate||'', r.salary||'', r.address||'', r.status||'Active', r.addedBy]);
+  const headers = ['Code','Name','Designation','Department','Reporting Manager','Mobile','Email','DOB','Join Date','Monthly Salary','Address','Status','Added By'];
+  const rows = (d.employees||[]).map(r=>[r.code, r.name, r.designation||'', r.department||'', r.reporting_manager||'', r.mobile||'', r.email||'', r.dob||'', r.joinDate||'', r.salary||'', r.address||'', r.status||'Active', r.addedBy]);
   cfExportAppend('employees', d.employees||[], headers, rows);
   exportToExcel(currentLocation+'_Employees', headers, rows);
 }
@@ -7655,6 +8073,380 @@ function exportLeaves(){
   const rows = (d.leaves||[]).map(r=>[r.employee, r.from, r.to, r.days, r.type, r.reason||'', r.status||'Pending', r.addedBy]);
   cfExportAppend('leaves', d.leaves||[], headers, rows);
   exportToExcel(currentLocation+'_Leaves', headers, rows);
+}
+
+
+/* ===== LEAVE BALANCE & REQUEST WORKFLOW ===== */
+
+function calculateEarnedLeave(d, empId){
+  if(!d || !empId) return 0;
+  /* Calculate earned leave: 1 day per 15 days worked in current month */
+  const now = new Date();
+  const currentMonth = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+  const attendance = (d.attendance || []).filter(a => {
+    const aDate = a.date ? a.date.substring(0, 7) : '';
+    return aDate === currentMonth && a.employee === empId && a.status === 'Present';
+  });
+  /* 1 earned leave for every 15 working days */
+  return Math.floor(attendance.length / 15);
+}
+
+function getLeaveBalance(d, empId){
+  if(!d.leave_balance) d.leave_balance = [];
+  let balance = d.leave_balance.find(x => x.emp_id === empId);
+  if(!balance){
+    const emp = (d.employees || []).find(e => e.id === empId);
+    if(emp){
+      balance = {
+        emp_id: empId,
+        emp_name: emp.name,
+        earned_leave: 0,
+        used_leave: 0,
+        balance: 0,
+        last_updated: new Date().toISOString()
+      };
+      d.leave_balance.push(balance);
+    }
+  }
+  return balance || {};
+}
+
+function updateLeaveBalance(d, empId){
+  if(!d || !empId) return;
+  const balance = getLeaveBalance(d, empId);
+  if(!balance || !balance.emp_id) return;
+  
+  /* Recalculate earned leave */
+  balance.earned_leave = calculateEarnedLeave(d, empId);
+  
+  /* Recalculate used leave from approved leaves */
+  const approved = (d.leaves || []).filter(l => 
+    l.employee === balance.emp_name && l.status === 'Approved'
+  );
+  balance.used_leave = approved.reduce((sum, l) => sum + (parseInt(l.days) || 0), 0);
+  
+  /* Calculate remaining balance */
+  balance.balance = Math.max(0, balance.earned_leave - balance.used_leave);
+  balance.last_updated = new Date().toISOString();
+}
+
+function hrLeaveBalanceSection(d){
+  if(!d) return '<p style="color:var(--muted);">No data available</p>';
+  hrEnsure(d);
+  const isAdminUser = isAdmin();
+  
+  /* Recalculate all balances */
+  try {
+    (d.employees || []).forEach(emp => {
+      if(emp && emp.id) updateLeaveBalance(d, emp.id);
+    });
+  } catch(e) {
+    console.error('Error calculating leave balance:', e);
+  }
+  
+  const balances = d.leave_balance || [];
+  
+  return `
+  ${secHead('💰', 'Leave Balance')}
+  <div class="panel"><div class="panel-head"><h3>Employee Leave Balance Summary</h3>
+  <div class="panel-head-actions">
+    ${isAdminUser ? '<button type="button" class="export-btn" onclick="exportLeaveBalance()">📊 Export</button>' : ''}
+  </div></div>
+  <div class="panel-body">
+  ${balances.length === 0 ? '<p style="color:var(--muted); text-align:center; padding:20px;">Add employees in the Employees section to see leave balance.</p>' : `
+  <table><thead><tr><th>Employee</th><th>Earned Leave</th><th>Used Leave</th><th>Remaining Balance</th></tr></thead><tbody>
+  ${balances.map(b => `<tr>
+    <td style="font-family:'IBM Plex Sans',sans-serif; font-weight:600;">${esc(b.emp_name)}</td>
+    <td style="text-align:center; font-weight:600; color:var(--accent-2);">${b.earned_leave}</td>
+    <td style="text-align:center; color:var(--danger);">${b.used_leave}</td>
+    <td style="text-align:center; font-weight:700; color:var(--success); font-size:14px;">${b.balance}</td>
+  </tr>`).join('')}
+  </tbody></table>
+  `}
+  <p style="margin-top:16px; font-size:11px; color:var(--muted);">
+    <b>Earned Leave:</b> 1 day per 15 working days in the month | 
+    <b>Used Leave:</b> Total approved leave days | 
+    <b>Balance:</b> Remaining leave available
+  </p>
+  </div></div>
+  `;
+}
+
+function hrLeaveRequestsSection(d){
+  if(!d) return '<p style="color:var(--muted);">No data available</p>';
+  hrEnsure(d);
+  const isAdminUser = isAdmin();
+  const currentUserEmpName = session ? session.name : '';
+  
+  /* Get current employee details */
+  const currentEmp = (d.employees || []).find(e => e && e.name === currentUserEmpName);
+  const empId = currentEmp ? currentEmp.id : '';
+  const empDept = currentEmp ? currentEmp.department || 'N/A' : 'N/A';
+  const empManager = currentEmp ? currentEmp.reporting_manager || 'N/A' : 'N/A';
+  
+  const myRequests = (d.leave_requests || []).filter(r => 
+    r && (isAdminUser || r.emp_name === currentUserEmpName)
+  );
+  
+  const formHTML = `<form onsubmit="return submitLeaveRequest(event)">
+    <div class="form-grid" style="grid-template-columns: repeat(2, 1fr); gap: 12px;">
+      <div class="field"><label>Employee Name</label><input type="text" value="${esc(currentUserEmpName)}" readonly style="background:var(--panel-2);"></div>
+      <div class="field"><label>Employee ID</label><input type="text" value="${esc(empId)}" readonly style="background:var(--panel-2);"></div>
+      <div class="field"><label>Department</label><input type="text" value="${esc(empDept)}" readonly style="background:var(--panel-2);"></div>
+      <div class="field"><label>Reporting Manager</label><input type="text" value="${esc(empManager)}" readonly style="background:var(--panel-2);"></div>
+      <div class="field"><label>Leave Type *</label>
+        <select id="lr-type" required>
+          <option value="">Select type</option>
+          <option value="Casual">Casual Leave</option>
+          <option value="Sick">Sick Leave</option>
+          <option value="Earned">Earned Leave</option>
+          <option value="Unpaid">Unpaid Leave</option>
+          <option value="Maternity">Maternity Leave</option>
+          <option value="Paternity">Paternity Leave</option>
+        </select>
+      </div>
+      <div class="field"><label>From Date *</label><input type="date" id="lr-from" required oninput="lrCalcDays()"></div>
+      <div class="field"><label>To Date *</label><input type="date" id="lr-to" required oninput="lrCalcDays()"></div>
+      <div class="field"><label>Duration (Days) *</label><input type="number" id="lr-days" readonly style="background:var(--panel-2); font-weight:600;" value="0"></div>
+      <div class="field"><label>Half Day</label>
+        <select id="lr-half-day">
+          <option value="">No</option>
+          <option value="First Half">First Half</option>
+          <option value="Second Half">Second Half</option>
+        </select>
+      </div>
+      <div class="field" style="grid-column:1/-1;"><label>Reason *</label><textarea id="lr-reason" placeholder="Provide detailed reason for leave request" required style="min-height:80px;"></textarea></div>
+      <div class="field" style="grid-column:1/-1;"><label>Attachment (Optional)</label><input type="file" id="lr-attachment" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" style="padding:8px;"></div>
+      <button type="submit" class="btn" style="grid-column:1/-1;">Submit Leave Request</button>
+    </div>
+  </form>`;
+  
+  let tableHTML = '';
+  if(myRequests.length === 0) {
+    tableHTML = '<p style="color:var(--muted); text-align:center; padding:20px;">No leave requests yet.</p>';
+  } else {
+    tableHTML = '<table style="width:100%; font-size:12px; border-collapse:collapse;"><thead><tr><th>Employee</th><th>ID</th><th>Dept</th><th>From</th><th>To</th><th>Days</th><th>Type</th><th>Half Day</th><th>Status</th><th>Date</th>';
+    if(isAdminUser) tableHTML += '<th>Manager</th><th>Action</th>';
+    tableHTML += '</tr></thead><tbody>';
+    
+    myRequests.slice().reverse().forEach(r => {
+      tableHTML += '<tr>';
+      tableHTML += '<td>' + esc(r.emp_name || '') + '</td>';
+      tableHTML += '<td style="font-size:11px;">' + esc(r.emp_id || '') + '</td>';
+      tableHTML += '<td>' + esc(r.department || '') + '</td>';
+      tableHTML += '<td>' + (r.from_date || '') + '</td>';
+      tableHTML += '<td>' + (r.to_date || '') + '</td>';
+      tableHTML += '<td style="text-align:center; font-weight:600;">' + (r.days || 0) + '</td>';
+      tableHTML += '<td>' + esc(r.leave_type || '') + '</td>';
+      tableHTML += '<td>' + esc(r.half_day || 'No') + '</td>';
+      tableHTML += '<td>' + leaveStatusBadge(r.status || 'Draft') + '</td>';
+      tableHTML += '<td style="font-size:11px;">' + (r.requested_on ? fd(r.requested_on.split('T')[0]) : '') + '</td>';
+      
+      if(isAdminUser) {
+        tableHTML += '<td>' + esc(r.manager || '') + '</td>';
+        tableHTML += '<td>';
+        if(r.status === 'Pending') {
+          tableHTML += '<select onchange="updateLeaveRequestStatus(\'' + r.id + '\', this.value)" style="padding:4px 8px; font-size:11px;">';
+          tableHTML += '<option value="Pending" selected>Pending</option>';
+          tableHTML += '<option value="Approved">Approved</option>';
+          tableHTML += '<option value="Rejected">Rejected</option>';
+          tableHTML += '<option value="Cancelled">Cancelled</option>';
+          tableHTML += '</select>';
+        } else {
+          tableHTML += '<span style="color:var(--muted); font-size:10px;">' + r.status + '</span>';
+        }
+        tableHTML += '</td>';
+      }
+      tableHTML += '</tr>';
+    });
+    
+    tableHTML += '</tbody></table>';
+  }
+  
+  return secHead('📋', 'Leave Requests') +
+    '<div class="panel"><div class="panel-head"><h3>Submit New Leave Request</h3></div><div class="panel-body">' +
+    formHTML +
+    '</div></div>' +
+    secHead('📌', 'My Requests') +
+    '<div class="panel"><div class="panel-head"><h3>' + (isAdminUser ? 'All Leave Requests' : 'Your Leave Requests') + '</h3>' +
+    '<div class="panel-head-actions">' +
+    (isAdminUser ? '<button type="button" class="export-btn" onclick="exportLeaveRequests()">📊 Export</button>' : '') +
+    '</div></div><div class="panel-body">' +
+    tableHTML +
+    '</div></div>';
+}
+
+function leaveStatusBadge(status){
+  const colors = {
+    'Pending': '#e08a2e',
+    'Approved': '#2f8f5b',
+    'Rejected': '#c6202f'
+  };
+  const color = colors[status] || '#8a93a6';
+  return `<span style="display:inline-block; background:${color}; color:#fff; padding:3px 10px; border-radius:10px; font-size:11px; font-weight:600; white-space:nowrap;">${esc(status)}</span>`;
+}
+
+function lrCalcDays(){
+  const f = (document.getElementById('lr-from') || {}).value;
+  const t = (document.getElementById('lr-to') || {}).value;
+  const el = document.getElementById('lr-days');
+  if(!el) return;
+  if(f && t){
+    const days = Math.round((new Date(t) - new Date(f)) / 86400000) + 1;
+    el.value = days > 0 ? days : '';
+  } else el.value = '';
+}
+
+async function submitLeaveRequest(e){
+  e.preventDefault();
+  const d = DATA[currentLocation];
+  hrEnsure(d);
+  
+  try {
+    const from = document.getElementById('lr-from').value;
+    const to = document.getElementById('lr-to').value;
+    const days = parseInt(document.getElementById('lr-days').value) || 0;
+    const type = document.getElementById('lr-type').value;
+    const reason = document.getElementById('lr-reason').value.trim();
+    const halfDay = document.getElementById('lr-half-day').value || '';
+    const empName = session ? session.name : 'Unknown';
+    
+    if(!from || !to || days <= 0 || !type || !reason){
+      alert('Please fill all required fields.');
+      return false;
+    }
+    
+    if(new Date(to) < new Date(from)){
+      alert('"To" date cannot be before "From" date.');
+      return false;
+    }
+    
+    /* Get current employee details */
+    const currentEmp = (d.employees || []).find(e => e && e.name === empName);
+    const empId = currentEmp ? currentEmp.id : '';
+    const empDept = currentEmp ? currentEmp.department || '' : '';
+    const empManager = currentEmp ? currentEmp.reporting_manager || '' : '';
+    
+    /* Check leave balance for earned leave */
+    if(type === 'Earned'){
+      if(currentEmp){
+        const balance = getLeaveBalance(d, currentEmp.id);
+        if(balance && balance.balance < days){
+          alert(`Insufficient earned leave balance. Available: ${balance.balance} days.`);
+          return false;
+        }
+      }
+    }
+    
+    d.leave_requests.push({
+      id: uid(),
+      emp_name: empName,
+      emp_id: empId,
+      department: empDept,
+      manager: empManager,
+      from_date: from,
+      to_date: to,
+      days: days,
+      leave_type: type,
+      half_day: halfDay,
+      reason: reason,
+      attachment: '',
+      status: 'Pending',
+      requested_on: new Date().toISOString()
+    });
+    
+    logAudit('DATA CHANGE', `Leave request submitted by ${empName}: ${from} to ${to} (${days} days, ${type})`);
+    await saveLocation(currentLocation);
+    render();
+    
+    // Clear form
+    document.getElementById('lr-from').value = '';
+    document.getElementById('lr-to').value = '';
+    document.getElementById('lr-type').value = '';
+    document.getElementById('lr-reason').value = '';
+    document.getElementById('lr-half-day').value = '';
+    document.getElementById('lr-days').value = '0';
+    
+    alert('Leave request submitted successfully! Status: Pending');
+    return false;
+  } catch(err) {
+    console.error('Error submitting leave request:', err);
+    alert('Error submitting leave request. Check console for details.');
+    return false;
+  }
+}
+
+async function updateLeaveRequestStatus(id, status){
+  const d = DATA[currentLocation];
+  if(!d) return;
+  const req = (d.leave_requests || []).find(x => x && x.id === id);
+  if(!req) return;
+  
+  try {
+    req.status = status;
+    
+    /* If approved, update leave balance */
+    if(status === 'Approved'){
+      const emp = (d.employees || []).find(e => e && e.name === req.emp_name);
+      if(emp){
+        /* Create leave entry automatically */
+        if(!d.leaves) d.leaves = [];
+        d.leaves.push({
+          id: uid(),
+          employee: req.emp_name,
+          from: req.from_date,
+          to: req.to_date,
+          days: req.days,
+          type: req.leave_type,
+          reason: req.reason,
+          status: 'Approved',
+          addedBy: actorName()
+        });
+        updateLeaveBalance(d, emp.id);
+        logAudit('DATA CHANGE', `Leave request approved for ${req.emp_name}: ${req.days} days (${req.leave_type})`);
+      }
+    } else if(status === 'Rejected'){
+      logAudit('DATA CHANGE', `Leave request rejected for ${req.emp_name}`);
+    } else if(status === 'Cancelled'){
+      logAudit('DATA CHANGE', `Leave request cancelled by ${req.emp_name}`);
+    }
+  } catch(e) {
+    console.error('Error updating leave request status:', e);
+  }
+  
+  await saveLocation(currentLocation);
+  render();
+}
+
+function exportLeaveBalance(){
+  const d = DATA[currentLocation];
+  if(!d) return;
+  const headers = ['Employee', 'Earned Leave', 'Used Leave', 'Balance', 'Last Updated'];
+  const rows = (d.leave_balance || []).map(b => [
+    b.emp_name || '', b.earned_leave || 0, b.used_leave || 0, b.balance || 0, b.last_updated || ''
+  ]);
+  exportToExcel(currentLocation + '_Leave_Balance', headers, rows);
+}
+
+function exportLeaveRequests(){
+  const d = DATA[currentLocation];
+  if(!d) return;
+  const headers = ['Employee', 'Emp ID', 'Department', 'Manager', 'From', 'To', 'Days', 'Type', 'Half Day', 'Reason', 'Status', 'Requested On'];
+  const rows = (d.leave_requests || []).map(r => [
+    r.emp_name || '', 
+    r.emp_id || '', 
+    r.department || '', 
+    r.manager || '', 
+    r.from_date || '', 
+    r.to_date || '', 
+    r.days || 0, 
+    r.leave_type || '', 
+    r.half_day || '', 
+    r.reason || '', 
+    r.status || 'Draft', 
+    r.requested_on || ''
+  ]);
+  exportToExcel(currentLocation + '_Leave_Requests', headers, rows);
 }
 
 /* ----- Salary ----- */
@@ -12596,11 +13388,11 @@ function userSecurityCell(u){
 }
 function renderUsers(){
   return `
-  ${tabHeader('Access Control', 'Users')}
+  ${tabHeader('Access Control', 'ADMIN')}
   ${importantNoticePanelHtml()}
   ${sendNotificationPanelHtml()}
   ${reportSchedulesPanelHtml()}
-  ${secHead('&#10133;', 'New Entry')}
+  ${secHead('&#10133;', 'Create User')}
   <div class="panel"><div class="panel-head"><h3>Add user login</h3></div>
   <div class="panel-body">
   <form onsubmit="return addUser(event)">
@@ -12617,7 +13409,7 @@ function renderUsers(){
     </div>
   </form>
   </div></div>
-  ${secHead('&#128203;', 'Records')}
+  ${secHead('&#128203;', 'USERS')}
   <div class="panel"><div class="panel-head"><h3>All logins <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(click a name to view General &amp; Access)</span></h3><div class="panel-head-actions">${importBtn('users')}<button class="icon-btn" onclick="restoreUsersFromBackup()" title="Restore the user list from the automatic backup">&#8634; Restore from backup${USERS_BACKUP_META ? ' ('+USERS_BACKUP_META.count+' users, '+new Date(USERS_BACKUP_META.savedAt).toLocaleDateString()+')' : ''}</button>${exportBtn('exportUsers')}</div></div>
   <div class="panel-body">
   <div class="user-list">
