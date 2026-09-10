@@ -779,6 +779,14 @@ const BUILTIN_ROLES = ['admin','stores','logistics','automation','enquiry'];
 const VALVE_TYPES = ['Gate Valve','Globe Valve','Ball Valve','Butterfly Valve','Check Valve','Plug Valve','Diaphragm Valve','Needle Valve','Control Valve','Safety Relief Valve','Solenoid Valve','Pressure Reducing Valve'];
 const VALVE_SIZES = ['1/2"','3/4"','1"','1.5"','2"','2.5"','3"','4"','5"','6"','8"','10"','12"','14"','16"','18"','20"','24"'];
 let CUSTOM_ROLES = {}; /* {roleName: {tabs:[...]}} - created by admin in the Users tab */
+/* Named permission templates (presets of module access) applied to users from the ADMIN tab. */
+let PERMISSION_TEMPLATES = {
+  'Sales Manager':    ['dashboard','sales','quotation','enquiry','inventory','reports'],
+  'Accounts Manager': ['dashboard','accounts','po','reports'],
+  'Operations Manager':['dashboard','inward','inventory','outward','logistics','po','reports'],
+  'Store Manager':    ['dashboard','inward','inventory','outward','reports'],
+  'Read-Only':        ['dashboard','reports']
+};
 function roleTabsFor(role){
   if(ROLE_TABS[role]) return ROLE_TABS[role];
   const c = CUSTOM_ROLES[role];
@@ -13163,7 +13171,52 @@ function accessChipsHtml(u){
   }).join('');
 }
 
-/* Detail panel shown when an admin clicks a user name: General + Access tabs. */
+/* Apply a named permission template to a user: allowed modules become exactly the template's list. */
+async function applyTemplateToUser(username, tplName){
+  if(!isAdmin()) return;
+  const u = USERS.find(function(x){ return x.username === username; });
+  if(!u) return;
+  const tpl = PERMISSION_TEMPLATES[tplName];
+  if(!tpl){ alert('Template not found: ' + tplName); return; }
+  if(u.username === session.username){ alert('You cannot change your own access. Ask another admin.'); return; }
+  const roleTabs = roleTabsFor(u.role);
+  const target = tpl.slice();
+  /* deniedTabs: role tabs NOT in the template (and not locked) */
+  u.deniedTabs = roleTabs.filter(function(t){ return !LOCKED_TABS.includes(t) && target.indexOf(t) === -1; });
+  /* extraTabs: template tabs NOT already in role (and not locked, and real tabs) */
+  u.extraTabs = target.filter(function(t){
+    return !LOCKED_TABS.includes(t) && roleTabs.indexOf(t) === -1 && TABS.some(function(x){ return x.id === t; });
+  });
+  u.template = tplName;
+  logAudit('DATA CHANGE', 'Template "' + tplName + '" applied to user ' + u.username);
+  await saveUsers();
+  render();
+}
+
+function templateSectionHtml(u){
+  const isSelf = u.username === session.username;
+  const names = Object.keys(PERMISSION_TEMPLATES);
+  let h = '<div style="margin-bottom:10px; font-size:13px; color:var(--text);">Applying a template sets this user\'s module access to a preset list in one click. Fine-tune afterwards in the Access tab.</div>';
+  if(u.template){
+    h += '<div style="margin-bottom:12px;"><span class="access-chip chip-role">Current template: ' + esc(u.template) + '</span></div>';
+  }
+  if(isSelf){
+    h += '<div style="color:var(--muted); font-size:12px;">You cannot change your own access. Ask another admin.</div>';
+    return h;
+  }
+  h += '<div class="access-chips">';
+  names.forEach(function(name){
+    const mods = PERMISSION_TEMPLATES[name];
+    const active = u.template === name;
+    const cls = active ? 'access-chip chip-role chip-clickable' : 'access-chip chip-grant';
+    const check = active ? '&#10003; ' : '';
+    h += '<span class="' + cls + '" title="Modules: ' + esc(mods.join(', ')) + '" onclick="applyTemplateToUser(\'' + esc(u.username) + '\',\'' + esc(name) + '\')">' + check + esc(name) + ' <span class="chip-tag">' + mods.length + ' modules</span></span>';
+  });
+  h += '</div>';
+  return h;
+}
+
+/* Detail panel shown when an admin clicks a user name: General + Template + Access tabs. */
 function userDetailPanel(u){
   const isSelf = u.username === session.username;
   const tab = userDetailTab || 'general';
@@ -13207,10 +13260,11 @@ function userDetailPanel(u){
   return `<div class="user-detail">
     <div class="user-detail-tabs">
       <button class="udt-btn${tab==='general'?' active':''}" onclick="event.stopPropagation(); setUserDetailTab('general')">General</button>
+      <button class="udt-btn${tab==='template'?' active':''}" onclick="event.stopPropagation(); setUserDetailTab('template')">Template</button>
       <button class="udt-btn${tab==='access'?' active':''}" onclick="event.stopPropagation(); setUserDetailTab('access')">Access</button>
     </div>
     <div class="user-detail-body" onclick="event.stopPropagation()">
-      ${tab==='general' ? general : access}
+      ${tab==='general' ? general : (tab==='template' ? templateSectionHtml(u) : access)}
     </div>
   </div>`;
 }
