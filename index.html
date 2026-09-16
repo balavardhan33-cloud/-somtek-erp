@@ -7,8 +7,6 @@
 <link rel="icon" id="favicon-link" href="">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.5/JsBarcode.all.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 
@@ -762,7 +760,7 @@ const TABS = [
   {id:'quotation', num:'10', label:'Quotation', icon:'&#128221;'},
   {id:'hr', num:'11', label:'HR', icon:'&#128101;'},
   {id:'reports', num:'12', label:'Reports', icon:'&#128203;'},
-  {id:'users', num:'', label:'ADMIN', icon:'&#128100;'}
+  {id:'users', num:'', label:'Users', icon:'&#128100;'}
 ];
 
 const ROLE_TABS = {
@@ -779,14 +777,6 @@ const BUILTIN_ROLES = ['admin','stores','logistics','automation','enquiry'];
 const VALVE_TYPES = ['Gate Valve','Globe Valve','Ball Valve','Butterfly Valve','Check Valve','Plug Valve','Diaphragm Valve','Needle Valve','Control Valve','Safety Relief Valve','Solenoid Valve','Pressure Reducing Valve'];
 const VALVE_SIZES = ['1/2"','3/4"','1"','1.5"','2"','2.5"','3"','4"','5"','6"','8"','10"','12"','14"','16"','18"','20"','24"'];
 let CUSTOM_ROLES = {}; /* {roleName: {tabs:[...]}} - created by admin in the Users tab */
-/* Named permission templates (presets of module access) applied to users from the ADMIN tab. */
-let PERMISSION_TEMPLATES = {
-  'Sales Manager':    ['dashboard','sales','quotation','enquiry','inventory','reports'],
-  'Accounts Manager': ['dashboard','accounts','po','reports'],
-  'Operations Manager':['dashboard','inward','inventory','outward','logistics','po','reports'],
-  'Store Manager':    ['dashboard','inward','inventory','outward','reports'],
-  'Read-Only':        ['dashboard','reports']
-};
 function roleTabsFor(role){
   if(ROLE_TABS[role]) return ROLE_TABS[role];
   const c = CUSTOM_ROLES[role];
@@ -1581,43 +1571,141 @@ function withTimeout(promise, ms, label){
   ]);
 }
 
+async function initFirebase(){
+  if(!FIREBASE_CONFIG || FIREBASE_CONFIG.apiKey === 'YOUR_API_KEY'){
+    firebaseLoadError = 'Firebase is not configured yet. Open the FIREBASE_CONFIG block near the top of the file and paste in your real project values from the Firebase console.';
+    console.error(firebaseLoadError);
+    return;
+  }
+  // REST calls need no SDK load / persistent connection - just mark ready.
+  firebaseReady = true;
+}
+
+async function fsGet(docId){
+  if(!firebaseReady) return null;
+  try{
+    const res = await fsFetch(FS_REST_BASE + docId, { method:'GET' }, 'Reading '+docId);
+    if(res.status === 404){ firebaseLoadError = null; fsGetLastStatus = 'missing'; return null; }
+    if(!res.ok){
+      let detail = '';
+      try{ const j = await res.json(); detail = (j.error && j.error.message) || ''; }catch(e2){}
+      throw new Error('HTTP '+res.status+(detail ? ': '+detail : ''));
+    }
+    const json = await res.json();
+    const raw = json.fields && json.fields.data && json.fields.data.stringValue;
+    firebaseLoadError = null;
+    fsGetLastStatus = 'ok';
+    return raw ? JSON.parse(raw) : null;
+  }catch(e){
+    console.error('fsGet failed', docId, e);
+    firebaseLoadError = 'DB error (read '+docId+'): '+e.message;
+    fsGetLastStatus = 'error';
+    return null;
+  }
+}
+/* 'ok' | 'missing' (confirmed 404) | 'error' (network/timeout - data may still exist!) */
+let fsGetLastStatus = 'ok';
+async function fsSet(docId, data){
+  if(!firebaseReady) return false;
+  try{
+    const body = { fields: { data: { stringValue: JSON.stringify(data) } } };
+    const res = await fsFetch(FS_REST_BASE + docId, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }, 'Saving '+docId);
+    if(!res.ok){
+      let detail = '';
+      try{ const j = await res.json(); detail = (j.error && j.error.message) || ''; }catch(e2){}
+      throw new Error('HTTP '+res.status+(detail ? ': '+detail : ''));
+    }
+    firebaseLoadError = null;
+    return true;
+  }catch(e){
+    console.error('fsSet failed', docId, e);
+    firebaseLoadError = 'DB error (save '+docId+'): '+e.message;
+    return false;
+  }
+}
+
+/* ---- per-tab session, using sessionStorage on purpose --------------------
+   sessionStorage survives a page refresh/reload (so hitting F5 doesn't log
+   you out) but the browser automatically wipes it the moment the tab or
+   window is actually closed - no unload event needed, and no risk of
+   refresh accidentally triggering a logout. ---------------------------- */
+function saveSessionLocal(){
+  try{ sessionStorage.setItem('somtek_erp_session', JSON.stringify({username: session.username, location: currentLocation})); }catch(e){}
+}
+function clearSessionLocal(){
+  try{ sessionStorage.removeItem('somtek_erp_session'); }catch(e){}
+}
+function readSessionLocal(){
+  try{ const v = sessionStorage.getItem('somtek_erp_session'); return v ? JSON.parse(v) : null; }catch(e){ return null; }
+}
+
+/* User accounts live in USERS_DOC ('users_v2'). Old cached app versions
+   only know the legacy 'users' document - whatever they write there is
+   ignored, so no outdated device can ever wipe or reset accounts again. */
+const USERS_DOC = 'users_v2';
+const USERS_DOC_LEGACY = 'users';
+
 async function loadUsers(){
   loadUsersBackupMeta();
   
   try {
-    // Load from new 'users' collection (no passwords)
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    
     const url = 'https://firestore.googleapis.com/v1/projects/somtek-erp/databases/(default)/documents/users';
-    const res = await withTimeout(fetch(url), FS_TIMEOUT_MS, 'Load users');
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeout);
     
     if (res.ok) {
       const data = await res.json();
       const docs = data.documents || [];
       
-      USERS = docs.map(doc => {
-        const f = doc.fields;
-        return {
-          username: f.username?.stringValue || '',
-          name: f.name?.stringValue || '',
-          role: f.role?.stringValue || 'enquiry',
-          mobile: f.mobile?.stringValue || '',
-          address: f.address?.stringValue || '',
-          dob: f.dob?.stringValue || '',
-          disabled: f.disabled?.booleanValue || false
-        };
-      });
-      
-      if (USERS.length > 0) {
+      if (docs.length > 0) {
+        USERS = docs.map(doc => {
+          const f = doc.fields || {};
+          return {
+            username: f.username?.stringValue || '',
+            name: f.name?.stringValue || '',
+            role: f.role?.stringValue || 'enquiry',
+            mobile: f.mobile?.stringValue || '',
+            address: f.address?.stringValue || '',
+            dob: f.dob?.stringValue || '',
+            disabled: f.disabled?.booleanValue || false
+          };
+        });
+        
         CUSTOM_ROLES = {};
         CUSTOM_FIELDS = {};
         syncRoleOptions();
         syncCustomFieldSchemas();
         snapshotUsersState();
-        console.info('loadUsers: loaded ' + USERS.length + ' from users collection');
+        console.info('✅ loadUsers: loaded ' + USERS.length + ' from users collection');
         return;
       }
     }
   } catch(e) {
-    console.warn('loadUsers: failed - ' + e);
+    console.warn('⚠️ loadUsers: timeout/error - ' + e.message);
+  }
+  
+  let doc = null;
+  for(let attempt = 1; attempt <= 3; attempt++){
+    doc = await fsGet(USERS_DOC);
+    if(doc || fsGetLastStatus === 'missing') break;
+    console.warn('loadUsers: read attempt '+attempt+' failed, retrying...');
+    await new Promise(r => setTimeout(r, 800 * attempt));
+  }
+  if(doc && Array.isArray(doc.list)){
+    USERS = doc.list;
+    CUSTOM_ROLES = (doc.roles && typeof doc.roles==='object' && !Array.isArray(doc.roles)) ? doc.roles : {};
+    CUSTOM_FIELDS = (doc.customFields && typeof doc.customFields==='object' && !Array.isArray(doc.customFields)) ? doc.customFields : {};
+    syncRoleOptions();
+    syncCustomFieldSchemas();
+    snapshotUsersState();
+    return;
   }
   
   USERS = DEFAULT_USERS;
@@ -1626,7 +1714,13 @@ async function loadUsers(){
   syncRoleOptions();
   syncCustomFieldSchemas();
   snapshotUsersState();
+  if(fsGetLastStatus === 'missing'){
+    await fsSet(USERS_DOC, {list: USERS, roles: CUSTOM_ROLES, customFields: CUSTOM_FIELDS});
+  }else{
+    console.error('loadUsers: could not read users after retries - NOT overwriting cloud users.');
+  }
 }
+
 let USERS_BACKUP_META = null; /* {savedAt, count} of the users_backup doc, for the Users tab */
 
 async function backupUsersDoc(){
@@ -5943,397 +6037,6 @@ function isLowStock(i){
 }
 let invSection = 'stock';
 function switchInvSection(s){ invSection = s; render(); }
-
-
-/* ===== ASSEMBLY / BOM SYSTEM ===== */
-let asmComponents = [];
-let asmDraft = {name:'', qty:'1'};
-
-function asmSaveDraft(){
-  const n = document.getElementById('asm-fg-name');
-  const q = document.getElementById('asm-fg-qty');
-  if(n) asmDraft.name = n.value;
-  if(q) asmDraft.qty = q.value;
-}
-
-function asmHandleKey(ev){
-  if(ev.key === 'Enter'){ ev.preventDefault(); asmAddComponent(); }
-}
-
-function asmAddComponent(){
-  const d = DATA[currentLocation];
-  if(!d) return;
-  const inputEl = document.getElementById('asm-scan');
-  const code = String(inputEl ? inputEl.value : '').trim().toUpperCase();
-  if(!code) return;
-  const item = findItemByCode(d, code);
-  if(!item){ alert('No item found for code: ' + code); if(inputEl) inputEl.select(); return; }
-  if(asmComponents.find(function(c){ return c.itemId === item.id; })){ alert('Component already added: ' + item.name); if(inputEl) inputEl.select(); return; }
-  asmComponents.push({itemId: item.id, itemCode: item.itemCode, name: item.name, qty: 1, available: item.qty, cost: item.cost});
-  asmSaveDraft();
-  render();
-  setTimeout(function(){ const el = document.getElementById('asm-scan'); if(el) el.focus(); }, 50);
-}
-
-function asmSetQty(idx, val){
-  if(asmComponents[idx]) asmComponents[idx].qty = parseFloat(val) || 0;
-}
-
-function asmRemoveComponent(idx){
-  asmSaveDraft();
-  asmComponents.splice(idx, 1);
-  render();
-}
-
-function asmClear(){
-  asmComponents = [];
-  asmDraft = {name:'', qty:'1'};
-  render();
-}
-
-async function submitAssembly(){
-  const d = DATA[currentLocation];
-  if(!d) return;
-  asmSaveDraft();
-  const fgName = String(asmDraft.name || '').trim();
-  const produceQty = parseInt(asmDraft.qty) || 0;
-  if(!fgName){ alert('Enter finished good name.'); return; }
-  if(produceQty < 1){ alert('Produce quantity must be at least 1.'); return; }
-  if(asmComponents.length < 1){ alert('Add at least one component (scan item codes).'); return; }
-  const bad = asmComponents.find(function(c){ return !(c.qty > 0); });
-  if(bad){ alert('Component "' + bad.name + '" has invalid quantity.'); return; }
-
-  /* Stock check */
-  const shortages = [];
-  asmComponents.forEach(function(c){
-    const item = (d.inventory || []).find(function(i){ return i.id === c.itemId; });
-    const avail = item ? (parseFloat(item.qty) || 0) : 0;
-    const need = c.qty * produceQty;
-    if(need > avail) shortages.push(c.name + ' (need ' + need + ', have ' + avail + ')');
-  });
-  if(shortages.length){ alert('Insufficient stock:\n' + shortages.join('\n')); return; }
-
-  /* Deduct components */
-  asmComponents.forEach(function(c){
-    const item = (d.inventory || []).find(function(i){ return i.id === c.itemId; });
-    if(item){
-      const avail = parseFloat(item.qty) || 0;
-      item.qty = String(avail - (c.qty * produceQty));
-    }
-  });
-
-  /* Per-unit BOM + auto cost */
-  const bom = asmComponents.map(function(c){ return {itemCode: c.itemCode, name: c.name, qty: c.qty}; });
-  let unitCost = 0;
-  asmComponents.forEach(function(c){ unitCost += (parseFloat(c.cost) || 0) * c.qty; });
-
-  /* Create or update finished good */
-  let fg = (d.inventory || []).find(function(i){ return i.isFinishedGood && String(i.name || '').trim().toLowerCase() === fgName.toLowerCase(); });
-  if(fg){
-    fg.qty = String((parseFloat(fg.qty) || 0) + produceQty);
-    fg.components = bom;
-    if(unitCost > 0) fg.cost = String(unitCost.toFixed(2));
-  } else {
-    fg = {
-      id: uid(),
-      name: fgName,
-      qty: String(produceQty),
-      minQty: '',
-      specs: 'Assembled product',
-      cost: unitCost > 0 ? String(unitCost.toFixed(2)) : '',
-      category: 'Finished Goods',
-      deadStock: 'No',
-      itemCode: nextItemCode(d),
-      isFinishedGood: true,
-      components: bom,
-      addedOn: today(),
-      addedBy: actorName()
-    };
-    d.inventory.push(fg);
-  }
-
-  /* Assembly history record */
-  if(!d.assemblies) d.assemblies = [];
-  d.assemblies.push({
-    id: uid(),
-    fgItemCode: fg.itemCode,
-    fgName: fgName,
-    producedQty: produceQty,
-    components: asmComponents.map(function(c){ return {itemCode: c.itemCode, name: c.name, qtyUsed: c.qty * produceQty}; }),
-    date: today(),
-    by: actorName()
-  });
-
-  logAudit('DATA CHANGE', 'Assembly: ' + produceQty + ' x ' + fgName + ' (' + fg.itemCode + ') from ' + asmComponents.length + ' components');
-  asmComponents = [];
-  asmDraft = {name:'', qty:'1'};
-  await saveLocation(currentLocation);
-  render();
-  alert('Assembly complete!\nFinished good: ' + fgName + '\nBarcode / Item code: ' + fg.itemCode + '\n\nPrint its label from the Barcode tab.');
-}
-
-function inventoryAssemblySection(d){
-  if(!d) return '<p style="color:var(--muted);">No data available</p>';
-  if(!d.assemblies) d.assemblies = [];
-
-  let html = secHead('&#128295;', 'Assemble Finished Good');
-  html += '<div class="panel"><div class="panel-head"><h3>New assembly</h3></div><div class="panel-body">';
-  html += '<div class="form-grid">';
-  html += '<div class="field"><label>Finished good name *</label><input type="text" id="asm-fg-name" value="' + esc(asmDraft.name) + '" placeholder="e.g. Pump Assembly 2HP" oninput="asmSaveDraft()"></div>';
-  html += '<div class="field"><label>Quantity to produce *</label><input type="number" id="asm-fg-qty" min="1" value="' + esc(asmDraft.qty) + '" oninput="asmSaveDraft()"></div>';
-  html += '<div class="field"><label>Scan / type component code + Enter</label><input type="text" id="asm-scan" placeholder="e.g. ' + esc(itemCodePrefix(currentLocation)) + '-0001" autocomplete="off" onkeydown="asmHandleKey(event)" style="font-family:monospace;"></div>';
-  html += '<button type="button" class="btn" onclick="asmAddComponent()">Add Component</button>';
-  html += '</div>';
-
-  if(asmComponents.length){
-    html += '<table style="font-size:12px; margin-top:14px;"><thead><tr><th>Code</th><th>Component</th><th>In Stock</th><th>Qty per unit</th><th></th></tr></thead><tbody>';
-    asmComponents.forEach(function(c, idx){
-      html += '<tr>';
-      html += '<td style="font-family:monospace;">' + esc(c.itemCode || '') + '</td>';
-      html += '<td>' + esc(c.name || '') + '</td>';
-      html += '<td>' + esc(c.available) + '</td>';
-      html += '<td><input type="number" min="0.01" step="any" value="' + esc(c.qty) + '" style="width:80px;" oninput="asmSetQty(' + idx + ', this.value)"></td>';
-      html += '<td><button type="button" class="icon-btn" onclick="asmRemoveComponent(' + idx + ')">&#10060;</button></td>';
-      html += '</tr>';
-    });
-    html += '</tbody></table>';
-    html += '<div style="margin-top:14px; display:flex; gap:10px;">';
-    html += '<button type="button" class="btn" onclick="submitAssembly()">&#128295; Assemble &amp; Create Finished Good</button>';
-    html += '<button type="button" class="icon-btn" onclick="asmClear()">Clear</button>';
-    html += '</div>';
-    html += '<p style="font-size:11px; color:var(--muted); margin-top:8px;">On assemble: component stock is deducted, finished good gets its own barcode (item code), and the component list (BOM) is saved to it.</p>';
-  } else {
-    html += '<p style="color:var(--muted); margin-top:12px; font-size:12px;">Scan component barcodes (or type codes) to add them to this assembly.</p>';
-  }
-  html += '</div></div>';
-
-  /* History */
-  html += secHead('&#128220;', 'Assembly History');
-  html += '<div class="panel"><div class="panel-head"><h3>Past assemblies (' + d.assemblies.length + ')</h3></div><div class="panel-body">';
-  if(d.assemblies.length === 0){
-    html += '<p style="color:var(--muted); text-align:center; padding:20px;">No assemblies yet.</p>';
-  } else {
-    html += '<table style="font-size:12px;"><thead><tr><th>Date</th><th>FG Code</th><th>Finished Good</th><th>Qty</th><th>Components Used</th><th>By</th></tr></thead><tbody>';
-    d.assemblies.slice().reverse().forEach(function(a){
-      let compStr = (a.components || []).map(function(c){ return esc(c.name) + ' x' + esc(c.qtyUsed); }).join(', ');
-      html += '<tr>';
-      html += '<td>' + esc(a.date || '') + '</td>';
-      html += '<td style="font-family:monospace; font-weight:600;">' + esc(a.fgItemCode || '') + '</td>';
-      html += '<td>' + esc(a.fgName || '') + '</td>';
-      html += '<td style="text-align:center;">' + esc(a.producedQty) + '</td>';
-      html += '<td style="max-width:340px; white-space:normal;">' + compStr + '</td>';
-      html += '<td>' + esc(a.by || '') + '</td>';
-      html += '</tr>';
-    });
-    html += '</tbody></table>';
-  }
-  html += '</div></div>';
-  return html;
-}
-
-/* ===== BARCODE SYSTEM ===== */
-let bcScanner = null;
-
-function findItemByCode(d, code){
-  const c = String(code || '').trim().toUpperCase();
-  if(!c) return null;
-  return (d.inventory || []).find(function(i){
-    if(!i) return false;
-    if(String(i.itemCode || '').trim().toUpperCase() === c) return true;
-    if(String(i.barcode || '').trim().toUpperCase() === c) return true;
-    return false;
-  }) || null;
-}
-
-async function assignBarcode(itemId){
-  const d = DATA[currentLocation];
-  if(!d) return;
-  const item = (d.inventory || []).find(function(i){ return i.id === itemId; });
-  if(!item) return;
-  const current = item.barcode || '';
-  const val = prompt('Scan or type barcode for:\n' + item.name + '\n\n(Leave empty to remove)', current);
-  if(val === null) return;
-  const code = String(val).trim();
-  if(code){
-    const dup = (d.inventory || []).find(function(i){
-      return i.id !== itemId && (String(i.barcode || '').trim().toUpperCase() === code.toUpperCase() || String(i.itemCode || '').trim().toUpperCase() === code.toUpperCase());
-    });
-    if(dup){ alert('This barcode is already used by: ' + dup.name + ' (' + (dup.barcode || dup.itemCode) + ')'); return; }
-  }
-  item.barcode = code;
-  logAudit('DATA CHANGE', 'Barcode ' + (code ? 'assigned to' : 'removed from') + ' ' + item.name + (code ? ': ' + code : ''));
-  await saveLocation(currentLocation);
-  render();
-}
-
-function inventoryBarcodeSection(d){
-  if(!d) return '<p style="color:var(--muted);">No data available</p>';
-  const items = d.inventory || [];
-
-  let html = secHead('&#128290;', 'Barcode - Scan Lookup');
-  html += '<div class="panel"><div class="panel-head"><h3>Scan or type item code</h3></div><div class="panel-body">';
-  html += '<div style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;">';
-  html += '<div class="field" style="flex:1; min-width:220px;"><label>Item Code (USB scanner types here + Enter)</label>';
-  html += '<input type="text" id="bc-scan-input" placeholder="e.g. ' + esc(itemCodePrefix(currentLocation)) + '-0001" autocomplete="off" onkeydown="bcHandleKey(event)" style="font-size:16px; font-family:monospace;"></div>';
-  html += '<button type="button" class="btn" onclick="barcodeLookup()">Lookup</button>';
-  html += '<button type="button" class="btn" id="bc-cam-btn" onclick="startCameraScan()">&#128247; Camera Scan</button>';
-  html += '</div>';
-  html += '<div id="bc-camera-wrap" style="display:none; margin-top:14px;">';
-  html += '<div id="bc-camera" style="max-width:360px;"></div>';
-  html += '<button type="button" class="btn" style="margin-top:8px;" onclick="stopCameraScan()">Stop Camera</button>';
-  html += '</div>';
-  html += '<div id="bc-result" style="margin-top:14px;"></div>';
-  html += '</div></div>';
-
-  html += secHead('&#128424;&#65039;', 'Barcode Labels');
-  html += '<div class="panel"><div class="panel-head"><h3>Print labels (' + items.length + ' items)</h3>';
-  html += '<div class="panel-head-actions"><button type="button" class="export-btn" onclick="printBarcodeLabels(null)">&#128424;&#65039; Print All Labels</button></div></div>';
-  html += '<div class="panel-body">';
-  if(items.length === 0){
-    html += '<p style="color:var(--muted); text-align:center; padding:20px;">No inventory items yet.</p>';
-  } else {
-    html += '<table style="font-size:12px;"><thead><tr><th>Item Code</th><th>Barcode</th><th>Item</th><th>Qty</th><th>Category</th><th></th></tr></thead><tbody>';
-    items.forEach(function(i){
-      html += '<tr>';
-      html += '<td style="font-family:monospace; font-weight:600;">' + esc(i.itemCode || '') + '</td>';
-      html += '<td style="font-family:monospace;">' + (i.barcode ? esc(i.barcode) : '<span style="color:var(--muted);">-</span>') + '</td>';
-      html += '<td style="max-width:300px; white-space:normal;">' + esc(i.name || '') + '</td>';
-      html += '<td>' + esc(i.qty) + '</td>';
-      html += '<td>' + esc(i.category || '') + '</td>';
-      html += '<td><button type="button" class="icon-btn" onclick="assignBarcode(' + "'" + i.id + "'" + ')" title="Assign or edit barcode">&#128290; Assign</button> <button type="button" class="icon-btn" onclick="printBarcodeLabels(' + "'" + i.id + "'" + ')" title="Print label">&#128424;&#65039; Label</button></td>';
-      html += '</tr>';
-    });
-    html += '</tbody></table>';
-  }
-  html += '</div></div>';
-  return html;
-}
-
-function bcHandleKey(ev){
-  if(ev.key === 'Enter'){ ev.preventDefault(); barcodeLookup(); }
-}
-
-function barcodeLookup(codeArg){
-  const d = DATA[currentLocation];
-  if(!d) return;
-  const inputEl = document.getElementById('bc-scan-input');
-  const code = String(codeArg != null ? codeArg : (inputEl ? inputEl.value : '')).trim().toUpperCase();
-  const out = document.getElementById('bc-result');
-  if(!out) return;
-  if(!code){ out.innerHTML = ''; return; }
-  const item = findItemByCode(d, code);
-  if(!item){
-    out.innerHTML = '<div class="panel" style="border-color:var(--danger);"><div class="panel-body" style="color:var(--danger);">No item found for code <b>' + esc(code) + '</b></div></div>';
-    if(inputEl){ inputEl.select(); }
-    return;
-  }
-  const low = isLowStockFlag(item) ? ' <span style="color:var(--danger); font-weight:700;">(LOW STOCK)</span>' : '';
-  let h = '<div class="panel" style="border-color:var(--accent-2);"><div class="panel-body">';
-  h += '<div style="display:flex; gap:20px; flex-wrap:wrap; align-items:center;">';
-  h += '<svg id="bc-result-svg"></svg>';
-  h += '<div>';
-  h += '<div style="font-size:16px; font-weight:700;">' + esc(item.name) + '</div>';
-  h += '<div style="font-family:monospace; color:var(--muted); margin:4px 0;">' + esc(item.itemCode || '') + (item.barcode ? ' &middot; Barcode: ' + esc(item.barcode) : '') + '</div>';
-  h += '<div>Qty: <b style="font-size:15px;">' + esc(item.qty) + '</b>' + low + '</div>';
-  h += '<div style="font-size:12px; color:var(--muted); margin-top:4px;">Cost: ' + esc(item.cost || '-') + ' &middot; Category: ' + esc(item.category || '-') + (item.specs ? ' &middot; ' + esc(item.specs) : '') + '</div>';
-  if(item.isFinishedGood && item.components && item.components.length){
-    h += '<div style="margin-top:10px;"><span style="background:var(--accent-2); color:#fff; padding:2px 10px; border-radius:10px; font-size:11px; font-weight:700;">FINISHED GOOD</span></div>';
-    h += '<div style="margin-top:8px; font-size:12px; font-weight:700;">Components used per unit:</div>';
-    h += '<table style="font-size:12px; margin-top:4px;"><thead><tr><th>Code</th><th>Component</th><th>Qty</th></tr></thead><tbody>';
-    item.components.forEach(function(c){
-      h += '<tr><td style="font-family:monospace;">' + esc(c.itemCode || '') + '</td><td>' + esc(c.name || '') + '</td><td>' + esc(c.qty) + '</td></tr>';
-    });
-    h += '</tbody></table>';
-  }
-  h += '<button type="button" class="icon-btn" style="margin-top:8px;" onclick="printBarcodeLabels(' + "'" + item.id + "'" + ')">&#128424;&#65039; Print Label</button>';
-  h += '</div></div></div></div>';
-  out.innerHTML = h;
-  try {
-    if(typeof JsBarcode !== 'undefined' && (item.barcode || item.itemCode)){
-      JsBarcode('#bc-result-svg', item.barcode || item.itemCode, {format:'CODE128', width:2, height:50, fontSize:12, margin:4});
-    }
-  } catch(e){ console.error('Barcode render error:', e); }
-  if(inputEl){ inputEl.select(); }
-}
-
-function startCameraScan(){
-  if(typeof Html5Qrcode === 'undefined'){ alert('Camera scan library not loaded. Check internet connection and refresh.'); return; }
-  const wrap = document.getElementById('bc-camera-wrap');
-  if(wrap) wrap.style.display = 'block';
-  if(bcScanner) return;
-  bcScanner = new Html5Qrcode('bc-camera');
-  bcScanner.start(
-    {facingMode: 'environment'},
-    {fps: 10, qrbox: {width: 260, height: 140}},
-    function(decodedText){
-      const inputEl = document.getElementById('bc-scan-input');
-      if(inputEl) inputEl.value = decodedText;
-      stopCameraScan();
-      barcodeLookup(decodedText);
-    },
-    function(){ /* per-frame decode misses are normal; ignore */ }
-  ).catch(function(err){
-    alert('Unable to start camera: ' + err);
-    bcScanner = null;
-    if(wrap) wrap.style.display = 'none';
-  });
-}
-
-function stopCameraScan(){
-  const wrap = document.getElementById('bc-camera-wrap');
-  if(bcScanner){
-    bcScanner.stop().then(function(){
-      bcScanner.clear();
-      bcScanner = null;
-      if(wrap) wrap.style.display = 'none';
-    }).catch(function(){
-      bcScanner = null;
-      if(wrap) wrap.style.display = 'none';
-    });
-  } else {
-    if(wrap) wrap.style.display = 'none';
-  }
-}
-
-function printBarcodeLabels(itemId){
-  if(typeof JsBarcode === 'undefined'){ alert('Barcode library not loaded. Check internet connection and refresh.'); return; }
-  const d = DATA[currentLocation];
-  if(!d) return;
-  let items = (d.inventory || []).filter(function(i){ return i && (i.barcode || i.itemCode); });
-  if(itemId) items = items.filter(function(i){ return i.id === itemId; });
-  if(items.length === 0){ alert('No items with item codes to print.'); return; }
-
-  /* Render barcodes to SVG in a hidden container, then copy HTML into print window */
-  let labelsHtml = '';
-  const tmp = document.createElement('div');
-  tmp.style.position = 'fixed';
-  tmp.style.left = '-9999px';
-  document.body.appendChild(tmp);
-  items.forEach(function(i, idx){
-    const svgId = 'bc-tmp-' + idx;
-    tmp.innerHTML = '<svg id="' + svgId + '"></svg>';
-    try {
-      JsBarcode('#' + svgId, i.barcode || i.itemCode, {format:'CODE128', width:1.6, height:44, fontSize:11, margin:2});
-      const svgHtml = tmp.innerHTML;
-      labelsHtml += '<div class="lbl"><div class="lbl-name">' + esc(i.name || '').substring(0, 48) + '</div>' + svgHtml + '</div>';
-    } catch(e){ console.error('Label error for', i.itemCode, e); }
-  });
-  document.body.removeChild(tmp);
-
-  const w = window.open('', '_blank');
-  if(!w){ alert('Popup blocked. Please allow popups for label printing.'); return; }
-  w.document.write('<html><head><title>Barcode Labels - ' + esc(currentLocation) + '</title><style>' +
-    'body{font-family:Arial,sans-serif; margin:8mm;}' +
-    '.sheet{display:flex; flex-wrap:wrap; gap:4mm;}' +
-    '.lbl{width:63mm; height:34mm; border:1px dashed #bbb; padding:2mm; box-sizing:border-box; text-align:center; overflow:hidden; page-break-inside:avoid;}' +
-    '.lbl-name{font-size:9pt; font-weight:bold; margin-bottom:1mm; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}' +
-    '.lbl svg{max-width:100%; height:auto;}' +
-    '@media print{.lbl{border:none;}}' +
-    '</style></head><body><div class="sheet">' + labelsHtml + '</div>' +
-    '<scr' + 'ipt>window.onload=function(){window.print();}</scr' + 'ipt></body></html>');
-  w.document.close();
-}
-
 function renderInventory(){
   const d = DATA[currentLocation];
   invStampDates(d);
@@ -6349,8 +6052,6 @@ function renderInventory(){
     <button type="button" class="acct-switch-btn ${invSection==='aging'?'active':''}" onclick="switchInvSection('aging')">&#9203; Aging Stock${agingStock.length?` (${agingStock.length})`:''}</button>
     <button type="button" class="acct-switch-btn ${invSection==='low'?'active':''}" onclick="switchInvSection('low')">&#128683; Low Stock${lowStockList.length?` (${lowStockList.length})`:''}</button>
     <button type="button" class="acct-switch-btn ${invSection==='dead'?'active':''}" onclick="switchInvSection('dead')">&#9888;&#65039; Dead Stock${deadStockList.length?` (${deadStockList.length})`:''}</button>
-    <button type="button" class="acct-switch-btn ${invSection==='barcode'?'active':''}" onclick="switchInvSection('barcode')">&#128290; Barcode</button>
-    <button type="button" class="acct-switch-btn ${invSection==='assembly'?'active':''}" onclick="switchInvSection('assembly')">&#128295; Assembly</button>
   </div>`;
   const stockSection = `
   ${secHead('&#10133;', 'New Entry')}
@@ -6364,7 +6065,6 @@ function renderInventory(){
       <div class="field"><label>Specifications</label><input type="text" id="inv-specs" placeholder="Optional"></div>
       <div class="field"><label>Cost</label><input type="number" step="0.01" id="inv-cost" placeholder="Cost per item"></div>
       <div class="field"><label>Category</label><input type="text" id="inv-cat" placeholder="Optional"></div>
-      <div class="field"><label>Barcode <span style="color:var(--muted); font-weight:400;">(scan product barcode)</span></label><input type="text" id="inv-barcode" placeholder="Optional - scan or type" autocomplete="off"></div>
       <div class="field"><label>Low Stock</label>
         <select id="inv-deadstock">
           <option value="No" selected>No</option>
@@ -6455,7 +6155,7 @@ function renderInventory(){
   </tbody>${totalFootRow(8, 'Total Aging Stock Value (all items)', sumTotal(agingSorted,'qty','cost'))}</table>
   ${showMoreBar('inventoryAging', agingSorted.length)}
   </div></div>`;
-  const sectionMap = { aging: agingSection, low: lowSection, dead: deadSection, barcode: inventoryBarcodeSection(d), assembly: inventoryAssemblySection(d) };
+  const sectionMap = { aging: agingSection, low: lowSection, dead: deadSection };
   return `
   ${tabHeader(currentLocation, 'Inventory')}
   ${switcher}
@@ -6484,7 +6184,6 @@ async function addInventory(e){
     specs: document.getElementById('inv-specs').value.trim(),
     cost: document.getElementById('inv-cost').value.trim(),
     category: document.getElementById('inv-cat').value.trim(),
-    barcode: document.getElementById('inv-barcode').value.trim(),
     deadStock: document.getElementById('inv-deadstock').value || 'No',
     itemCode: nextItemCode(DATA[currentLocation]),
     addedOn: today(),
@@ -8036,7 +7735,7 @@ function updateLeaveBalance(d, empId){
 function hrLeaveBalanceSection(d){
   if(!d) return '<p style="color:var(--muted);">No data available</p>';
   hrEnsure(d);
-  const isAdminUser = isAdmin();
+  const isAdmin = currentUserRole === 'admin' || currentUserRole === 'Admin';
   
   /* Recalculate all balances */
   try {
@@ -8053,7 +7752,7 @@ function hrLeaveBalanceSection(d){
   ${secHead('💰', 'Leave Balance')}
   <div class="panel"><div class="panel-head"><h3>Employee Leave Balance Summary</h3>
   <div class="panel-head-actions">
-    ${isAdminUser ? '<button type="button" class="export-btn" onclick="exportLeaveBalance()">📊 Export</button>' : ''}
+    ${isAdmin ? '<button type="button" class="export-btn" onclick="exportLeaveBalance()">📊 Export</button>' : ''}
   </div></div>
   <div class="panel-body">
   ${balances.length === 0 ? '<p style="color:var(--muted); text-align:center; padding:20px;">Add employees in the Employees section to see leave balance.</p>' : `
@@ -8078,8 +7777,8 @@ function hrLeaveBalanceSection(d){
 function hrLeaveRequestsSection(d){
   if(!d) return '<p style="color:var(--muted);">No data available</p>';
   hrEnsure(d);
-  const isAdminUser = isAdmin();
-  const currentUserEmpName = session ? session.name : '';
+  const isAdmin = currentUserRole === 'admin' || currentUserRole === 'Admin';
+  const currentUserEmpName = LOGGED_USER ? LOGGED_USER.split('|')[1] || LOGGED_USER : '';
   
   /* Get current employee details */
   const currentEmp = (d.employees || []).find(e => e && e.name === currentUserEmpName);
@@ -8088,15 +7787,17 @@ function hrLeaveRequestsSection(d){
   const empManager = currentEmp ? currentEmp.reporting_manager || 'N/A' : 'N/A';
   
   const myRequests = (d.leave_requests || []).filter(r => 
-    r && (isAdminUser || r.emp_name === currentUserEmpName)
+    r && (isAdmin || r.emp_name === currentUserEmpName)
   );
   
-  const formHTML = `<form onsubmit="return submitLeaveRequest(event)">
+  const formHTML = `
+  <form onsubmit="return submitLeaveRequest(event)">
     <div class="form-grid" style="grid-template-columns: repeat(2, 1fr); gap: 12px;">
       <div class="field"><label>Employee Name</label><input type="text" value="${esc(currentUserEmpName)}" readonly style="background:var(--panel-2);"></div>
       <div class="field"><label>Employee ID</label><input type="text" value="${esc(empId)}" readonly style="background:var(--panel-2);"></div>
       <div class="field"><label>Department</label><input type="text" value="${esc(empDept)}" readonly style="background:var(--panel-2);"></div>
       <div class="field"><label>Reporting Manager</label><input type="text" value="${esc(empManager)}" readonly style="background:var(--panel-2);"></div>
+      
       <div class="field"><label>Leave Type *</label>
         <select id="lr-type" required>
           <option value="">Select type</option>
@@ -8108,9 +7809,11 @@ function hrLeaveRequestsSection(d){
           <option value="Paternity">Paternity Leave</option>
         </select>
       </div>
+      
       <div class="field"><label>From Date *</label><input type="date" id="lr-from" required oninput="lrCalcDays()"></div>
       <div class="field"><label>To Date *</label><input type="date" id="lr-to" required oninput="lrCalcDays()"></div>
       <div class="field"><label>Duration (Days) *</label><input type="number" id="lr-days" readonly style="background:var(--panel-2); font-weight:600;" value="0"></div>
+      
       <div class="field"><label>Half Day</label>
         <select id="lr-half-day">
           <option value="">No</option>
@@ -8118,65 +7821,65 @@ function hrLeaveRequestsSection(d){
           <option value="Second Half">Second Half</option>
         </select>
       </div>
+      
       <div class="field" style="grid-column:1/-1;"><label>Reason *</label><textarea id="lr-reason" placeholder="Provide detailed reason for leave request" required style="min-height:80px;"></textarea></div>
+      
       <div class="field" style="grid-column:1/-1;"><label>Attachment (Optional)</label><input type="file" id="lr-attachment" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" style="padding:8px;"></div>
+      
       <button type="submit" class="btn" style="grid-column:1/-1;">Submit Leave Request</button>
     </div>
-  </form>`;
+  </form>
+  `;
   
-  let tableHTML = '';
-  if(myRequests.length === 0) {
-    tableHTML = '<p style="color:var(--muted); text-align:center; padding:20px;">No leave requests yet.</p>';
-  } else {
-    tableHTML = '<table style="width:100%; font-size:12px; border-collapse:collapse;"><thead><tr><th>Employee</th><th>ID</th><th>Dept</th><th>From</th><th>To</th><th>Days</th><th>Type</th><th>Half Day</th><th>Status</th><th>Date</th>';
-    if(isAdminUser) tableHTML += '<th>Manager</th><th>Action</th>';
-    tableHTML += '</tr></thead><tbody>';
-    
-    myRequests.slice().reverse().forEach(r => {
-      tableHTML += '<tr>';
-      tableHTML += '<td>' + esc(r.emp_name || '') + '</td>';
-      tableHTML += '<td style="font-size:11px;">' + esc(r.emp_id || '') + '</td>';
-      tableHTML += '<td>' + esc(r.department || '') + '</td>';
-      tableHTML += '<td>' + (r.from_date || '') + '</td>';
-      tableHTML += '<td>' + (r.to_date || '') + '</td>';
-      tableHTML += '<td style="text-align:center; font-weight:600;">' + (r.days || 0) + '</td>';
-      tableHTML += '<td>' + esc(r.leave_type || '') + '</td>';
-      tableHTML += '<td>' + esc(r.half_day || 'No') + '</td>';
-      tableHTML += '<td>' + leaveStatusBadge(r.status || 'Draft') + '</td>';
-      tableHTML += '<td style="font-size:11px;">' + (r.requested_on ? fd(r.requested_on.split('T')[0]) : '') + '</td>';
-      
-      if(isAdminUser) {
-        tableHTML += '<td>' + esc(r.manager || '') + '</td>';
-        tableHTML += '<td>';
-        if(r.status === 'Pending') {
-          tableHTML += '<select onchange="updateLeaveRequestStatus(\'' + r.id + '\', this.value)" style="padding:4px 8px; font-size:11px;">';
-          tableHTML += '<option value="Pending" selected>Pending</option>';
-          tableHTML += '<option value="Approved">Approved</option>';
-          tableHTML += '<option value="Rejected">Rejected</option>';
-          tableHTML += '<option value="Cancelled">Cancelled</option>';
-          tableHTML += '</select>';
-        } else {
-          tableHTML += '<span style="color:var(--muted); font-size:10px;">' + r.status + '</span>';
-        }
-        tableHTML += '</td>';
-      }
-      tableHTML += '</tr>';
-    });
-    
-    tableHTML += '</tbody></table>';
-  }
+  const tableHTML = myRequests.length === 0 
+    ? '<p style="color:var(--muted); text-align:center; padding:20px;">No leave requests yet.</p>'
+    : `<table style="width:100%; font-size:12px;">
+        <thead><tr>
+          <th>Employee</th><th>ID</th><th>Dept</th><th>From</th><th>To</th><th>Days</th><th>Type</th><th>Half Day</th><th>Status</th><th>Req. Date</th>
+          ${isAdmin ? '<th>Manager</th><th>Action</th>' : ''}
+        </tr></thead>
+        <tbody>
+        ${myRequests.slice().reverse().map(r => `<tr>
+          <td>${esc(r.emp_name || '')}</td>
+          <td style="font-size:11px;">${esc(r.emp_id || '')}</td>
+          <td>${esc(r.department || '')}</td>
+          <td>${r.from_date || ''}</td>
+          <td>${r.to_date || ''}</td>
+          <td style="text-align:center; font-weight:600;">${r.days || 0}</td>
+          <td>${esc(r.leave_type || '')}</td>
+          <td>${esc(r.half_day || 'No')}</td>
+          <td>${leaveStatusBadge(r.status || 'Draft')}</td>
+          <td style="font-size:11px;">${r.requested_on ? fd(r.requested_on.split('T')[0]) : ''}</td>
+          ${isAdmin ? `<td>${esc(r.manager || '')}</td><td>
+            ${r.status === 'Pending' ? `
+              <select onchange="updateLeaveRequestStatus('${r.id}', this.value)" style="padding:4px 8px; font-size:11px;">
+                <option value="Pending" selected>Pending</option>
+                <option value="Approved">Approved</option>
+                <option value="Rejected">Rejected</option>
+                <option value="Cancelled">Cancelled</option>
+              </select>
+            ` : `<span style="color:var(--muted); font-size:10px;">${r.status}</span>`}
+          </td>` : ''}
+        </tr>`).join('')}
+        </tbody>
+      </table>`;
   
-  return secHead('📋', 'Leave Requests') +
-    '<div class="panel"><div class="panel-head"><h3>Submit New Leave Request</h3></div><div class="panel-body">' +
-    formHTML +
-    '</div></div>' +
-    secHead('📌', 'My Requests') +
-    '<div class="panel"><div class="panel-head"><h3>' + (isAdminUser ? 'All Leave Requests' : 'Your Leave Requests') + '</h3>' +
-    '<div class="panel-head-actions">' +
-    (isAdminUser ? '<button type="button" class="export-btn" onclick="exportLeaveRequests()">📊 Export</button>' : '') +
-    '</div></div><div class="panel-body">' +
-    tableHTML +
-    '</div></div>';
+  return `
+  ${secHead('📋', 'Leave Requests')}
+  <div class="panel"><div class="panel-head"><h3>Submit New Leave Request</h3></div>
+  <div class="panel-body">
+  ${formHTML}
+  </div></div>
+  
+  ${secHead('📌', 'My Requests')}
+  <div class="panel"><div class="panel-head"><h3>${isAdmin ? 'All Leave Requests' : 'Your Leave Requests'}</h3>
+  <div class="panel-head-actions">
+    ${isAdmin ? '<button type="button" class="export-btn" onclick="exportLeaveRequests()">📊 Export</button>' : ''}
+  </div></div>
+  <div class="panel-body">
+  ${tableHTML}
+  </div></div>
+  `;
 }
 
 function leaveStatusBadge(status){
@@ -8212,7 +7915,7 @@ async function submitLeaveRequest(e){
     const type = document.getElementById('lr-type').value;
     const reason = document.getElementById('lr-reason').value.trim();
     const halfDay = document.getElementById('lr-half-day').value || '';
-    const empName = session ? session.name : 'Unknown';
+    const empName = LOGGED_USER ? LOGGED_USER.split('|')[1] || LOGGED_USER : 'Unknown';
     
     if(!from || !to || days <= 0 || !type || !reason){
       alert('Please fill all required fields.');
@@ -13066,52 +12769,7 @@ function accessChipsHtml(u){
   }).join('');
 }
 
-/* Apply a named permission template to a user: allowed modules become exactly the template's list. */
-async function applyTemplateToUser(username, tplName){
-  if(!isAdmin()) return;
-  const u = USERS.find(function(x){ return x.username === username; });
-  if(!u) return;
-  const tpl = PERMISSION_TEMPLATES[tplName];
-  if(!tpl){ alert('Template not found: ' + tplName); return; }
-  if(u.username === session.username){ alert('You cannot change your own access. Ask another admin.'); return; }
-  const roleTabs = roleTabsFor(u.role);
-  const target = tpl.slice();
-  /* deniedTabs: role tabs NOT in the template (and not locked) */
-  u.deniedTabs = roleTabs.filter(function(t){ return !LOCKED_TABS.includes(t) && target.indexOf(t) === -1; });
-  /* extraTabs: template tabs NOT already in role (and not locked, and real tabs) */
-  u.extraTabs = target.filter(function(t){
-    return !LOCKED_TABS.includes(t) && roleTabs.indexOf(t) === -1 && TABS.some(function(x){ return x.id === t; });
-  });
-  u.template = tplName;
-  logAudit('DATA CHANGE', 'Template "' + tplName + '" applied to user ' + u.username);
-  await saveUsers();
-  render();
-}
-
-function templateSectionHtml(u){
-  const isSelf = u.username === session.username;
-  const names = Object.keys(PERMISSION_TEMPLATES);
-  let h = '<div style="margin-bottom:10px; font-size:13px; color:var(--text);">Applying a template sets this user\'s module access to a preset list in one click. Fine-tune afterwards in the Access tab.</div>';
-  if(u.template){
-    h += '<div style="margin-bottom:12px;"><span class="access-chip chip-role">Current template: ' + esc(u.template) + '</span></div>';
-  }
-  if(isSelf){
-    h += '<div style="color:var(--muted); font-size:12px;">You cannot change your own access. Ask another admin.</div>';
-    return h;
-  }
-  h += '<div class="access-chips">';
-  names.forEach(function(name){
-    const mods = PERMISSION_TEMPLATES[name];
-    const active = u.template === name;
-    const cls = active ? 'access-chip chip-role chip-clickable' : 'access-chip chip-grant';
-    const check = active ? '&#10003; ' : '';
-    h += '<span class="' + cls + '" title="Modules: ' + esc(mods.join(', ')) + '" onclick="applyTemplateToUser(\'' + esc(u.username) + '\',\'' + esc(name) + '\')">' + check + esc(name) + ' <span class="chip-tag">' + mods.length + ' modules</span></span>';
-  });
-  h += '</div>';
-  return h;
-}
-
-/* Detail panel shown when an admin clicks a user name: General + Template + Access tabs. */
+/* Detail panel shown when an admin clicks a user name: General + Access tabs. */
 function userDetailPanel(u){
   const isSelf = u.username === session.username;
   const tab = userDetailTab || 'general';
@@ -13155,11 +12813,10 @@ function userDetailPanel(u){
   return `<div class="user-detail">
     <div class="user-detail-tabs">
       <button class="udt-btn${tab==='general'?' active':''}" onclick="event.stopPropagation(); setUserDetailTab('general')">General</button>
-      <button class="udt-btn${tab==='template'?' active':''}" onclick="event.stopPropagation(); setUserDetailTab('template')">Template</button>
       <button class="udt-btn${tab==='access'?' active':''}" onclick="event.stopPropagation(); setUserDetailTab('access')">Access</button>
     </div>
     <div class="user-detail-body" onclick="event.stopPropagation()">
-      ${tab==='general' ? general : (tab==='template' ? templateSectionHtml(u) : access)}
+      ${tab==='general' ? general : access}
     </div>
   </div>`;
 }
@@ -13337,11 +12994,11 @@ function userSecurityCell(u){
 }
 function renderUsers(){
   return `
-  ${tabHeader('Access Control', 'ADMIN')}
+  ${tabHeader('Access Control', 'Users')}
   ${importantNoticePanelHtml()}
   ${sendNotificationPanelHtml()}
   ${reportSchedulesPanelHtml()}
-  ${secHead('&#10133;', 'Create User')}
+  ${secHead('&#10133;', 'New Entry')}
   <div class="panel"><div class="panel-head"><h3>Add user login</h3></div>
   <div class="panel-body">
   <form onsubmit="return addUser(event)">
@@ -13358,7 +13015,7 @@ function renderUsers(){
     </div>
   </form>
   </div></div>
-  ${secHead('&#128203;', 'USERS')}
+  ${secHead('&#128203;', 'Records')}
   <div class="panel"><div class="panel-head"><h3>All logins <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(click a name to view General &amp; Access)</span></h3><div class="panel-head-actions">${importBtn('users')}<button class="icon-btn" onclick="restoreUsersFromBackup()" title="Restore the user list from the automatic backup">&#8634; Restore from backup${USERS_BACKUP_META ? ' ('+USERS_BACKUP_META.count+' users, '+new Date(USERS_BACKUP_META.savedAt).toLocaleDateString()+')' : ''}</button>${exportBtn('exportUsers')}</div></div>
   <div class="panel-body">
   <div class="user-list">
