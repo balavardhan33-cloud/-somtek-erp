@@ -1581,157 +1581,52 @@ function withTimeout(promise, ms, label){
   ]);
 }
 
-async function initFirebase(){
-  if(!FIREBASE_CONFIG || FIREBASE_CONFIG.apiKey === 'YOUR_API_KEY'){
-    firebaseLoadError = 'Firebase is not configured yet. Open the FIREBASE_CONFIG block near the top of the file and paste in your real project values from the Firebase console.';
-    console.error(firebaseLoadError);
-    return;
-  }
-  // REST calls need no SDK load / persistent connection - just mark ready.
-  firebaseReady = true;
-}
-
-async function fsGet(docId){
-  if(!firebaseReady) return null;
-  try{
-    const res = await fsFetch(FS_REST_BASE + docId, { method:'GET' }, 'Reading '+docId);
-    if(res.status === 404){ firebaseLoadError = null; fsGetLastStatus = 'missing'; return null; }
-    if(!res.ok){
-      let detail = '';
-      try{ const j = await res.json(); detail = (j.error && j.error.message) || ''; }catch(e2){}
-      throw new Error('HTTP '+res.status+(detail ? ': '+detail : ''));
-    }
-    const json = await res.json();
-    const raw = json.fields && json.fields.data && json.fields.data.stringValue;
-    firebaseLoadError = null;
-    fsGetLastStatus = 'ok';
-    return raw ? JSON.parse(raw) : null;
-  }catch(e){
-    console.error('fsGet failed', docId, e);
-    firebaseLoadError = 'DB error (read '+docId+'): '+e.message;
-    fsGetLastStatus = 'error';
-    return null;
-  }
-}
-/* 'ok' | 'missing' (confirmed 404) | 'error' (network/timeout - data may still exist!) */
-let fsGetLastStatus = 'ok';
-async function fsSet(docId, data){
-  if(!firebaseReady) return false;
-  try{
-    const body = { fields: { data: { stringValue: JSON.stringify(data) } } };
-    const res = await fsFetch(FS_REST_BASE + docId, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    }, 'Saving '+docId);
-    if(!res.ok){
-      let detail = '';
-      try{ const j = await res.json(); detail = (j.error && j.error.message) || ''; }catch(e2){}
-      throw new Error('HTTP '+res.status+(detail ? ': '+detail : ''));
-    }
-    firebaseLoadError = null;
-    return true;
-  }catch(e){
-    console.error('fsSet failed', docId, e);
-    firebaseLoadError = 'DB error (save '+docId+'): '+e.message;
-    return false;
-  }
-}
-
-/* ---- per-tab session, using sessionStorage on purpose --------------------
-   sessionStorage survives a page refresh/reload (so hitting F5 doesn't log
-   you out) but the browser automatically wipes it the moment the tab or
-   window is actually closed - no unload event needed, and no risk of
-   refresh accidentally triggering a logout. ---------------------------- */
-function saveSessionLocal(){
-  try{ sessionStorage.setItem('somtek_erp_session', JSON.stringify({username: session.username, location: currentLocation})); }catch(e){}
-}
-function clearSessionLocal(){
-  try{ sessionStorage.removeItem('somtek_erp_session'); }catch(e){}
-}
-function readSessionLocal(){
-  try{ const v = sessionStorage.getItem('somtek_erp_session'); return v ? JSON.parse(v) : null; }catch(e){ return null; }
-}
-
-/* User accounts live in USERS_DOC ('users_v2'). Old cached app versions
-   only know the legacy 'users' document - whatever they write there is
-   ignored, so no outdated device can ever wipe or reset accounts again. */
-const USERS_DOC = 'users_v2';
-const USERS_DOC_LEGACY = 'users';
-
 async function loadUsers(){
-  loadUsersBackupMeta(); /* fire-and-forget: fills the restore button label */
-  /* Retry up to 3 times - a temporary network failure must NEVER be treated
-     as "no users exist", otherwise the cloud user list gets overwritten
-     with defaults and every real user is wiped. */
-  let doc = null;
-  for(let attempt = 1; attempt <= 3; attempt++){
-    doc = await fsGet(USERS_DOC);
-    if(doc || fsGetLastStatus === 'missing') break;   /* got data, or confirmed 404 */
-    console.warn('loadUsers: read attempt '+attempt+' failed, retrying...');
-    await new Promise(r => setTimeout(r, 800 * attempt));
+  loadUsersBackupMeta();
+  
+  try {
+    // Load from new 'users' collection (no passwords)
+    const url = 'https://firestore.googleapis.com/v1/projects/somtek-erp/databases/(default)/documents/users';
+    const res = await withTimeout(fetch(url), FS_TIMEOUT_MS, 'Load users');
+    
+    if (res.ok) {
+      const data = await res.json();
+      const docs = data.documents || [];
+      
+      USERS = docs.map(doc => {
+        const f = doc.fields;
+        return {
+          username: f.username?.stringValue || '',
+          name: f.name?.stringValue || '',
+          role: f.role?.stringValue || 'enquiry',
+          mobile: f.mobile?.stringValue || '',
+          address: f.address?.stringValue || '',
+          dob: f.dob?.stringValue || '',
+          disabled: f.disabled?.booleanValue || false
+        };
+      });
+      
+      if (USERS.length > 0) {
+        CUSTOM_ROLES = {};
+        CUSTOM_FIELDS = {};
+        syncRoleOptions();
+        syncCustomFieldSchemas();
+        snapshotUsersState();
+        console.info('loadUsers: loaded ' + USERS.length + ' from users collection');
+        return;
+      }
+    }
+  } catch(e) {
+    console.warn('loadUsers: failed - ' + e);
   }
-  if(!doc && fsGetLastStatus === 'missing'){
-    /* users_v2 does not exist yet -> one-time migration from the legacy doc */
-    const legacy = await fsGet(USERS_DOC_LEGACY);
-    if(legacy && Array.isArray(legacy.list) && legacy.list.length){
-      doc = legacy;
-      await fsSet(USERS_DOC, legacy);
-      console.warn('loadUsers: migrated '+legacy.list.length+' user(s) from legacy doc to '+USERS_DOC+'.');
-    }
-  }
-  if(doc && Array.isArray(doc.list)){
-    USERS = doc.list;
-    CUSTOM_ROLES = (doc.roles && typeof doc.roles==='object' && !Array.isArray(doc.roles)) ? doc.roles : {};
-    CUSTOM_FIELDS = (doc.customFields && typeof doc.customFields==='object' && !Array.isArray(doc.customFields)) ? doc.customFields : {};
-    syncRoleOptions();
-    syncCustomFieldSchemas();
-    // migrate legacy default logins to the new requested credentials
-    let changed = false;
-    const legacyAdmin = USERS.find(u=>u.username==='admin1');
-    if(legacyAdmin && !USERS.some(u=>u.username==='Somtekadmin')){
-      legacyAdmin.username = 'Somtekadmin'; legacyAdmin.password = 'SomtekLLP'; legacyAdmin.name = 'Admin';
-      changed = true;
-    }
-    const legacyStores = USERS.find(u=>u.username==='store1');
-    if(legacyStores && !USERS.some(u=>u.username==='Somtekstores')){
-      legacyStores.username = 'Somtekstores'; legacyStores.password = 'SomtekLLP'; legacyStores.name = 'Stores';
-      changed = true;
-    }
-    const legacyLogistics = USERS.find(u=>u.username==='logistics1');
-    if(legacyLogistics && !USERS.some(u=>u.username==='Somtektransport')){
-      legacyLogistics.username = 'Somtektransport'; legacyLogistics.password = 'SomtekLLP'; legacyLogistics.name = 'Transport';
-      changed = true;
-    }
-    if(!USERS.some(u=>u.username==='Somtekauto')){
-      USERS.push({username:'Somtekauto', password:'SomtekLLP', name:'Automation', role:'automation'});
-      changed = true;
-    }
-    if(!USERS.some(u=>u.username==='Somtekank')){
-      USERS.push({username:'Somtekank', password:'SomtekLLP', name:'Enquiry Desk', role:'enquiry'});
-      changed = true;
-    }
-    snapshotUsersState();
-    if(changed) await saveUsers();
-    return;
-  }
+  
   USERS = DEFAULT_USERS;
   CUSTOM_ROLES = {};
   CUSTOM_FIELDS = {};
   syncRoleOptions();
   syncCustomFieldSchemas();
   snapshotUsersState();
-  if(fsGetLastStatus === 'missing'){
-    /* Confirmed: the users document really does not exist -> safe to seed defaults. */
-    await fsSet(USERS_DOC, {list: USERS, roles: CUSTOM_ROLES, customFields: CUSTOM_FIELDS});
-  }else{
-    /* The read FAILED (network/timeout). The real users very likely still exist
-       in Firestore - do NOT overwrite them. Use defaults in memory only and
-       surface the DB error banner so the problem is visible. */
-    console.error('loadUsers: could not read users after retries - NOT overwriting cloud users.');
-  }
 }
-
 let USERS_BACKUP_META = null; /* {savedAt, count} of the users_backup doc, for the Users tab */
 
 async function backupUsersDoc(){
