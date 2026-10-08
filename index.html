@@ -720,6 +720,35 @@ form input[readonly]{background:var(--panel-2); color:var(--muted); cursor:defau
 /* Composite barcode field on an Inward item line (readonly, auto-filled) */
 .in-line-barcode{letter-spacing:0.5px; text-align:center;}
 .in-line-barcode::placeholder{font-size:10px; opacity:0.6;}
+/* Camera barcode scanning */
+.scan-input-wrap{display:flex; gap:8px; align-items:stretch;}
+.scan-input-wrap .scan-input{flex:1 1 auto; min-width:0;}
+.scan-cam-btn{display:inline-flex; align-items:center; gap:7px; white-space:nowrap; flex:0 0 auto;}
+.scan-cam-btn svg{display:block;}
+.cam-stage{position:relative; background:#11151f; overflow:hidden; aspect-ratio:4/3; display:flex; align-items:center; justify-content:center;}
+.cam-stage video{width:100%; height:100%; object-fit:cover; display:block;}
+.cam-reticle{position:absolute; left:8%; right:8%; top:28%; bottom:28%; pointer-events:none; filter:drop-shadow(0 0 2px rgba(0,0,0,0.85));}
+.cam-reticle::before,.cam-reticle::after{content:''; position:absolute; width:26px; height:26px; border:3px solid rgba(255,255,255,0.9);}
+.cam-reticle::before{top:0; left:0; border-right:0; border-bottom:0;}
+.cam-reticle::after{bottom:0; right:0; border-left:0; border-top:0;}
+.cam-reticle i{position:absolute; width:26px; height:26px; border:3px solid rgba(255,255,255,0.9);}
+.cam-reticle i.tr{top:0; right:0; border-left:0; border-bottom:0;}
+.cam-reticle i.bl{bottom:0; left:0; border-right:0; border-top:0;}
+.cam-beam{position:absolute; left:8%; right:8%; top:50%; height:2px; background:#e6577a; box-shadow:0 0 8px rgba(230,87,122,0.9); pointer-events:none; animation:camBeam 1.8s ease-in-out infinite;}
+@keyframes camBeam{0%,100%{transform:translateY(-62px);} 50%{transform:translateY(62px);}}
+.cam-status{font-size:12.5px; color:var(--muted); margin-top:12px; line-height:1.5; min-height:34px;}
+.cam-status.cam-ok{color:#1fa574; font-weight:600;}
+.cam-status.cam-err{color:#e6577a; font-weight:600;}
+.cam-controls{display:flex; gap:8px; align-items:center; margin-top:10px; flex-wrap:wrap;}
+.cam-controls select{flex:1 1 180px; min-width:0; padding:7px 9px; border:1px solid var(--border); background:var(--panel); font-size:12.5px;}
+.cam-diag{font-size:11px; color:var(--muted); margin-top:8px; font-family:'IBM Plex Mono',monospace; line-height:1.5; word-break:break-word; white-space:pre-line;}
+.cam-found{margin-top:12px; max-height:132px; overflow-y:auto;}
+.cam-found-item{display:flex; justify-content:space-between; gap:10px; font-size:12px; padding:5px 0; border-bottom:1px solid var(--border);}
+.cam-found-code{font-family:'IBM Plex Mono',monospace; color:var(--accent); font-weight:700;}
+@media(max-width:560px){
+  .scan-input-wrap{flex-direction:column;}
+  .scan-cam-btn{justify-content:center;}
+}
 /* Outward barcode scanner box */
 .scan-row{border:1px solid var(--border); border-left:3px solid var(--accent-2); background:var(--panel-2); padding:12px 14px; margin:0 0 16px 0;}
 .scan-label{display:block; font-family:'Oswald',sans-serif; text-transform:uppercase; letter-spacing:0.05em; font-size:11.5px; font-weight:600; color:var(--text); margin-bottom:7px;}
@@ -6875,10 +6904,13 @@ function renderOutward(){
     </div>
     <div class="scan-row">
       <label class="scan-label">&#127915; Scan barcode to add item</label>
-      <input type="text" id="out-barcode-scanner" class="scan-input" autocomplete="off"
-             placeholder="Click here, then scan a label &mdash; or type a barcode and press Enter"
-             onkeydown="if(event.key==='Enter'){ event.preventDefault(); scanOutwardBarcode(this.value); }">
-      <div class="scan-hint" id="out-scan-hint">Each scan adds the item below, or bumps its quantity if it is already on the list. Review the lines, then press Add Dispatch to deduct the stock.</div>
+      <div class="scan-input-wrap">
+        <input type="text" id="out-barcode-scanner" class="scan-input" autocomplete="off"
+               placeholder="Click here, then scan a label &mdash; or type a barcode and press Enter"
+               onkeydown="if(event.key==='Enter'){ event.preventDefault(); scanOutwardBarcode(this.value); }">
+        <button type="button" class="btn scan-cam-btn" onclick="openCameraScanner()" title="Scan a barcode with the camera">${scanIconSvg()} Camera</button>
+      </div>
+      <div class="scan-hint" id="out-scan-hint">Use a handheld scanner, type the code, or press Camera to scan with this device. Each scan adds the item below, or bumps its quantity if it is already on the list. Review the lines, then press Add Dispatch to deduct the stock.</div>
     </div>
     <div class="out-lines-head">Items in this dispatch</div>
     <div id="out-item-lines">${outItemLineHtml()}</div>
@@ -6979,6 +7011,524 @@ function scanOutwardBarcode(raw){
   if(priceInput && !priceInput.value.trim() && item.cost) priceInput.value = item.cost;
 
   outScanHint(item.name + ' added — 1 of ' + avail + ' available.', 'ok');
+  if(field) field.focus();
+}
+
+/* ===================== CAMERA BARCODE SCANNING (Outward) =====================
+   The printed labels are Code 39 (see labelDocHtml -> code39Svg), so the
+   camera has to read Code 39, not only QR.
+
+   Two decode paths:
+     1. navigator BarcodeDetector where the browser ships it (Android Chrome,
+        desktop Chrome / Edge). Hardware-assisted, tolerant of angle and blur.
+     2. Otherwise a Code 39 scanline decoder built from this file's own CODE39
+        table. That covers iOS Safari and Firefox, needs no external library,
+        and keeps working with no internet.
+
+   Typing a code, or firing one in from a handheld scanner, is unaffected and
+   stays available whenever the camera cannot be used. */
+
+/* Reverse of CODE39: 9-element wide/narrow pattern -> character. */
+const CODE39_REV = (function(){
+  const m = {};
+  for(const ch in CODE39) m[CODE39[ch]] = ch;
+  return m;
+})();
+
+function scanIconSvg(){
+  return '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"'
+    + ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+    + '<path d="M3 8V5a2 2 0 0 1 2-2h3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/>'
+    + '<path d="M21 16v3a2 2 0 0 1-2 2h-3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/>'
+    + '<path d="M7 8.5v7M10.5 8.5v7M14 8.5v7M17 8.5v7" stroke-width="1.6"/></svg>';
+}
+
+/* ---- Code 39 scanline decoding ----
+   A Code 39 symbol is '*' + data + '*'. Each character is 9 elements
+   (bar,space,... beginning and ending with a bar) of which exactly 3 are wide,
+   and characters are separated by one narrow space.
+
+   A camera frame is nothing like a clean bitmap, so this does three things a
+   naive row scan does not:
+     - sweeps a range of angles, because a hand-held label is never level;
+     - thresholds each sample against a LOCAL moving average, so glare or a
+       lighting gradient across the label does not swallow half the bars;
+     - searches for the '*' start sentinel anywhere along the line, so printing,
+       a box edge or a smudge elsewhere in the row cannot invalidate the scan. */
+
+/* Decode the 9 elements starting at i. Returns the character, or ''. */
+function code39Char(runs, i){
+  let mn = Infinity, mx = 0;
+  for(let k = 0; k < 9; k++){
+    const L = runs[i + k].len;
+    if(L < mn) mn = L;
+    if(L > mx) mx = L;
+  }
+  if(mn <= 0 || mx < mn * 1.5) return '';     /* no wide/narrow separation */
+  const thr = (mn + mx) / 2;
+  let pat = '', wides = 0;
+  for(let k = 0; k < 9; k++){
+    const isWide = runs[i + k].len > thr;
+    pat += isWide ? '1' : '0';
+    if(isWide) wides++;
+  }
+  if(wides !== 3) return '';                  /* Code 39 is self-checking */
+  return CODE39_REV[pat] || '';
+}
+
+/* Find one complete '*' ... '*' symbol anywhere in the run list.
+   A diagonal scanline across a tilted label can throw up run patterns that
+   parse as a short symbol by chance, and a wrong read dispatches the wrong
+   product, so the quiet zones either side of the symbol are checked too. */
+function code39FindSymbol(runs){
+  const n = runs.length;
+  for(let s = 0; s + 29 <= n; s++){
+    if(!runs[s].dark) continue;               /* a symbol opens on a bar */
+    if(code39Char(runs, s) !== '*') continue;
+
+    /* narrow element width, taken from the start sentinel */
+    let narrow = Infinity;
+    for(let k = 0; k < 9; k++) if(runs[s + k].len < narrow) narrow = runs[s + k].len;
+    /* leading quiet zone: light, and clearly wider than one narrow element */
+    if(s > 0 && (runs[s - 1].dark || runs[s - 1].len < narrow * 2)) continue;
+
+    const chars = [];
+    let i = s + 10;                           /* step over '*' and its gap */
+    while(i + 9 <= n){
+      const ch = code39Char(runs, i);
+      if(!ch) break;
+      if(ch === '*'){
+        if(!chars.length) break;              /* '**' is not a code */
+        /* trailing quiet zone */
+        const after = i + 9;
+        if(after < n && (runs[after].dark || runs[after].len < narrow * 2)) break;
+        return chars.join('');
+      }
+      chars.push(ch);
+      if(chars.length > 48) break;
+      i += 10;
+    }
+  }
+  return '';
+}
+
+/* Try the line as scanned, then end-to-end, so a label held the other way
+   round still reads. */
+function code39DecodeRuns(runs){
+  if(!runs || runs.length < 29) return '';
+  return code39FindSymbol(runs) || code39FindSymbol(runs.slice().reverse());
+}
+
+/* Luminance samples -> alternating runs.
+   The cut is the midpoint between the darkest and lightest sample in the
+   neighbourhood, not a local mean. That matters under soft focus: blur is
+   roughly symmetric, so the true edge stays at the half-way level even as
+   contrast collapses, whereas a mean-based cut drifts and makes narrow bars
+   measure narrower than they are, which breaks the 3:1 wide/narrow test. */
+function code39RunsFromSamples(s){
+  const n = s.length;
+  if(n < 80) return null;
+  let gmn = 255, gmx = 0;
+  for(let i = 0; i < n; i++){ const v = s[i]; if(v < gmn) gmn = v; if(v > gmx) gmx = v; }
+  if(gmx - gmn < 32) return null;             /* flat: no code on this line */
+
+  const B = Math.max(8, Math.round(n / 24));
+  const nb = Math.ceil(n / B);
+  const bmin = new Float32Array(nb), bmax = new Float32Array(nb);
+  for(let b = 0; b < nb; b++){
+    let mn = 255, mx = 0;
+    const e = Math.min(n, (b + 1) * B);
+    for(let i = b * B; i < e; i++){ const v = s[i]; if(v < mn) mn = v; if(v > mx) mx = v; }
+    bmin[b] = mn; bmax[b] = mx;
+  }
+
+  const runs = [];
+  let cur = null, len = 0;
+  for(let i = 0; i < n; i++){
+    const b = (i / B) | 0;
+    const b0 = b > 0 ? b - 1 : 0;
+    const b1 = b < nb - 1 ? b + 1 : nb - 1;
+    let mn = bmin[b], mx = bmax[b];
+    if(bmin[b0] < mn) mn = bmin[b0];
+    if(bmax[b0] > mx) mx = bmax[b0];
+    if(bmin[b1] < mn) mn = bmin[b1];
+    if(bmax[b1] > mx) mx = bmax[b1];
+    /* no local contrast means quiet zone / plain paper, so: light */
+    const dark = (mx - mn >= 22) && s[i] < (mn + mx) / 2;
+    if(cur === null){ cur = dark; len = 1; continue; }
+    if(dark === cur){ len++; continue; }
+    runs.push({ len: len, dark: cur });
+    cur = dark; len = 1;
+  }
+  runs.push({ len: len, dark: cur });
+  return runs;
+}
+
+/* Sample a straight line through the frame. Each point averages a few pixels
+   taken ALONG the bars (perpendicular to the scan), which costs little and
+   firms up soft-focus edges and sensor noise enormously - those taps all fall
+   inside the same bar, because bars are tall in that direction.
+   Outside the frame reads as white, which is exactly the quiet zone a symbol
+   needs. */
+const CODE39_TAPS = [-3, 0, 3];
+
+function code39SampleLine(data, W, H, cx, cy, ux, uy, half){
+  const nx = -uy, ny = ux;
+  const out = new Float32Array(half * 2);
+  let k = 0;
+  for(let t = -half; t < half; t++){
+    const bx = cx + ux * t, by = cy + uy * t;
+    let sum = 0;
+    for(let q = 0; q < CODE39_TAPS.length; q++){
+      const o = CODE39_TAPS[q];
+      const x = (bx + nx * o) | 0;
+      const y = (by + ny * o) | 0;
+      if(x < 0 || y < 0 || x >= W || y >= H){ sum += 255; continue; }
+      const p = (y * W + x) * 4;
+      sum += (data[p] * 299 + data[p + 1] * 587 + data[p + 2] * 114) / 1000;
+    }
+    out[k++] = sum / CODE39_TAPS.length;
+  }
+  return out.subarray(0, k);
+}
+
+/* Sweep angles and parallel offsets; return the first code that decodes.
+   Angles are ordered by how likely they are, and the search exits on the first
+   hit, so the common near-level case stays cheap. */
+const CODE39_ANGLES = [0, 5, -5, 10, -10, 16, -16, 22, -22, 30, -30];
+
+function code39DecodeImageData(img){
+  const data = img.data, W = img.width, H = img.height;
+  const cx0 = W / 2, cy0 = H / 2;
+  const half = Math.floor(W / 2);
+  const span = H * 0.38;
+  const lines = 13;
+  /* A real label is crossed by many scanlines, so a genuine code turns up
+     more than once. Requiring two independent lines to agree costs almost
+     nothing and throws out the chance parses that a diagonal cut can produce.
+     Scanning the wrong product into a dispatch is far worse than a retry. */
+  const votes = new Map();
+  for(let ai = 0; ai < CODE39_ANGLES.length; ai++){
+    const r = CODE39_ANGLES[ai] * Math.PI / 180;
+    const ux = Math.cos(r), uy = Math.sin(r);
+    const nx = -uy, ny = ux;
+    for(let li = 0; li < lines; li++){
+      const d = -span + (2 * span) * (li / (lines - 1));
+      const runs = code39RunsFromSamples(
+        code39SampleLine(data, W, H, cx0 + nx * d, cy0 + ny * d, ux, uy, half));
+      if(!runs) continue;
+      const code = code39DecodeRuns(runs);
+      if(!code) continue;
+      const v = (votes.get(code) || 0) + 1;
+      if(v >= 2) return code;
+      votes.set(code, v);
+    }
+  }
+  return '';
+}
+
+/* ---- camera session ---- */
+let camScan = null;   /* {stream, track, raf, detector, seen, devices} */
+
+function camStatus(msg, kind){
+  const el = document.getElementById('cam-scan-status');
+  if(!el) return;
+  el.textContent = msg;
+  el.className = 'cam-status' + (kind ? ' cam-' + kind : '');
+}
+
+function camBeep(){
+  try{
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if(!Ctx) return;
+    const ac = new Ctx();
+    const osc = ac.createOscillator(), gain = ac.createGain();
+    osc.type = 'square';
+    osc.frequency.value = 1760;
+    gain.gain.setValueAtTime(0.07, ac.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + 0.12);
+    osc.connect(gain); gain.connect(ac.destination);
+    osc.start(); osc.stop(ac.currentTime + 0.13);
+    setTimeout(() => { try{ ac.close(); }catch(e){} }, 400);
+  }catch(e){}
+  try{ if(navigator.vibrate) navigator.vibrate(55); }catch(e){}
+}
+
+function camScanModalHtml(){
+  return '<div id="cam-scan-root" class="modal-overlay" onclick="if(event.target===this)closeCameraScanner()">'
+    + '<div class="modal-card" style="max-width:540px;">'
+      + '<div class="modal-head"><h3>Scan barcode</h3>'
+        + '<button type="button" class="icon-btn" onclick="closeCameraScanner()">Close</button></div>'
+      + '<div class="modal-body">'
+        + '<div class="cam-stage">'
+          + '<video id="cam-scan-video" playsinline muted autoplay></video>'
+          + '<div class="cam-reticle"><i class="tr"></i><i class="bl"></i></div>'
+          + '<div class="cam-beam"></div>'
+        + '</div>'
+        + '<div class="cam-status" id="cam-scan-status">Starting camera…</div>'
+        + '<div class="cam-controls">'
+          + '<select id="cam-scan-device" style="display:none;" onchange="switchScanCamera(this.value)"></select>'
+          + '<button type="button" class="btn btn-ghost" id="cam-scan-torch" style="display:none;" onclick="toggleScanTorch()">💡 Light</button>'
+        + '</div>'
+        + '<div class="cam-diag" id="cam-scan-diag"></div>'
+        + '<div class="cam-found" id="cam-scan-found"></div>'
+      + '</div>'
+      + '<div class="modal-actions">'
+        + '<button type="button" class="btn btn-secondary" onclick="closeCameraScanner()">Done</button>'
+      + '</div>'
+    + '</div>'
+  + '</div>';
+}
+
+async function openCameraScanner(){
+  if(document.getElementById('cam-scan-root')) return;
+  document.body.insertAdjacentHTML('beforeend', camScanModalHtml());
+  document.addEventListener('keydown', camScanKeydown);
+  camScan = { stream:null, track:null, raf:0, detector:null, seen:new Map(), busy:false,
+               torchOn:false, waitTimer:0, frames:0, hits:0, lastRaw:'', via:'' };
+
+  if(!window.isSecureContext){
+    camStatus('The camera needs a secure (https) connection. Open the ERP over https, or keep using a handheld scanner or type the code.', 'err');
+    return;
+  }
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    camStatus('This browser does not provide camera access. Use a handheld scanner, or type the code.', 'err');
+    return;
+  }
+  await startScanStream();
+}
+
+function camScanKeydown(e){ if(e.key === 'Escape') closeCameraScanner(); }
+
+function camClearWait(){
+  if(camScan && camScan.waitTimer){ clearTimeout(camScan.waitTimer); camScan.waitTimer = 0; }
+}
+
+async function startScanStream(deviceId){
+  if(!camScan) return;
+  stopScanTracks();
+  camStatus('Starting camera… allow camera access if the browser asks.');
+  /* An unanswered permission prompt leaves getUserMedia pending forever, with
+     no error to catch. Without this the box would just read "Starting camera"
+     indefinitely. The request is deliberately left running, so it still works
+     if permission is granted late. */
+  camClearWait();
+  camScan.waitTimer = setTimeout(function(){
+    const el = document.getElementById('cam-scan-status');
+    if(el && el.textContent.indexOf('Starting camera') === 0){
+      camStatus('Still waiting for camera permission. Look for the camera prompt near the address bar, or allow camera access for this site in the browser settings. A handheld scanner, or typing the code, works in the meantime.', 'err');
+    }
+  }, 10000);
+  const constraints = deviceId
+    ? { video: { deviceId: { exact: deviceId } } }
+    : { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 960 } } };
+  let stream;
+  try{
+    stream = await navigator.mediaDevices.getUserMedia(constraints);
+  }catch(err){
+    camClearWait();
+    const name = (err && err.name) || '';
+    if(name === 'NotAllowedError' || name === 'SecurityError'){
+      camStatus('Camera permission was refused. Allow camera access for this site in the browser settings, then press Camera again.', 'err');
+    } else if(name === 'NotFoundError' || name === 'OverconstrainedError'){
+      camStatus('No camera was found on this device. Use a handheld scanner, or type the code.', 'err');
+    } else if(name === 'NotReadableError'){
+      camStatus('The camera is already in use by another app. Close that app and press Camera again.', 'err');
+    } else {
+      camStatus('The camera could not be started' + (name ? ' (' + name + ')' : '') + '. Use a handheld scanner, or type the code.', 'err');
+    }
+    return;
+  }
+  camClearWait();
+  if(!camScan){ stream.getTracks().forEach(t => t.stop()); return; }   /* closed while waiting */
+
+  camScan.stream = stream;
+  camScan.track = stream.getVideoTracks()[0] || null;
+  const video = document.getElementById('cam-scan-video');
+  if(!video){ stopScanTracks(); return; }
+  video.srcObject = stream;
+  try{ await video.play(); }catch(e){}
+
+  await buildScanCameraList();
+  setupScanTorch();
+
+  /* Prefer the browser's own detector when it can read Code 39. */
+  camScan.detector = null;
+  try{
+    if('BarcodeDetector' in window){
+      const supported = await window.BarcodeDetector.getSupportedFormats();
+      const want = ['code_39','code_128','code_93','qr_code','ean_13'].filter(f => supported.includes(f));
+      if(want.includes('code_39')) camScan.detector = new window.BarcodeDetector({ formats: want });
+    }
+  }catch(e){ camScan.detector = null; }
+
+  camStatus(camScan.detector
+    ? 'Point the camera at a barcode label. It is read automatically.'
+    : 'Point the camera at a barcode label and fill the frame width. Hold steady — 1D labels need a moment to focus.');
+
+  camScan.canvas = document.createElement('canvas');
+  camScan.ctx = camScan.canvas.getContext('2d', { willReadFrequently: true });
+  camScanLoop();
+}
+
+async function buildScanCameraList(){
+  const sel = document.getElementById('cam-scan-device');
+  if(!sel || !navigator.mediaDevices.enumerateDevices) return;
+  let devices = [];
+  try{ devices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput'); }
+  catch(e){ return; }
+  if(devices.length < 2){ sel.style.display = 'none'; return; }
+  const current = camScan && camScan.track && camScan.track.getSettings
+    ? (camScan.track.getSettings().deviceId || '') : '';
+  sel.innerHTML = devices.map((d, i) =>
+    '<option value="' + esc(d.deviceId) + '"' + (d.deviceId === current ? ' selected' : '') + '>'
+    + esc(d.label || ('Camera ' + (i + 1))) + '</option>').join('');
+  sel.style.display = '';
+}
+
+function switchScanCamera(deviceId){
+  if(!deviceId) return;
+  camStatus('Switching camera…');
+  startScanStream(deviceId);
+}
+
+function setupScanTorch(){
+  const btn = document.getElementById('cam-scan-torch');
+  if(!btn || !camScan || !camScan.track || !camScan.track.getCapabilities){ if(btn) btn.style.display = 'none'; return; }
+  let caps = {};
+  try{ caps = camScan.track.getCapabilities() || {}; }catch(e){}
+  btn.style.display = caps.torch ? '' : 'none';
+  camScan.torchOn = false;
+}
+
+async function toggleScanTorch(){
+  if(!camScan || !camScan.track) return;
+  try{
+    camScan.torchOn = !camScan.torchOn;
+    await camScan.track.applyConstraints({ advanced: [{ torch: camScan.torchOn }] });
+    const btn = document.getElementById('cam-scan-torch');
+    if(btn) btn.textContent = camScan.torchOn ? '💡 Light on' : '💡 Light';
+  }catch(e){}
+}
+
+function camScanLoop(){
+  if(!camScan) return;
+  camScan.raf = requestAnimationFrame(camScanLoop);
+  if(camScan.busy) return;
+  const video = document.getElementById('cam-scan-video');
+  if(!video || video.readyState < 2 || !video.videoWidth) return;
+
+  camScan.busy = true;
+  camScan.frames++;
+  if(camScan.frames % 8 === 0) camUpdateDiag();
+
+  const finish = (code) => {
+    camScan.busy = false;
+    if(code) onCameraCode(code);
+  };
+
+  /* Where the browser ships a detector, use it first - it copes with angle and
+     blur better than anything written here. But some builds advertise code_39
+     and still never return one, so until a scan has actually succeeded the
+     built-in decoder gets a go at the same frame rather than waiting on a
+     detector that may never fire. */
+  if(camScan.detector){
+    camScan.detector.detect(video)
+      .then(list => {
+        const code = list && list.length ? String(list[0].rawValue || '').trim() : '';
+        if(code){ camScan.via = 'device decoder'; finish(code); return; }
+        if(camScan.hits === 0){ camScan.via = 'built-in decoder'; finish(camScanBuiltIn(video)); return; }
+        camScan.busy = false;
+      })
+      .catch(() => { camScan.busy = false; });
+    return;
+  }
+
+  camScan.via = 'built-in decoder';
+  finish(camScanBuiltIn(video));
+}
+
+/* Draw the frame and run the in-app Code 39 decoder over it. */
+function camScanBuiltIn(video){
+  try{
+    /* 640 was starving thin bars when the label sat small in the frame. */
+    const cw = Math.min(1280, video.videoWidth);
+    const chh = Math.max(1, Math.round(video.videoHeight * (cw / video.videoWidth)));
+    camScan.canvas.width = cw;
+    camScan.canvas.height = chh;
+    camScan.ctx.drawImage(video, 0, 0, cw, chh);
+    return code39DecodeImageData(camScan.ctx.getImageData(0, 0, cw, chh));
+  }catch(e){
+    return '';
+  }
+}
+
+/* A silent failure is impossible to report, so say out loud what is being
+   read, how, and what the last code off the label actually said - that
+   separates "the camera cannot read it" from "it read fine but no stock item
+   carries that barcode". */
+function camUpdateDiag(){
+  const el = document.getElementById('cam-scan-diag');
+  if(!el || !camScan) return;
+  const v = document.getElementById('cam-scan-video');
+  const res = v && v.videoWidth ? (v.videoWidth + '×' + v.videoHeight) : '—';
+  let txt = res + ' · ' + (camScan.detector ? 'device + built-in decoder' : 'built-in decoder')
+          + ' · ' + camScan.frames + ' frames read';
+  if(camScan.lastRaw) txt += '\n last code seen: ' + camScan.lastRaw;
+  else if(camScan.frames > 60) txt += '\n no barcode read yet — fill the frame width with the label and hold steady';
+  el.textContent = txt;
+}
+
+/* A held-still label decodes many times a second; only act once per code
+   per cooldown so the quantity does not run away. */
+function onCameraCode(code){
+  if(!camScan || !code) return;
+  camScan.lastRaw = code;
+  camScan.hits++;
+  camUpdateDiag();
+  const now = Date.now();
+  const last = camScan.seen.get(code) || 0;
+  if(now - last < 1800) return;
+  camScan.seen.set(code, now);
+
+  camBeep();
+  scanOutwardBarcode(code);
+
+  const hint = document.getElementById('out-scan-hint');
+  const msg = hint ? hint.textContent : '';
+  const bad = hint && hint.classList.contains('scan-err');
+  camStatus(msg || ('Scanned ' + code), bad ? 'err' : 'ok');
+
+  const found = document.getElementById('cam-scan-found');
+  if(found){
+    found.insertAdjacentHTML('afterbegin',
+      '<div class="cam-found-item"><span class="cam-found-code">' + esc(code) + '</span>'
+      + '<span style="color:var(--muted);">' + esc(bad ? 'not added' : 'added') + '</span></div>');
+  }
+}
+
+function stopScanTracks(){
+  if(!camScan) return;
+  if(camScan.stream){
+    try{ camScan.stream.getTracks().forEach(t => t.stop()); }catch(e){}
+  }
+  camScan.stream = null;
+  camScan.track = null;
+}
+
+function closeCameraScanner(){
+  document.removeEventListener('keydown', camScanKeydown);
+  if(camScan){
+    camClearWait();
+    if(camScan.raf) cancelAnimationFrame(camScan.raf);
+    stopScanTracks();
+    camScan = null;
+  }
+  const video = document.getElementById('cam-scan-video');
+  if(video){ try{ video.srcObject = null; }catch(e){} }
+  const root = document.getElementById('cam-scan-root');
+  if(root) root.remove();
+  const field = document.getElementById('out-barcode-scanner');
   if(field) field.focus();
 }
 
