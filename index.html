@@ -717,6 +717,17 @@ form input[readonly]{background:var(--panel-2); color:var(--muted); cursor:defau
   .nav-item{width:auto;}
   .main{padding:20px;}
 }
+/* Composite barcode field on an Inward item line (readonly, auto-filled) */
+.in-line-barcode{letter-spacing:0.5px; text-align:center;}
+.in-line-barcode::placeholder{font-size:10px; opacity:0.6;}
+/* Outward barcode scanner box */
+.scan-row{border:1px solid var(--border); border-left:3px solid var(--accent-2); background:var(--panel-2); padding:12px 14px; margin:0 0 16px 0;}
+.scan-label{display:block; font-family:'Oswald',sans-serif; text-transform:uppercase; letter-spacing:0.05em; font-size:11.5px; font-weight:600; color:var(--text); margin-bottom:7px;}
+.scan-input{width:100%; font-family:'IBM Plex Mono',monospace; font-size:13.5px; letter-spacing:0.5px; padding:9px 11px; border:1px solid var(--border); background:var(--panel);}
+.scan-input:focus{outline:none; border-color:var(--accent); box-shadow:0 0 0 2px rgba(31,68,145,0.12);}
+.scan-hint{font-size:11.5px; color:var(--muted); margin-top:6px; line-height:1.5;}
+.scan-hint.scan-ok{color:#1fa574; font-weight:600;}
+.scan-hint.scan-err{color:#e6577a; font-weight:600;}
 </style>
 </head>
 <body>
@@ -3727,6 +3738,8 @@ const IMPORT_SCHEMAS = {
   ],
   inward: [
     {key:'date', header:'Date', type:'date'},
+    {key:'productLocation', header:'Product Location'},
+    {key:'barcode', header:'Barcode'},
     {key:'vendor', header:'Vendor Name'},
     {key:'poNumber', header:'PO Number'},
     {key:'poDate', header:'PO Date', type:'date'},
@@ -5447,6 +5460,7 @@ function renderInward(){
         </select>
       </div>
       <div class="field" id="in-paid-vendor-wrap" style="display:none;"><label>Paying Vendor Name</label><input type="text" id="in-paid-vendor" list="in-paid-vendor-list" autocomplete="off" oninput="this.dataset.manual='1'" placeholder="Auto-fills vendor name, or type"><datalist id="in-paid-vendor-list">${prevPaidVendors.map(v=>`<option value="${esc(v)}">`).join('')}</datalist></div>
+      <div class="field"><label>Product Location</label><input type="text" id="in-product-location" placeholder="e.g., Rack A1, Shelf 3, Warehouse 2"></div>
     </div>
     <div class="out-lines-head">Items in this receipt (multiple items allowed, including items of the same category)</div>
     <div id="in-item-lines">${inItemLineHtml()}</div>
@@ -5456,18 +5470,17 @@ function renderInward(){
   </form>
   <p style="margin:10px 0 0 0; font-size:11.5px; color:var(--muted);">All items above are saved under the same vendor / PO in one go &mdash; you can repeat the same Item Type / Category on any number of lines. Stock is automatically added to the Inventory tab (matched by item name).</p>
   </div></div>
-  ${barcodeStationHtml('in')}
   ${secHead('&#128203;', 'Records')}
-  <div class="panel"><div class="panel-head"><h3>Inward log</h3><div class="panel-head-actions">${importBtn('inward')}${exportBtn('exportInward')}</div></div>
+  <div class="panel"><div class="panel-head"><h3>Inward log</h3><div class="panel-head-actions"><button type="button" class="export-btn" onclick="bgAutoAssign()">&#127915; Assign Barcodes</button>${importBtn('inward')}${exportBtn('exportInward')}</div></div>
   <div class="panel-body">
   ${tableToolbar('inward', d.inward)}
-  <table><thead><tr><th>Date</th><th>Vendor Name</th><th>PO Number</th><th>PO Date</th><th>ITEM</th><th>Item Type</th><th>Qty</th><th>Price</th><th>Total Value</th><th>Transporter</th><th>L.R No</th><th>Amount Paid</th><th>Paid By</th><th>Aging</th><th>Low Stock</th>${cfHeaders('inward')}<th>Added By</th><th></th></tr></thead><tbody>
-  ${inwardRows.length===0 ? noMatchRow(17, d.inward.length) :
+  <table><thead><tr><th>Date</th><th>📍 Location</th><th>🏷️ Barcode</th><th>Vendor Name</th><th>PO Number</th><th>PO Date</th><th>ITEM</th><th>Item Type</th><th>Qty</th><th>Price</th><th>Total Value</th><th>Transporter</th><th>L.R No</th><th>Amount Paid</th><th>Paid By</th><th>Aging</th><th>Low Stock</th>${cfHeaders('inward')}<th>Added By</th><th></th></tr></thead><tbody>
+  ${inwardRows.length===0 ? noMatchRow(18, d.inward.length) :
     inwardRows.map(r=>`<tr>
-      <td>${fd(r.date)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.vendor)}</td><td>${esc(r.poNumber)}</td><td>${fd(r.poDate)}</td><td>${descCellHtml('inward:'+r.id+':item', r.item)}</td><td>${esc(r.itemType)}</td><td>${esc(r.qty)}</td><td>${esc(r.price)}</td><td>${rowTotal(r.qty, r.price)}</td><td>${esc(r.transporter)}</td><td>${esc(r.lrNumber)}</td><td>${esc(r.amountPaid)}</td><td>${esc(inPaidByDisplay(r))}</td><td>${ageChip(inwardAgeDays(r)) || '<span style="color:var(--muted); font-size:11px;">&mdash;</span>'}</td><td>${esc(r.deadStock||'No')}</td>${cfCells('inward', r)}${addedByCell(r)}
+      <td>${fd(r.date)}</td><td style="font-size:12px; color:var(--muted);">${r.productLocation ? esc(r.productLocation) : '—'}</td>${inwardBarcodeCell(r, d)}<td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.vendor)}</td><td>${esc(r.poNumber)}</td><td>${fd(r.poDate)}</td><td>${descCellHtml('inward:'+r.id+':item', r.item)}</td><td>${esc(r.itemType)}</td><td>${esc(r.qty)}</td><td>${esc(r.price)}</td><td>${rowTotal(r.qty, r.price)}</td><td>${esc(r.transporter)}</td><td>${esc(r.lrNumber)}</td><td>${esc(r.amountPaid)}</td><td>${esc(inPaidByDisplay(r))}</td><td>${ageChip(inwardAgeDays(r)) || '<span style="color:var(--muted); font-size:11px;">&mdash;</span>'}</td><td>${esc(r.deadStock||'No')}</td>${cfCells('inward', r)}${addedByCell(r)}
       <td>${actionCell(editBtn('inward', r.id), deleteBtn(`deleteInward('${r.id}')`))}</td>
     </tr>`).join('')}
-  </tbody>${totalFootRow(17 + cfDefs('inward').length, 'Total Value (all matching entries)', sumTotal(inwardAll,'qty','price'))}</table>
+  </tbody>${totalFootRow(18 + cfDefs('inward').length, 'Total Value (all matching entries)', sumTotal(inwardAll,'qty','price'))}</table>
   ${showMoreBar('inward', inwardAll.length)}
   </div></div>`;
 }
@@ -5575,6 +5588,32 @@ async function assignItemCodes(){
   logAudit('INVENTORY', 'Assigned barcode codes to ' + missing.length + ' item(s)');
   render();
 }
+
+/* NEW: Generate next available barcode code (BSOM-0001, BSOM-0002, etc.) */
+function getNextBarcodeCode(){
+  const d = DATA[currentLocation] || {};
+  const inv = d.inventory || [];
+  let maxNum = 0;
+
+  // Get prefix based on company location
+  let prefix = 'BSOM-';
+  if(currentLocation && currentLocation.toLowerCase().includes('evissat')){
+    prefix = 'BEVI-';
+  }
+
+  inv.forEach(i => {
+    const code = String(i.itemCode || '').trim();
+    if(code.startsWith(prefix)){
+      const num = parseInt(code.substring(prefix.length), 10);
+      if(!isNaN(num) && num > maxNum) maxNum = num;
+    }
+  });
+
+  const nextNum = (maxNum + 1).toString().padStart(4, '0');
+  return prefix + nextNum;
+}
+
+
 /* Deliberately forgiving, because this field is typed by hand as well as
    scanned: case, spaces, dashes and underscores are all ignored. Falls back
    to the internal id and then the exact item name. */
@@ -5728,6 +5767,381 @@ function bcPrintLabels(){
   w.focus();
   setTimeout(() => { try{ w.print(); }catch(e){} }, 350);
 }
+
+/* NEW: Print individual barcode label (4x6 thermal) */
+/* ---- Barcode label: shared data + one HTML builder for preview and print ----
+   The label is printed and stuck to received stock, so it deliberately carries
+   no purchase cost. Everything on it answers a warehouse question: what is it,
+   what is its code, when did it arrive, where does it live. */
+
+function labelCompanyName(loc){
+  return loc === 'SOMTEK' ? 'SOMTEK EQUIPMENTS LLP' : 'EVISSAT TECHNOLOGIES';
+}
+
+/* Resolve a barcode to everything the label needs. The code may be a composite
+   (PREFIX/BSOM-0001) or a plain item code; In Date and Product Location live on
+   the Inward record, the name on the Inventory item. */
+function labelDataFor(code){
+  code = String(code == null ? '' : code).trim();
+  if(!code) return null;
+
+  const d = DATA[currentLocation] || {};
+  const inv = d.inventory || [];
+  const inw = d.inward || [];
+  /* Resolve through the inward record carrying this barcode - barcodes belong
+     to receipts now, not to inventory items. */
+  let rec = null;
+  for(let i = inw.length - 1; i >= 0; i--){
+    if(String(inw[i].barcode || '').trim() === code){ rec = inw[i]; break; }
+  }
+  let item = null;
+  if(rec){
+    const nm = String(rec.item || '').toLowerCase().trim();
+    item = inv.find(i => String(i.name || '').toLowerCase().trim() === nm);
+  }
+  if(!item){
+    item = inv.find(i => String(i.barcode || '').trim() === code) || null;
+    if(item) rec = null;
+  }
+  if(!item) return null;
+
+  return {
+    code: code,
+    itemName: String(item.name || ''),
+    inDate: rec && rec.date ? rec.date
+          : (item.receiptDate || item.lastInwardOn || item.addedOn || ''),
+    productLocation: rec ? String(rec.productLocation || '').trim() : String(item.productLocation || '').trim(),
+    company: labelCompanyName(currentLocation),
+    logo: (typeof quoteLogoUri === 'function') ? quoteLogoUri(currentLocation) : ''
+  };
+}
+
+/* The label document. forPrint adds the auto-print hook; the preview reuses the
+   identical markup so what you see is what comes out of the printer. */
+function labelDocHtml(data){
+  const svg = code39Svg(data.code, {narrow:2.6, height:80, text:false})
+           || '<div style="color:#c00; font-size:10px;">This code cannot be drawn as Code 39</div>';
+  const dateStr = (typeof fd === 'function' && fd(data.inDate)) || data.inDate || '\u2014';
+  const loc = data.productLocation || '\u2014';
+
+  return '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
+    '<title>Label ' + esc(data.code) + '</title><style>' +
+    '*{margin:0; padding:0; box-sizing:border-box;}' +
+    'body{font-family:Arial, Helvetica, sans-serif; background:#fff;}' +
+    '.thermal-label{width:101.6mm; height:152.4mm; padding:5mm; background:#fff;' +
+      ' display:flex; flex-direction:column; align-items:center; text-align:center;}' +
+    /* company block */
+    '.lbl-brand{width:100%; padding-bottom:3mm; border-bottom:2px solid #000;}' +
+    '.lbl-logo{max-width:58mm; max-height:20mm; object-fit:contain; display:block; margin:0 auto 2mm;}' +
+    '.lbl-company{font-size:13px; font-weight:800; letter-spacing:0.04em;}' +
+    /* barcode block, centred in the label */
+    '.lbl-mid{flex:1; width:100%; display:flex; flex-direction:column;' +
+      ' align-items:center; justify-content:center; gap:3mm;}' +
+    '.lbl-item{font-size:14px; font-weight:700; line-height:1.3; max-height:56px;' +
+      ' overflow:hidden; word-break:break-word; padding:0 2mm;}' +
+    '.lbl-bars svg{max-width:90mm; height:125px; display:block; margin:0 auto;}' +
+    '.lbl-code{font-family:"Courier New", monospace; font-size:21px; font-weight:700;' +
+      ' letter-spacing:1.5px; word-break:break-all;}' +
+    /* footer facts */
+    '.lbl-foot{width:100%; border-top:2px solid #000; padding-top:3mm; display:flex;' +
+      ' flex-direction:column; gap:2mm;}' +
+    '.lbl-row{display:flex; justify-content:space-between; align-items:baseline; gap:3mm;}' +
+    '.lbl-k{font-size:9px; font-weight:700; letter-spacing:0.08em; color:#444;' +
+      ' text-transform:uppercase; white-space:nowrap;}' +
+    '.lbl-v{font-size:13px; font-weight:700; text-align:right; word-break:break-word;}' +
+    '.lbl-loc .lbl-v{font-size:16px;}' +
+    '@media print{body{margin:0;} .thermal-label{padding:5mm;}}' +
+    '</style></head><body>' +
+    '<div class="thermal-label">' +
+      '<div class="lbl-brand">' +
+        (data.logo ? '<img class="lbl-logo" src="' + data.logo + '" alt="">' : '') +
+        '<div class="lbl-company">' + esc(data.company) + '</div>' +
+      '</div>' +
+      '<div class="lbl-mid">' +
+        (data.itemName ? '<div class="lbl-item">' + esc(data.itemName) + '</div>' : '') +
+        '<div class="lbl-bars">' + svg + '</div>' +
+        '<div class="lbl-code">' + esc(data.code) + '</div>' +
+      '</div>' +
+      '<div class="lbl-foot">' +
+        '<div class="lbl-row"><span class="lbl-k">In Date</span>' +
+          '<span class="lbl-v">' + esc(dateStr) + '</span></div>' +
+        '<div class="lbl-row lbl-loc"><span class="lbl-k">Location</span>' +
+          '<span class="lbl-v">' + esc(loc) + '</span></div>' +
+      '</div>' +
+    '</div></body></html>';
+}
+
+/* Preview: the same label, shown to scale in a modal, with Print alongside. */
+function previewLabel(code){
+  const data = labelDataFor(code);
+  if(!data){ alert('No inventory item matches barcode ' + code); return; }
+  closeLabelPreview();
+
+  /* 101.6mm x 152.4mm at 96dpi, scaled to sit in the modal. */
+  const W = 384, H = 576, S = 0.62;
+  document.body.insertAdjacentHTML('beforeend',
+  '<div id="label-preview-root" class="modal-overlay" onclick="if(event.target===this)closeLabelPreview()">' +
+    '<div class="modal-card" style="max-width:420px;">' +
+      '<div class="modal-head"><h3>Label Preview</h3>' +
+        '<button class="icon-btn" onclick="closeLabelPreview()">Close</button></div>' +
+      '<div class="modal-body" style="text-align:center;">' +
+        '<div style="width:' + Math.round(W*S) + 'px; height:' + Math.round(H*S) + 'px;' +
+          ' margin:0 auto; overflow:hidden; background:#fff; box-shadow:0 2px 14px rgba(0,0,0,0.25);">' +
+          '<iframe id="label-preview-frame" title="Label preview" style="width:' + W + 'px;' +
+            ' height:' + H + 'px; border:0; transform:scale(' + S + ');' +
+            ' transform-origin:top left; display:block;"></iframe>' +
+        '</div>' +
+        '<p style="font-size:11px; color:var(--muted); margin-top:12px;">' +
+          '4&times;6 in thermal label, shown to scale.</p>' +
+      '</div>' +
+      '<div class="modal-actions">' +
+        '<button class="btn btn-secondary" onclick="closeLabelPreview()">Close</button>' +
+        '<button class="btn" data-code="' + esc(data.code) + '"' +
+          ' onclick="printIndividualLabel(this.getAttribute(\'data-code\'))">Print Label</button>' +
+      '</div>' +
+    '</div>' +
+  '</div>');
+
+  /* Written into the frame rather than passed as srcdoc so the logo data URI
+     and the inline SVG are not subject to attribute-length quirks. */
+  const fr = document.getElementById('label-preview-frame');
+  if(fr){
+    try{
+      const doc = fr.contentWindow.document;
+      doc.open(); doc.write(labelDocHtml(data)); doc.close();
+    }catch(e){ console.error('Label preview failed:', e); }
+  }
+}
+
+function closeLabelPreview(){
+  const el = document.getElementById('label-preview-root');
+  if(el) el.remove();
+}
+
+function printIndividualLabel(code){
+  const data = labelDataFor(code);
+  if(!data){ alert('No inventory item matches barcode ' + String(code || '')); return; }
+
+  const w = window.open('', '_blank');
+  if(!w){ alert('Browser blocked pop-up. Allow pop-ups and try again.'); return; }
+  w.document.write(labelDocHtml(data));
+  w.document.close();
+  w.focus();
+  setTimeout(() => { try{ w.print(); }catch(e){ console.error('Print failed:', e); } }, 350);
+}
+
+/* ONE barcode cell renderer, shared by the Inward, Inventory and Outward
+   tables so all three render identically and cannot drift apart. Code 39 bars
+   encode the composite itself, so a scan returns exactly the code printed
+   beneath them. */
+function barcodeCellHtml(code){
+  code = String(code == null ? '' : code).trim();
+  if(!code) return '<td style="text-align:center; color:var(--muted); font-size:12px;">&mdash;</td>';
+  const svg = code39Svg(code, {narrow:1.2, height:40, text:false});
+  const btnCss = 'padding:3px 6px; font-size:10px;';
+  const btns =
+    '<button type="button" class="btn btn-sm" style="' + btnCss + '" data-code="' + esc(code) + '"'
+      + ' onclick="previewLabel(this.getAttribute(\'data-code\'))">🔍 Preview</button> ' +
+    '<button type="button" class="btn btn-sm" style="' + btnCss + '" data-code="' + esc(code) + '"'
+      + ' onclick="printIndividualLabel(this.getAttribute(\'data-code\'))">🖨 Print</button>';
+  return '<td style="text-align:center; padding:6px;">' +
+    '<div style="margin-bottom:6px;">' + (svg || esc(code)) + '</div>' +
+    '<div style="font-family:\'IBM Plex Mono\', monospace; font-weight:700; font-size:12px; color:var(--accent); cursor:pointer; user-select:all; margin-bottom:8px; letter-spacing:0.5px;" title="Click to copy">' + esc(code) + '</div>' +
+    btns +
+    '</td>';
+}
+
+/* NEW: Get barcode for inward item, or show assign button */
+/* The barcode number shown under the visual barcode in the Inward log.
+   Prefers the record's own composite barcode (PREFIX/BSOM-0001) and falls back
+   to the matched inventory item's code for stock received before barcodes were
+   introduced. Single source of truth: the table, the Excel export and the
+   print label all read this, so what you see is what you get. */
+function inwardBarcodeText(r, d){
+  return String((r && r.barcode) || '').trim();
+}
+
+function inwardBarcodeCell(r, d){
+  return barcodeCellHtml(inwardBarcodeText(r, d));
+}
+
+
+
+
+/* ---------------- BARCODE GENERATOR (Inward) ----------------
+   Assigns barcodes to existing Inward records that have none, using exactly
+   the same scheme as new entries: BSOM-0001 / BEVI-0001, or PREFIX/BSOM-0001
+   when a prefix is given. Records that already have a barcode are never touched. */
+function bgLocPrefix(){
+  return (currentLocation && currentLocation.toLowerCase().includes('evissat')) ? 'BEVI-' : 'BSOM-';
+}
+function bgSeq(code, prefix){
+  let s = String(code == null ? '' : code).trim().toUpperCase();
+  const slash = s.lastIndexOf('/');
+  if(slash >= 0) s = s.slice(slash + 1);
+  if(!s.startsWith(prefix)) return 0;
+  const n = parseInt(s.slice(prefix.length), 10);
+  return isNaN(n) ? 0 : n;
+}
+function bgMissing(){
+  const d = DATA[currentLocation] || {};
+  return (d.inward || []).filter(r => !String(r.barcode || '').trim() && String(r.item || '').trim());
+}
+function bgNextNum(){
+  const prefix = bgLocPrefix();
+  let max = 0;
+  const dd = DATA[currentLocation] || {};
+  (dd.inward || []).concat(dd.inventory || []).forEach(r => {
+    const n = bgSeq(r.barcode, prefix);
+    if(n > max) max = n;
+  });
+  return max + 1;
+}
+function openBarcodeGenerator(){
+  closeBarcodeGenerator();
+  const list = bgMissing().slice().reverse();
+  const loc = bgLocPrefix();
+  const next = loc + String(bgNextNum()).padStart(4, '0');
+  const rows = list.map(r => '<tr>' +
+    '<td style="text-align:center;"><input type="checkbox" class="bg-chk" value="' + esc(r.id) + '" checked onchange="bgCount()"></td>' +
+    '<td>' + fd(r.date) + '</td>' +
+    '<td style="white-space:normal;">' + esc(r.item) + '</td>' +
+    '<td>' + esc(r.itemType || '') + '</td>' +
+    '<td>' + esc(r.qty || '') + '</td>' +
+    '<td>' + esc(r.vendor || '') + '</td>' +
+    '<td>' + esc(r.poNumber || '') + '</td>' +
+    '<td><input type="text" class="bg-pfx" data-id="' + esc(r.id) + '" placeholder="optional" style="width:90px; padding:5px 6px; background:var(--bg); border:1px solid var(--border); color:var(--text);"></td>' +
+    '</tr>').join('');
+  const body = list.length === 0
+    ? '<div style="padding:18px; color:var(--success);">&#10003; Every Inward entry already has a barcode.</div>'
+    : '<div style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; margin-bottom:14px;">' +
+        '<div><label style="display:block; font-size:11px; text-transform:uppercase; color:var(--muted); margin-bottom:4px;">Prefix for all (optional)</label>' +
+        '<input type="text" id="bg-all-pfx" placeholder="e.g. BFV" oninput="bgApplyAll(this.value)" style="width:140px; padding:8px; background:var(--bg); border:1px solid var(--border); color:var(--text);"></div>' +
+        '<div style="font-size:12.5px; color:var(--muted); padding-bottom:8px;">Next number: <b style="color:var(--accent);">' + esc(next) + '</b> &middot; <span id="bg-count">' + list.length + '</span> selected</div>' +
+      '</div>' +
+      '<div style="overflow:auto; max-height:52vh; border:1px solid var(--border);">' +
+      '<table><thead><tr><th><input type="checkbox" checked onchange="bgAll(this.checked)"></th><th>Date</th><th>Item</th><th>Item Type</th><th>Qty</th><th>Vendor</th><th>PO Number</th><th>Prefix</th></tr></thead>' +
+      '<tbody>' + rows + '</tbody></table></div>';
+  const el = document.createElement('div');
+  el.id = 'bg-modal';
+  el.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:9000; display:flex; align-items:center; justify-content:center; padding:16px;';
+  el.onclick = e => { if(e.target === el) closeBarcodeGenerator(); };
+  el.innerHTML = '<div class="panel" style="width:960px; max-width:100%; max-height:92vh; overflow:auto; margin:0;">' +
+    '<div class="panel-head"><h3>Assign barcodes to existing stock</h3>' +
+    '<button type="button" class="btn btn-ghost" onclick="closeBarcodeGenerator()">&times; Close</button></div>' +
+    '<div class="panel-body">' +
+    '<p style="font-size:12.5px; color:var(--muted); margin:0 0 14px 0;">Inward entries without a barcode are listed below. Existing barcodes are never changed, so printed labels stay valid.</p>' +
+    body +
+    (list.length ? '<div style="margin-top:14px; display:flex; gap:10px;"><button type="button" class="btn" onclick="bgAssign()">&#127915; Assign barcodes</button>' +
+      '<button type="button" class="btn btn-ghost" onclick="closeBarcodeGenerator()">Cancel</button></div>' : '') +
+    '</div></div>';
+  document.body.appendChild(el);
+}
+/* One click: every Inward entry with a blank barcode gets the next number. */
+async function bgAutoAssign(){
+  const d = DATA[currentLocation];
+  const recs = (d.inward || []).filter(r => !String(r.barcode || '').trim());
+  if(!recs.length){ alert('Every Inward entry already has a barcode.'); return; }
+  const loc = bgLocPrefix();
+  let n = bgNextNum();
+  const first = loc + String(n).padStart(4, '0');
+  const last = loc + String(n + recs.length - 1).padStart(4, '0');
+  if(!confirm('Assign barcodes to ' + recs.length + ' Inward entr' + (recs.length === 1 ? 'y' : 'ies') + ' with no barcode?\n\n' +
+     first + (recs.length > 1 ? ' to ' + last : '') + '\n\nExisting barcodes are not changed.')) return;
+  recs.forEach(r => {
+    const code = loc + String(n++).padStart(4, '0');
+    const p = String(r.barcodePrefix || '').trim().toUpperCase();
+    r.barcode = p ? p + '/' + code : code;
+  });
+  await saveLocation(currentLocation);
+  logAudit('INWARD', 'Auto-assigned barcodes to ' + recs.length + ' inward entr' + (recs.length === 1 ? 'y' : 'ies'));
+  render();
+}
+/* Edit-modal check for an Inward barcode. Returns the final barcode, or null
+   to cancel the save. Blank -> next number; duplicates and unprintable
+   characters are refused. */
+function bgEditBarcode(recordId, raw){
+  const d = DATA[currentLocation] || {};
+  let v = String(raw || '').trim().toUpperCase();
+  if(!v) return bgLocPrefix() + String(bgNextNum()).padStart(4, '0');
+  if(!/^[A-Z0-9 .\-$+%\/]+$/.test(v)){ alert('Barcode can only use letters, numbers, space and - . $ / + %'); return null; }
+  const dup = (d.inward || []).find(r => r.id !== recordId && String(r.barcode || '').trim().toUpperCase() === v);
+  if(dup){ alert('Barcode "' + v + '" is already used by another Inward entry (' + (dup.item || 'no item') + ').'); return null; }
+  const dupI = (d.inventory || []).find(i => String(i.barcode || '').trim().toUpperCase() === v);
+  if(dupI){ alert('Barcode "' + v + '" is already used by Inventory item ' + (dupI.name || '') + '.'); return null; }
+  return v;
+}
+/* Inventory edit: barcode must not belong to another item (via Inward or its own). */
+function bgInvEditBarcode(item, raw){
+  const d = DATA[currentLocation] || {};
+  let v = String(raw || '').trim().toUpperCase();
+  if(!v) return bgLocPrefix() + String(bgNextNum()).padStart(4, '0');
+  if(!/^[A-Z0-9 .\-$+%\/]+$/.test(v)){ alert('Barcode can only use letters, numbers, space and - . $ / + %'); return null; }
+  const nm = String(item.name || '').toLowerCase().trim();
+  const dupR = (d.inward || []).find(r => String(r.barcode || '').trim().toUpperCase() === v && String(r.item || '').toLowerCase().trim() !== nm);
+  if(dupR){ alert('Barcode "' + v + '" is already used by Inward entry ' + (dupR.item || '') + '.'); return null; }
+  const dupI = (d.inventory || []).find(i => i.id !== item.id && String(i.barcode || '').trim().toUpperCase() === v);
+  if(dupI){ alert('Barcode "' + v + '" is already used by Inventory item ' + (dupI.name || '') + '.'); return null; }
+  return v;
+}
+/* One click: every Inventory item showing no barcode gets the next number. */
+async function bgInvAutoAssign(){
+  const d = DATA[currentLocation];
+  const items = (d.inventory || []).filter(i => String(i.name || '').trim() && !getInventoryBarcode(i.name));
+  if(!items.length){ alert('Every Inventory item already has a barcode.'); return; }
+  const loc = bgLocPrefix();
+  let n = bgNextNum();
+  const first = loc + String(n).padStart(4, '0');
+  const last = loc + String(n + items.length - 1).padStart(4, '0');
+  if(!confirm('Assign barcodes to ' + items.length + ' Inventory item' + (items.length === 1 ? '' : 's') + ' with no barcode?\n\n' +
+     first + (items.length > 1 ? ' to ' + last : '') + '\n\nExisting barcodes are not changed.')) return;
+  items.forEach(i => { i.barcode = loc + String(n++).padStart(4, '0'); });
+  await saveLocation(currentLocation);
+  logAudit('INVENTORY', 'Auto-assigned barcodes to ' + items.length + ' inventory item' + (items.length === 1 ? '' : 's'));
+  render();
+}
+function closeBarcodeGenerator(){
+  const el = document.getElementById('bg-modal');
+  if(el) el.remove();
+}
+function bgCount(){
+  const n = document.querySelectorAll('#bg-modal .bg-chk:checked').length;
+  const c = document.getElementById('bg-count');
+  if(c) c.textContent = n;
+}
+function bgAll(on){
+  document.querySelectorAll('#bg-modal .bg-chk').forEach(c => { c.checked = on; });
+  bgCount();
+}
+function bgApplyAll(v){
+  document.querySelectorAll('#bg-modal .bg-pfx').forEach(i => { i.value = v; });
+}
+async function bgAssign(){
+  const d = DATA[currentLocation];
+  const ids = [...document.querySelectorAll('#bg-modal .bg-chk:checked')].map(c => c.value);
+  if(!ids.length){ alert('Select at least one entry.'); return; }
+  const pfx = {};
+  document.querySelectorAll('#bg-modal .bg-pfx').forEach(i => { pfx[i.getAttribute('data-id')] = i.value.trim().toUpperCase(); });
+  const bad = Object.keys(pfx).filter(id => ids.includes(id) && pfx[id] && !/^[A-Z0-9 .\-$+%]+$/.test(pfx[id]));
+  if(bad.length){ alert('Prefix can only use letters, numbers, space and - . $ + %'); return; }
+  if(!confirm('Assign barcodes to ' + ids.length + ' Inward entr' + (ids.length === 1 ? 'y' : 'ies') + '?')) return;
+  const loc = bgLocPrefix();
+  let n = bgNextNum();
+  /* Oldest first, so numbers follow receipt order. */
+  const recs = d.inward.filter(r => ids.includes(r.id) && !String(r.barcode || '').trim());
+  recs.forEach(r => {
+    const code = loc + String(n++).padStart(4, '0');
+    const p = pfx[r.id] || '';
+    r.barcode = p ? p + '/' + code : code;
+    r.barcodePrefix = p;
+  });
+  await saveLocation(currentLocation);
+  logAudit('INWARD', 'Assigned barcodes to ' + recs.length + ' existing inward entr' + (recs.length === 1 ? 'y' : 'ies'));
+  closeBarcodeGenerator();
+  render();
+  alert('Done. ' + recs.length + ' barcode(s) assigned. Use Preview / Print in the Barcode column of the Inward log.');
+}
+
 /* The panel itself. mode is 'in' (Inward) or 'out' (Outward). */
 function barcodeStationHtml(mode){
   const d = DATA[currentLocation];
@@ -5778,6 +6192,8 @@ function inItemLineHtml(){
     <input type="text" class="out-line-item in-line-type" style="flex:1 1 160px; min-width:130px;" placeholder="Item Type / Category">
     <input type="number" class="out-line-qty in-line-qty" placeholder="Qty" oninput="updateInLinesTotal()">
     <input type="number" step="0.01" class="out-line-price in-line-price" placeholder="Price per item" oninput="updateInLinesTotal()">
+    <input type="text" class="in-line-prefix" placeholder="Prefix (AFR, LOT, etc.)" style="flex:0 1 130px; min-width:120px; font-weight:bold; color:var(--accent);">
+    <input type="text" class="in-line-barcode" placeholder="Composite Barcode" readonly style="flex:0 1 180px; min-width:160px; background:var(--bg-hover); font-family:monospace; font-weight:bold; color:var(--accent-2); font-size:11px;" title="Auto: Prefix/LocationBarcode">
     <select class="out-line-item in-line-deadstock" style="flex:0 1 120px; min-width:100px;" title="Low Stock">
       <option value="No" selected>Low: No</option>
       <option value="Yes">Low: Yes</option>
@@ -5830,6 +6246,72 @@ function nextInwardPoNumber(d){
   return prefix + '-' + String(maxN + 1).padStart(3, '0');
 }
 async function addInward(e){
+
+/* NEW: Generate next inward barcode code (BBSOM-0001, BBSOM-0002, etc.) */
+
+/* Get next barcode number for a specific prefix (e.g., "CUSTOM-" → 0001) */
+function getNextBarcodeForPrefix(prefix){
+  const d = DATA[currentLocation] || {};
+  const inw = d.inward || [];
+  let maxNum = 0;
+
+  inw.forEach(r => {
+    const code = String(r.barcode || '').trim();
+    if(code.startsWith(prefix)){
+      const num = parseInt(code.substring(prefix.length), 10);
+      if(!isNaN(num) && num > maxNum) maxNum = num;
+    }
+  });
+
+  const nextNum = (maxNum + 1).toString().padStart(4, '0');
+  return prefix + nextNum;
+}
+
+/* Location prefix for this company's stock barcodes. */
+function locationBarcodePrefix(){
+  return (currentLocation && currentLocation.toLowerCase().includes('evissat')) ? 'BEVI-' : 'BSOM-';
+}
+
+/* The sequence number inside a barcode, whatever shape it is.
+   'BSOM-0007' -> 7 and 'BFV/BSOM-0007' -> 7. The old code tested
+   startsWith(prefix) on the whole string, so every composite scored 0 and the
+   counter never advanced past 0001. */
+function barcodeSeqNum(code, prefix){
+  let s = String(code == null ? '' : code).trim().toUpperCase();
+  const slash = s.lastIndexOf('/');
+  if(slash >= 0) s = s.slice(slash + 1);
+  if(!s.startsWith(prefix)) return 0;
+  const n = parseInt(s.slice(prefix.length), 10);
+  return isNaN(n) ? 0 : n;
+}
+
+/* The next unused stock number. Counts saved inward records AND the barcodes
+   already handed to line rows on screen, so several lines in one entry each
+   get their own number instead of all getting 0001. */
+function getNextInwardBarcodeCode(){
+  const prefix = locationBarcodePrefix();
+  let max = 0;
+
+  const d = DATA[currentLocation] || {};
+  (d.inward || []).forEach(r => {
+    const n = barcodeSeqNum(r.barcode, prefix);
+    if(n > max) max = n;
+  });
+
+  /* Unsaved line rows currently in the Inward form. */
+  try{
+    const fields = document.querySelectorAll('.in-line-barcode');
+    for(let i = 0; i < fields.length; i++){
+      const n = barcodeSeqNum(fields[i].value, prefix);
+      if(n > max) max = n;
+    }
+  }catch(e){ /* no DOM (tests) - saved records alone are enough */ }
+
+  return prefix + String(max + 1).padStart(4, '0');
+}
+
+
+
   e.preventDefault();
   const d = DATA[currentLocation];
   const prefix = inwardPoPrefix(currentLocation);
@@ -5850,7 +6332,8 @@ async function addInward(e){
     lrNumber: document.getElementById('in-lr').value.trim(),
     amountPaid: document.getElementById('in-amount-paid').value.trim(),
     paidBy: paidBy,
-    paidVendor: paidBy === 'Paid by vendor' ? document.getElementById('in-paid-vendor').value.trim() : ''
+    paidVendor: paidBy === 'Paid by vendor' ? document.getElementById('in-paid-vendor').value.trim() : '',
+    productLocation: document.getElementById('in-product-location').value.trim()
   };
   if(paidBy === 'Paid by vendor' && !header.paidVendor){
     alert('You chose "Paid by vendor" - enter the paying vendor name.');
@@ -5861,6 +6344,8 @@ async function addInward(e){
     itemType: line.querySelector('.in-line-type').value.trim(),
     qty: line.querySelector('.in-line-qty').value.trim(),
     price: line.querySelector('.in-line-price').value.trim(),
+    barcodePrefix: line.querySelector('.in-line-prefix').value.trim(),
+    barcode: line.querySelector('.in-line-barcode').value.trim(),
     deadStock: line.querySelector('.in-line-deadstock').value || 'No'
   })).filter(l => l.item || l.itemType || l.qty || l.price);
   /* item details are optional - a header-only entry is still allowed */
@@ -5868,6 +6353,9 @@ async function addInward(e){
   for(const l of lines){
     d.inward.push({
       id: uid(),
+      location: currentLocation,
+      barcode: l.barcode || (l.barcodePrefix ? l.barcodePrefix + '/' + getNextInwardBarcodeCode() : getNextInwardBarcodeCode()),
+      barcodePrefix: l.barcodePrefix,
       date: header.date,
       vendor: header.vendor,
       poNumber: header.poNumber,
@@ -5877,6 +6365,7 @@ async function addInward(e){
       amountPaid: header.amountPaid,
       paidBy: header.paidBy,
       paidVendor: header.paidVendor,
+      productLocation: header.productLocation,
       item: l.item,
       itemType: l.itemType,
       qty: l.qty,
@@ -5901,7 +6390,12 @@ async function addInward(e){
           specs: '',
           cost: l.price,
           category: l.itemType,
+          barcodePrefix: l.barcodePrefix,
           deadStock: l.deadStock,
+          billRef: header.invoiceNo || header.billRef || '',
+          invoiceNo: header.invoiceNo || '',
+          supplier: header.supplier || '',
+          receiptDate: header.date || today(),
           addedOn: header.date || today(),
           lastInwardOn: header.date || today(),
           addedBy: actorName()
@@ -5915,8 +6409,8 @@ async function addInward(e){
 }
 function exportInward(){
   const d = DATA[currentLocation];
-  const headers = ['Date','Vendor Name','PO Number','PO Date','ITEM','Item Type','Qty','Price','Total Value','Transporter','LR Number','Amount Paid','Paid By','Paying Vendor','Low Stock','Added By'];
-  const rows = d.inward.map(r=>[r.date, r.vendor, r.poNumber, r.poDate, r.item, r.itemType, r.qty, r.price, ((parseFloat(r.qty)||0)*(parseFloat(r.price)||0))||'', r.transporter||'', r.lrNumber||'', r.amountPaid||'', r.paidBy||'', r.paidVendor||'', r.deadStock||'No', r.addedBy]);
+  const headers = ['Date','Product Location','Barcode','Vendor Name','PO Number','PO Date','ITEM','Item Type','Qty','Price','Total Value','Transporter','LR Number','Amount Paid','Paid By','Paying Vendor','Low Stock','Added By'];
+  const rows = d.inward.map(r=>[r.date, r.productLocation||'', inwardBarcodeText(r, d), r.vendor, r.poNumber, r.poDate, r.item, r.itemType, r.qty, r.price, ((parseFloat(r.qty)||0)*(parseFloat(r.price)||0))||'', r.transporter||'', r.lrNumber||'', r.amountPaid||'', r.paidBy||'', r.paidVendor||'', r.deadStock||'No', r.addedBy]);
   cfExportAppend('inward', d.inward, headers, rows);
   exportToExcel(currentLocation+'_Inward', headers, rows);
 }
@@ -6037,6 +6531,111 @@ function isLowStock(i){
 }
 let invSection = 'stock';
 function switchInvSection(s){ invSection = s; render(); }
+
+/* ---- Inventory: barcode + product location, sourced from Inward records ---- */
+
+/* Most recent inward record for an inventory item, matched on item name. */
+function inwardRecordForItem(itemName){
+  const name = String(itemName == null ? '' : itemName).toLowerCase().trim();
+  if(!name) return null;
+  const d = DATA[currentLocation] || {};
+  const inw = d.inward || [];
+  for(let i = inw.length - 1; i >= 0; i--){
+    if(String(inw[i].item || '').toLowerCase().trim() === name) return inw[i];
+  }
+  return null;
+}
+
+/* Composite barcode (PREFIX/BSOM-0001) for an inventory item. */
+/* THE barcode for a stock item - the one on the physical sticker. Inventory
+   and Outward both read this, so the two tabs can never disagree.
+   Takes the most recent inward receipt that actually carries a barcode (a later
+   barcode-less receipt must not mask an assigned code), then the item's own
+   code so pre-barcode stock still shows something. */
+function getInventoryBarcode(itemName){
+  const nm = String(itemName == null ? '' : itemName).toLowerCase().trim();
+  if(!nm) return '';
+  const d = DATA[currentLocation] || {};
+  const own = (d.inventory || []).find(i => String(i.name || '').toLowerCase().trim() === nm && String(i.barcode || '').trim());
+  if(own) return String(own.barcode).trim();
+  const inw = d.inward || [];
+  for(let i = inw.length - 1; i >= 0; i--){
+    if(String(inw[i].item || '').toLowerCase().trim() !== nm) continue;
+    const b = String(inw[i].barcode || '').trim();
+    if(b) return b;
+  }
+  return '';
+}
+
+/* Where the product physically sits - the Product Location typed in Inward
+   (e.g. "Rack A1"), NOT the company location. */
+function getInventoryProductLocation(item){
+  if(item && String(item.productLocation || '').trim()) return String(item.productLocation).trim();
+  const r = inwardRecordForItem(item && item.name);
+  if(r && String(r.productLocation || '').trim()) return String(r.productLocation).trim();
+  return String((item && item.productLocation) || '').trim();
+}
+
+function inventoryBarcodeCell(item){
+  return barcodeCellHtml(getInventoryBarcode(item && item.name));
+}
+
+function inventoryLocationCell(item){
+  /* Same presentation as the Product Location column in the Inward log. */
+  const loc = getInventoryProductLocation(item);
+  return '<td style="font-size:12px; color:var(--muted);">' + (loc ? esc(loc) : '—') + '</td>';
+}
+
+/* Full-size view: big QR for phones, Code 39 for handheld scanners. */
+function openBarcodeModal(code){
+  code = String(code == null ? '' : code).trim();
+  if(!code) return;
+  closeBarcodeModal();
+
+  const c39 = code39Svg(code, {narrow:2.2, height:70, text:false});
+  const d = DATA[currentLocation] || {};
+  const rec = (d.inward || []).find(r => String(r.barcode || '').trim() === code);
+  const invOwn = rec ? null : (d.inventory || []).find(i => String(i.barcode || '').trim() === code);
+  const itemName = rec ? String(rec.item || '') : (invOwn ? String(invOwn.name || '') : '');
+  const prodLoc = rec ? String(rec.productLocation || '') : (invOwn ? String(invOwn.productLocation || '') : '');
+
+  document.body.insertAdjacentHTML('beforeend',
+  '<div id="barcode-modal-root" class="modal-overlay" onclick="if(event.target===this)closeBarcodeModal()">' +
+    '<div class="modal-card" style="max-width:420px;">' +
+      '<div class="modal-head"><h3>Scan Barcode</h3>' +
+        '<button class="icon-btn" onclick="closeBarcodeModal()">Close</button></div>' +
+      '<div class="modal-body" style="text-align:center;">' +
+        (itemName ? '<p style="font-weight:600; margin-bottom:4px;">' + esc(itemName) + '</p>' : '') +
+        (prodLoc ? '<p style="font-size:12px; color:var(--muted); margin-bottom:14px;">Location: ' + esc(prodLoc) + '</p>' : '') +
+        '<div id="barcode-modal-qr" style="display:flex; justify-content:center; margin-bottom:16px;"></div>' +
+        (c39
+          ? '<div style="background:#fff; padding:10px; display:inline-block; margin-bottom:10px;">' + c39 + '</div>'
+          : '<p style="font-size:11px; color:var(--muted);">Code 39 cannot encode this barcode &mdash; use the QR code above.</p>') +
+        '<div style="font-family:\'IBM Plex Mono\', monospace; font-weight:700; font-size:15px; letter-spacing:1px; user-select:all; margin-top:6px;">' +
+          esc(code) +
+        '</div>' +
+      '</div>' +
+      '<div class="modal-actions">' +
+        '<button class="btn btn-secondary" onclick="closeBarcodeModal()">Close</button>' +
+        '<button class="btn btn-secondary" onclick="previewLabel(this.getAttribute(\'data-code\'))" data-code="' + esc(code) + '">Preview Label</button>' +
+        '<button class="btn" onclick="printIndividualLabel(this.getAttribute(\'data-code\'))" data-code="' + esc(code) + '">Print Label</button>' +
+      '</div>' +
+    '</div>' +
+  '</div>');
+
+  if(typeof QRCode !== 'undefined'){
+    try{
+      new QRCode(document.getElementById('barcode-modal-qr'),
+        {text: code, width: 190, height: 190, correctLevel: QRCode.CorrectLevel.M});
+    }catch(e){}
+  }
+}
+
+function closeBarcodeModal(){
+  const el = document.getElementById('barcode-modal-root');
+  if(el) el.remove();
+}
+
 function renderInventory(){
   const d = DATA[currentLocation];
   invStampDates(d);
@@ -6076,13 +6675,13 @@ function renderInventory(){
   </form>
   </div></div>
   ${secHead('&#128203;', 'Records')}
-  <div class="panel"><div class="panel-head"><h3>Stock &mdash; ${locationLabel(currentLocation, 14)}</h3><div class="panel-head-actions">${importBtn('inventory')}${exportBtn('exportInventory')}</div></div>
+  <div class="panel"><div class="panel-head"><h3>Stock &mdash; ${locationLabel(currentLocation, 14)}</h3><div class="panel-head-actions"><button type="button" class="export-btn" onclick="bgInvAutoAssign()">&#127915; Assign Barcodes</button>${importBtn('inventory')}${exportBtn('exportInventory')}</div></div>
   <div class="panel-body">
   ${tableToolbar('inventory', d.inventory)}
-  <table><thead><tr><th>Item</th><th>Date</th><th>Qty</th><th>Specifications</th><th>Cost</th><th>Total Value</th><th>Category</th><th>Aging</th><th>Low Stock</th>${cfHeaders('inventory')}<th>Added By</th><th></th></tr></thead><tbody>
-  ${invRows.length===0 ? noMatchRow(11, d.inventory.length) :
+  <table><thead><tr><th>Item</th><th>Date</th><th>Qty</th><th>Barcode</th><th>Location</th><th>Specifications</th><th>Cost</th><th>Total Value</th><th>Category</th><th>Aging</th><th>Low Stock</th>${cfHeaders('inventory')}<th>Added By</th><th></th></tr></thead><tbody>
+  ${invRows.length===0 ? noMatchRow(13, d.inventory.length) :
     invRows.map(i=>`<tr>
-      <td style="font-family:'IBM Plex Sans',sans-serif; max-width:340px; white-space:normal;">${descCellHtml('inventory:'+i.id+':name', i.name, 70)}</td><td>${fd(invDate(i)) || '<span style="color:var(--muted); font-size:11px;">&mdash;</span>'}</td><td>${esc(i.qty)}${isLowStock(i) ? ' <span class="badge badge-overdue" title="At or below minimum quantity of ' + esc(i.minQty) + '">LOW</span>' : ''}</td><td style="white-space:normal; max-width:220px;">${descCellHtml('inventory:'+i.id+':specs', i.specs)}</td><td>${esc(i.cost)}</td><td>${rowTotal(i.qty, i.cost)}</td><td>${esc(i.category)}</td>
+      <td style="font-family:'IBM Plex Sans',sans-serif; max-width:340px; white-space:normal;">${descCellHtml('inventory:'+i.id+':name', i.name, 70)}</td><td>${fd(invDate(i)) || '<span style="color:var(--muted); font-size:11px;">&mdash;</span>'}</td><td>${esc(i.qty)}${isLowStock(i) ? ' <span class="badge badge-overdue" title="At or below minimum quantity of ' + esc(i.minQty) + '">LOW</span>' : ''}</td>${inventoryBarcodeCell(i)}${inventoryLocationCell(i)}<td style="white-space:normal; max-width:220px;">${descCellHtml('inventory:'+i.id+':specs', i.specs)}</td><td>${esc(i.cost)}</td><td>${rowTotal(i.qty, i.cost)}</td><td>${esc(i.category)}</td>
       <td>${ageChip(invAgeDays(i)) || '<span style="color:var(--muted); font-size:11px;">&mdash;</span>'}</td>
       <td><select class="status-select" onchange="updateInventoryDeadStock('${i.id}', this.value)">
         <option value="No" ${(i.deadStock||'No')==='No'?'selected':''}>No</option>
@@ -6091,7 +6690,7 @@ function renderInventory(){
       ${cfCells('inventory', i)}${addedByCell(i)}
       <td>${actionCell(editBtn('inventory', i.id), deleteBtn(`deleteInventory('${i.id}')`))}</td>
     </tr>`).join('')}
-  </tbody>${totalFootRow(11 + cfDefs('inventory').length, 'Total Stock Value (all matching items)', sumTotal(invAll,'qty','cost'))}</table>
+  </tbody>${totalFootRow(13 + cfDefs('inventory').length, 'Total Stock Value (all matching items)', sumTotal(invAll,'qty','cost'))}</table>
   ${showMoreBar('inventory', invAll.length)}
   </div></div>`;
   const lowRows = limitRows('inventoryLow', lowStockList);
@@ -6185,7 +6784,6 @@ async function addInventory(e){
     cost: document.getElementById('inv-cost').value.trim(),
     category: document.getElementById('inv-cat').value.trim(),
     deadStock: document.getElementById('inv-deadstock').value || 'No',
-    itemCode: nextItemCode(DATA[currentLocation]),
     addedOn: today(),
     addedBy: actorName()
   });
@@ -6217,8 +6815,8 @@ async function updateInventoryLowStockRemarks(id, value){
 }
 function exportInventory(){
   const d = DATA[currentLocation];
-  const headers = ['Item','Code','Date','Qty','Specifications','Cost','Total Value','Category','Low Stock','Added By'];
-  const rows = d.inventory.map(i=>[i.name, i.itemCode||'', invDate(i), i.qty, i.specs, i.cost, ((parseFloat(i.qty)||0)*(parseFloat(i.cost)||0))||'', i.category, i.deadStock||'No', i.addedBy]);
+  const headers = ['Item','Barcode','Product Location','Date','Qty','Specifications','Cost','Total Value','Category','Low Stock','Added By'];
+  const rows = d.inventory.map(i=>[i.name, getInventoryBarcode(i.name)||'', getInventoryProductLocation(i)||'', invDate(i), i.qty, i.specs, i.cost, ((parseFloat(i.qty)||0)*(parseFloat(i.cost)||0))||'', i.category, i.deadStock||'No', i.addedBy]);
   cfExportAppend('inventory', d.inventory, headers, rows);
   exportToExcel(currentLocation+'_Inventory', headers, rows);
 }
@@ -6250,6 +6848,12 @@ async function deleteInventory(id){
 }
 
 /* ---------------- OUTWARD ---------------- */
+/* Outward dispatches show the stock item's barcode, same renderer as
+   Inward and Inventory. */
+function outwardBarcodeCell(itemName){
+  return barcodeCellHtml(getInventoryBarcode(itemName));
+}
+
 function renderOutward(){
   const d = DATA[currentLocation];
   const readOnly = session.role === 'logistics';
@@ -6269,6 +6873,13 @@ function renderOutward(){
       <div class="field"><label>Customer P.O</label><input type="text" id="out-po" placeholder="Optional"></div>
       <div class="field"><label>P.O Date</label><input type="date" id="out-po-date"></div>
     </div>
+    <div class="scan-row">
+      <label class="scan-label">&#127915; Scan barcode to add item</label>
+      <input type="text" id="out-barcode-scanner" class="scan-input" autocomplete="off"
+             placeholder="Click here, then scan a label &mdash; or type a barcode and press Enter"
+             onkeydown="if(event.key==='Enter'){ event.preventDefault(); scanOutwardBarcode(this.value); }">
+      <div class="scan-hint" id="out-scan-hint">Each scan adds the item below, or bumps its quantity if it is already on the list. Review the lines, then press Add Dispatch to deduct the stock.</div>
+    </div>
     <div class="out-lines-head">Items in this dispatch</div>
     <div id="out-item-lines">${outItemLineHtml()}</div>
     <div style="margin:10px 0 14px 0;"><button type="button" class="btn btn-ghost" onclick="addOutItemLine()">+ Add another item</button></div>
@@ -6276,21 +6887,101 @@ function renderOutward(){
   </form>
   <p style="margin:10px 0 0 0; font-size:11.5px; color:var(--muted);">All items above are saved under the same customer / P.O in one go &mdash; add as many items as needed, including multiple items of the same category (even the same item on two lines). Each quantity is automatically deducted from the Inventory tab; you cannot dispatch more than the available stock.</p>
   </div></div>`}
-  ${readOnly ? '' : barcodeStationHtml('out')}
   ${secHead('&#128203;', 'Records')}
   <div class="panel"><div class="panel-head"><h3>Outward log</h3><div class="panel-head-actions">${importBtn('outward')}${exportBtn('exportOutward')}</div></div>
   <div class="panel-body">
   ${tableToolbar('outward', d.outward)}
-  <table><thead><tr><th>Date</th><th>Customer Name</th><th>Customer P.O</th><th>P.O Date</th><th>Item</th><th>Qty</th><th>Unit Price</th><th>Total Price</th>${cfHeaders('outward')}<th>Added By</th><th></th></tr></thead><tbody>
-  ${outwardRows.length===0 ? noMatchRow(10, d.outward.length) :
+  <table><thead><tr><th>Date</th><th>Customer Name</th><th>Customer P.O</th><th>P.O Date</th><th>Item</th><th>Barcode</th><th>Qty</th><th>Unit Price</th><th>Total Price</th>${cfHeaders('outward')}<th>Added By</th><th></th></tr></thead><tbody>
+  ${outwardRows.length===0 ? noMatchRow(11, d.outward.length) :
     outwardRows.map(r=>`<tr>
-      <td>${fd(r.date)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.customer)}</td><td>${esc(r.customerPO)}</td><td>${fd(r.poDate)}</td><td>${descCellHtml('outward:'+r.id+':item', r.item)}</td><td>${esc(r.qty)}</td><td>${esc(r.unitPrice)}</td><td>${rowTotal(r.qty, r.unitPrice) || esc(r.totalPrice)}</td>${cfCells('outward', r)}${addedByCell(r)}
+      <td>${fd(r.date)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.customer)}</td><td>${esc(r.customerPO)}</td><td>${fd(r.poDate)}</td><td>${descCellHtml('outward:'+r.id+':item', r.item)}</td>${outwardBarcodeCell(r.item)}<td>${esc(r.qty)}</td><td>${esc(r.unitPrice)}</td><td>${rowTotal(r.qty, r.unitPrice) || esc(r.totalPrice)}</td>${cfCells('outward', r)}${addedByCell(r)}
       <td>${actionCell(editBtn('outward', r.id), deleteBtn(`deleteOutward('${r.id}')`))}</td>
     </tr>`).join('')}
-  </tbody>${totalFootRow(10 + cfDefs('outward').length, 'Total Value (all matching dispatches)', sumTotal(outwardAll,'qty','unitPrice'))}</table>
+  </tbody>${totalFootRow(11 + cfDefs('outward').length, 'Total Value (all matching dispatches)', sumTotal(outwardAll,'qty','unitPrice'))}</table>
   ${showMoreBar('outward', outwardAll.length)}
   </div></div>`;
 }
+/* ---- Outward barcode scanning ----
+   A handheld scanner types the code then sends Enter. Each scan resolves the
+   code to a stock item and puts it on the dispatch lines; stock is not touched
+   until Add Dispatch is submitted, which is where addOutward() validates the
+   totals and deducts. */
+function outScanHint(msg, kind){
+  const el = document.getElementById('out-scan-hint');
+  if(!el) return;
+  el.textContent = msg;
+  el.className = 'scan-hint' + (kind ? ' scan-' + kind : '');
+}
+
+function scanOutwardBarcode(raw){
+  const field = document.getElementById('out-barcode-scanner');
+  const code = String(raw == null ? '' : raw).trim();
+  if(field) field.value = '';
+  if(!code) return;
+
+  const d = DATA[currentLocation];
+  const item = (d.inventory || []).find(i => getInventoryBarcode(i.name) === code);
+  if(!item){
+    outScanHint('No stock item in ' + currentLocation + ' carries barcode ' + code + '.', 'err');
+    if(field) field.focus();
+    return;
+  }
+
+  const avail = parseFloat(item.qty) || 0;
+  if(avail <= 0){
+    outScanHint(item.name + ' is out of stock (0 available), so it cannot be dispatched.', 'err');
+    if(field) field.focus();
+    return;
+  }
+
+  const lines = [...document.querySelectorAll('#out-item-lines .out-line')];
+
+  /* Already on the list -> bump the quantity, capped at available stock. */
+  const existing = lines.find(l => {
+    const sel = l.querySelector('.out-line-item');
+    return sel && sel.value === item.id;
+  });
+  if(existing){
+    const qtyInput = existing.querySelector('.out-line-qty');
+    const want = (parseFloat(qtyInput.value) || 0) + 1;
+    if(want > avail){
+      outScanHint('Only ' + avail + ' of ' + item.name + ' in stock, so the quantity stays at ' + avail + '.', 'err');
+      qtyInput.value = avail;
+    } else {
+      qtyInput.value = want;
+      outScanHint(item.name + ' — quantity now ' + want + ' of ' + avail + ' available.', 'ok');
+    }
+    if(field) field.focus();
+    return;
+  }
+
+  /* Otherwise fill the first blank line, or add one. */
+  let line = lines.find(l => {
+    const sel = l.querySelector('.out-line-item');
+    return sel && !sel.value;
+  });
+  if(!line){
+    addOutItemLine();
+    const all = [...document.querySelectorAll('#out-item-lines .out-line')];
+    line = all[all.length - 1];
+  }
+  if(!line){
+    outScanHint('Could not add a dispatch line for ' + item.name + '.', 'err');
+    return;
+  }
+
+  const sel = line.querySelector('.out-line-item');
+  const qtyInput = line.querySelector('.out-line-qty');
+  const priceInput = line.querySelector('.out-line-price');
+  sel.value = item.id;
+  outLineItemChanged(sel);
+  qtyInput.value = 1;
+  if(priceInput && !priceInput.value.trim() && item.cost) priceInput.value = item.cost;
+
+  outScanHint(item.name + ' added — 1 of ' + avail + ' available.', 'ok');
+  if(field) field.focus();
+}
+
 function outItemLineHtml(){
   const d = DATA[currentLocation];
   const stockItems = d.inventory.filter(i => (parseFloat(i.qty)||0) > 0);
@@ -6391,8 +7082,8 @@ async function addOutward(e){
 }
 function exportOutward(){
   const d = DATA[currentLocation];
-  const headers = ['Date','Customer Name','Customer P.O','P.O Date','Item','Qty','Unit Price','Total Price','Added By'];
-  const rows = d.outward.map(r=>[r.date, r.customer, r.customerPO, r.poDate||'', r.item, r.qty, r.unitPrice, r.totalPrice, r.addedBy]);
+  const headers = ['Date','Customer Name','Customer P.O','P.O Date','Item','Barcode','Qty','Unit Price','Total Price','Added By'];
+  const rows = d.outward.map(r=>[r.date, r.customer, r.customerPO, r.poDate||'', r.item, getInventoryBarcode(r.item)||'', r.qty, r.unitPrice, r.totalPrice, r.addedBy]);
   cfExportAppend('outward', d.outward, headers, rows);
   exportToExcel(currentLocation+'_Outward', headers, rows);
 }
@@ -11320,7 +12011,8 @@ const EDIT_SCHEMAS = {
     {key:'category', label:'Category', type:'text'},
     {key:'deadStock', label:'Low Stock', type:'select', options:['No','Yes']},
     {key:'addedOn', label:'Stock Since (date)', type:'date'},
-    {key:'itemCode', label:'Barcode Code', type:'text'}
+    {key:'productLocation', label:'Product Location', type:'text'},
+    {key:'barcode', label:'Barcode (leave blank to auto-assign)', type:'text'}
   ],
   vendorPO: [
     {key:'poType', label:'Type (Internal / External)', type:'select', options:['','internal','external']},
@@ -11364,6 +12056,8 @@ const EDIT_SCHEMAS = {
     {key:'amountPaid', label:'Amount Paid', type:'number'},
     {key:'paidBy', label:'Paid By', type:'select', options:['Paid by us','Paid by vendor']},
     {key:'paidVendor', label:'Paying Vendor Name', type:'text'},
+    {key:'productLocation', label:'Product Location', type:'text'},
+    {key:'barcode', label:'Barcode (leave blank to auto-assign)', type:'text'},
     {key:'deadStock', label:'Low Stock', type:'select', options:['No','Yes']}
   ],
   outward: [
@@ -11657,6 +12351,13 @@ function openEditModal(table, id){
   if(!record) return;
   editModalState = {table, id};
   renderEditModal(record);
+  if(table === 'inventory'){
+    const bc = getInventoryBarcode(record.name), pl = getInventoryProductLocation(record);
+    editModalState.shownBarcode = bc;
+    editModalState.shownLocation = pl;
+    const bEl = document.getElementById('edit-f-barcode'); if(bEl) bEl.value = bc;
+    const lEl = document.getElementById('edit-f-productLocation'); if(lEl) lEl.value = pl;
+  }
 }
 
 function closeEditModal(){
@@ -11796,6 +12497,27 @@ async function saveEditModal(){
   const schema = EDIT_SCHEMAS[table];
   const record = findEditRecord(table, id);
   if(!record){ closeEditModal(); return; }
+  let bgBarcode = null;
+  const invPrev = table === 'inventory' ? {barcode: record.barcode, productLocation: record.productLocation} : null;
+  let invBarcode;
+  if(table === 'inventory'){
+    const bEl = document.getElementById('edit-f-barcode');
+    if(bEl){
+      const v = String(bEl.value || '').trim().toUpperCase();
+      if(v && v === String(editModalState.shownBarcode || '').toUpperCase()) invBarcode = invPrev.barcode;
+      else {
+        invBarcode = bgInvEditBarcode(record, v);
+        if(invBarcode === null) return;
+      }
+    }
+  }
+  if(table === 'inward'){
+    const bEl = document.getElementById('edit-f-barcode');
+    if(bEl){
+      bgBarcode = bgEditBarcode(id, bEl.value);
+      if(bgBarcode === null) return;
+    }
+  }
   schema.forEach(f=>{
     const el = document.getElementById('edit-f-'+f.key);
     if(!el) return;
@@ -11803,6 +12525,20 @@ async function saveEditModal(){
     if(typeof v === 'string') v = v.trim();
     record[f.key] = v;
   });
+  if(table === 'inventory'){
+    if(invBarcode === undefined) record.barcode = invPrev.barcode; else record.barcode = invBarcode;
+    if(record.barcode === undefined) delete record.barcode;
+    const lEl = document.getElementById('edit-f-productLocation');
+    if(lEl && String(lEl.value || '').trim() === String(editModalState.shownLocation || '')){
+      record.productLocation = invPrev.productLocation;
+      if(record.productLocation === undefined) delete record.productLocation;
+    }
+  }
+  if(table==='inward' && bgBarcode !== null){
+    record.barcode = bgBarcode;
+    const sl = bgBarcode.lastIndexOf('/');
+    record.barcodePrefix = sl >= 0 ? bgBarcode.slice(0, sl) : '';
+  }
   if(table==='outward'){
     const qty = parseFloat(record.qty)||0;
     const unitPrice = parseFloat(record.unitPrice)||0;
@@ -13198,6 +13934,69 @@ async function deleteUser(username){
    treated the same as closing the tab. */
 
 boot();
+
+
+/* MIGRATION: Add 'B' prefix to existing barcodes (SOM-XXXX → BSOM-XXXX) */
+function migrateBarcodePrefix(){
+  const d = DATA[currentLocation];
+  if(!d || !d.inventory) return alert('No inventory data found');
+
+  let count = 0;
+  d.inventory.forEach(item => {
+    const code = String(item.itemCode || '').trim();
+    if(code && code.startsWith('SOM-') && !code.startsWith('BSOM-')){
+      item.itemCode = 'B' + code;
+      count++;
+    }
+  });
+
+  if(count === 0){
+    alert('✅ No barcodes to update - all barcodes already have B prefix!');
+    return;
+  }
+
+  // Save to Firestore
+  saveLocation(currentLocation).then(() => {
+    alert('✅ Migration complete! Updated ' + count + ' barcodes to B prefix.\n\nExamples:\nSOM-0001 → BSOM-0001\nSOM-0107 → BSOM-0107');
+    location.reload();
+  }).catch(err => {
+    alert('❌ Error saving: ' + err.message);
+  });
+}
+
+/* Quick command to run migration from browser console */
+window.updateBarcodePrefix = migrateBarcodePrefix;
+console.log('%c✓ Type: updateBarcodePrefix() to add B prefix to all existing barcodes', 'color:green;font-weight:bold;font-size:12px;');
+
+
+/* Auto-generate composite barcode only when barcode field is empty */
+document.addEventListener('input', function(e) {
+  if(e.target.classList.contains('in-line-prefix')) {
+    const customPrefix = e.target.value.trim();
+    const barcodeField = e.target.closest('.in-line').querySelector('.in-line-barcode');
+
+    // Only generate barcode if it doesn't already have one
+    // This prevents incrementing the counter on every prefix edit
+    if(customPrefix && !barcodeField.value) {
+      // Get location-based barcode (BSOM or BEVI)
+      const locationBarcode = getNextInwardBarcodeCode();
+      // Composite barcode: customPrefix / locationBarcode
+      const compositeBarcode = customPrefix + '/' + locationBarcode;
+      barcodeField.value = compositeBarcode;
+      console.log('🎯 Composite barcode generated:', compositeBarcode);
+    } else if(!customPrefix) {
+      // Clear barcode if prefix is cleared
+      barcodeField.value = '';
+      console.log('🗑 Barcode cleared (prefix empty)');
+    }
+    // If prefix changed but barcode exists, don't regenerate
+  }
+});
+
+
+
+
+
 </script>
 </body>
 </html>
