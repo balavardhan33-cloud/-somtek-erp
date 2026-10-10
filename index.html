@@ -795,6 +795,7 @@ const TABS = [
   {id:'logistics', num:'05', label:'Logistics', icon:'&#128667;'},
   {id:'sales', num:'06', label:'Sales', icon:'&#128200;'},
   {id:'automation', num:'07', label:'Automation', icon:'&#9881;'},
+  {id:'barcode', num:'', label:'Barcode Station', icon:'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 8v8M10 8v8M13 8v8M16 8v8"/></svg>'},
   {id:'enquiry', num:'08', label:'Enquiry', icon:'&#129489;&#8205;&#128187;'},
   {id:'accounts', num:'09', label:'Accounts', icon:'&#128176;'},
   {id:'quotation', num:'10', label:'Quotation', icon:'&#128221;'},
@@ -804,10 +805,10 @@ const TABS = [
 ];
 
 const ROLE_TABS = {
-  admin: ['dashboard','po','inward','inventory','outward','logistics','sales','automation','enquiry','accounts','quotation','hr','reports','users'],
-  stores: ['dashboard','inward','inventory','outward','reports'],
+  admin: ['dashboard','po','inward','inventory','outward','logistics','sales','automation','barcode','enquiry','accounts','quotation','hr','reports','users'],
+  stores: ['dashboard','inward','inventory','outward','barcode','reports'],
   logistics: ['dashboard','outward','logistics','reports'],
-  automation: ['dashboard','automation','reports'],
+  automation: ['dashboard','automation','barcode','reports'],
   enquiry: ['dashboard','enquiry','inventory','po','reports']
 };
 
@@ -3490,16 +3491,110 @@ function renderShell(){
 }
 
 async function switchLocation(loc){
+  if(loc !== currentLocation) storeTabDraft();
   currentLocation = loc;
   saveSessionLocal();
   render(loadingScreen('Loading '+loc+'...'));
   await loadLocation(loc);
   subscribeLocation(loc);
   render();
+  restoreTabDraft();
+}
+/* ---- Unsaved entries survive a tab or location switch ----
+   Switching tabs re-renders the whole screen, which used to wipe anything typed
+   into a form but not yet submitted. Before leaving a tab we keep what is in its
+   forms (plain fields, checkboxes, and every dynamic item row) and put it back
+   when the tab is opened again. Passwords and file inputs are never kept. */
+const TAB_DRAFTS = {};
+const TAB_DRAFT_ADDERS = {
+  'cpo-item-lines': 'addCpoItemLine', 'in-item-lines': 'addInItemLine',
+  'out-item-lines': 'addOutItemLine', 'pa-item-lines': 'addPaItemLine',
+  'sa-item-lines': 'addSaItemLine', 'pf-item-lines': 'addPfItemLine',
+  'edit-item-lines': 'addEditItemLine'
+};
+function draftKey(){ return currentLocation + '|' + currentTab; }
+function draftFieldOk(el){
+  return el.type !== 'password' && el.type !== 'file' && el.type !== 'button' && el.type !== 'submit';
+}
+function captureTabDraft(){
+  const app = document.getElementById('app');
+  if(!app) return null;
+  const draft = { fields: {}, rows: {} };
+  app.querySelectorAll('form input, form select, form textarea').forEach(el => {
+    if(!el.id || !draftFieldOk(el)) return;
+    draft.fields[el.id] = (el.type === 'checkbox' || el.type === 'radio')
+      ? { checked: el.checked } : { value: el.value };
+  });
+  app.querySelectorAll('[id$="-lines"]').forEach(box => {
+    if(!box.id) return;
+    draft.rows[box.id] = [...box.children].map(row => ({
+      code: row.dataset && row.dataset.code ? row.dataset.code : '',
+      f: [...row.querySelectorAll('input, select, textarea')].filter(draftFieldOk).map(el =>
+        (el.type === 'checkbox' || el.type === 'radio') ? { c: el.checked } : { v: el.value })
+    }));
+  });
+  return draft;
+}
+function restoreDraftRows(box, savedRows){
+  let adder = null;
+  if(box.id.endsWith('-bom-lines')){
+    const prefix = box.id.slice(0, -'-bom-lines'.length);
+    adder = () => addBomLine(prefix);
+  }else if(TAB_DRAFT_ADDERS[box.id] && typeof window[TAB_DRAFT_ADDERS[box.id]] === 'function'){
+    adder = window[TAB_DRAFT_ADDERS[box.id]];
+  }
+  if(!adder) return;
+  let guard = 0;
+  while(box.children.length < savedRows.length && guard++ < 200) adder();
+  savedRows.forEach((sr, i) => {
+    const row = box.children[i];
+    if(!row) return;
+    if(sr.code && row.dataset) row.dataset.code = sr.code;
+    const els = [...row.querySelectorAll('input, select, textarea')].filter(draftFieldOk);
+    sr.f.forEach((fv, j) => {
+      const el = els[j];
+      if(!el) return;
+      if('c' in fv){ el.checked = fv.c; }
+      else { el.value = fv.v; }
+    });
+  });
+}
+function storeTabDraft(){
+  if(!hasUnsavedFormInput()) return;
+  const d = captureTabDraft();
+  if(d) TAB_DRAFTS[draftKey()] = d;
+}
+function restoreTabDraft(){
+  const key = draftKey();
+  const draft = TAB_DRAFTS[key];
+  if(!draft) return;
+  delete TAB_DRAFTS[key];
+  Object.keys(draft.rows || {}).forEach(id => {
+    const box = document.getElementById(id);
+    if(box) restoreDraftRows(box, draft.rows[id]);
+  });
+  Object.keys(draft.fields || {}).forEach(id => {
+    const el = document.getElementById(id);
+    if(!el) return;
+    const f = draft.fields[id];
+    if('checked' in f){
+      if(el.checked !== f.checked){
+        el.checked = f.checked;
+        el.dispatchEvent(new Event('change', { bubbles: true }));   /* shows/hides BOM etc. */
+      }
+    }else if(el.value !== f.value){
+      el.value = f.value;
+    }
+  });
+  try{ if(typeof updateInLinesTotal === 'function') updateInLinesTotal(); }catch(e){}
+  try{ if(typeof paRecalc === 'function') paRecalc(); }catch(e){}
+  try{ if(typeof updateQuoteTotals === 'function') updateQuoteTotals(); }catch(e){}
 }
 async function switchTab(tab){
+  if(tab !== currentTab) storeTabDraft();
   currentTab = tab;
   render();
+  restoreTabDraft();
 }
 async function manualRefresh(){
   await loadLocation(currentLocation);
@@ -3545,6 +3640,7 @@ function renderTabContent(){
     case 'hr': return renderHR();
     case 'reports': return renderReports();
     case 'automation': return renderAutomation();
+    case 'barcode': return renderBarcodeStation();
     case 'enquiry': return renderEnquiry();
     case 'accounts': return canSeeTab('accounts') ? renderAccounts() : renderDashboard();
     case 'quotation': return canSeeTab('quotation') ? renderQuotation() : renderDashboard();
@@ -5810,6 +5906,27 @@ function labelCompanyName(loc){
 /* Resolve a barcode to everything the label needs. The code may be a composite
    (PREFIX/BSOM-0001) or a plain item code; In Date and Product Location live on
    the Inward record, the name on the Inventory item. */
+/* Parent (finished-good) barcodes live on Automation records, not on stock. Their
+   label shows the assembled product and the child barcodes built into it. */
+function finishedGoodLabelData(code){
+  const d = DATA[currentLocation] || {};
+  const want = String(code == null ? '' : code).trim().toUpperCase();
+  if(!want) return null;
+  const r = (d.automation || []).find(x => String(x.finishedBarcode || '').trim().toUpperCase() === want);
+  if(!r) return null;
+  const components = (Array.isArray(r.bom) ? r.bom : [])
+    .filter(l => l && String(l.barcode || '').trim())
+    .map(l => ({ code: String(l.barcode).trim(), item: String(l.item || '') }));
+  return {
+    code: String(r.finishedBarcode).trim(),
+    itemName: String(r.item || r.valveType || 'Assembled product'),
+    inDate: r.date || '',
+    productLocation: [r.valveType, r.valveSize].filter(Boolean).join(' / '),
+    company: labelCompanyName(currentLocation),
+    logo: (typeof quoteLogoUri === 'function') ? quoteLogoUri(currentLocation) : '',
+    components: components
+  };
+}
 function labelDataFor(code){
   code = String(code == null ? '' : code).trim();
   if(!code) return null;
@@ -5832,7 +5949,7 @@ function labelDataFor(code){
     item = inv.find(i => String(i.barcode || '').trim() === code) || null;
     if(item) rec = null;
   }
-  if(!item) return null;
+  if(!item){ return finishedGoodLabelData(code); }
 
   return {
     code: code,
@@ -5878,6 +5995,7 @@ function labelDocHtml(data){
     '.lbl-k{font-size:9px; font-weight:700; letter-spacing:0.08em; color:#444;' +
       ' text-transform:uppercase; white-space:nowrap;}' +
     '.lbl-v{font-size:13px; font-weight:700; text-align:right; word-break:break-word;}' +
+    '.lbl-parts{font-family:"Courier New", monospace; font-size:9px; line-height:1.4; max-width:90mm; word-break:break-all; padding:0 2mm;}' +
     '.lbl-loc .lbl-v{font-size:16px;}' +
     '@media print{body{margin:0;} .thermal-label{padding:5mm;}}' +
     '</style></head><body>' +
@@ -5890,6 +6008,12 @@ function labelDocHtml(data){
         (data.itemName ? '<div class="lbl-item">' + esc(data.itemName) + '</div>' : '') +
         '<div class="lbl-bars">' + svg + '</div>' +
         '<div class="lbl-code">' + esc(data.code) + '</div>' +
+        (data.components && data.components.length
+          ? '<div class="lbl-parts"><b>Parts:</b> ' +
+            data.components.slice(0, 12).map(c => esc(c.code)).join(' \u00b7 ') +
+            (data.components.length > 12 ? ' \u00b7 +' + (data.components.length - 12) + ' more' : '') +
+            '</div>'
+          : '') +
       '</div>' +
       '<div class="lbl-foot">' +
         '<div class="lbl-row"><span class="lbl-k">In Date</span>' +
@@ -7280,12 +7404,12 @@ function camScanModalHtml(){
   + '</div>';
 }
 
-async function openCameraScanner(){
+async function openCameraScanner(target){
   if(document.getElementById('cam-scan-root')) return;
   document.body.insertAdjacentHTML('beforeend', camScanModalHtml());
   document.addEventListener('keydown', camScanKeydown);
   camScan = { stream:null, track:null, raf:0, detector:null, seen:new Map(), busy:false,
-               torchOn:false, waitTimer:0, frames:0, hits:0, lastRaw:'', via:'' };
+               torchOn:false, waitTimer:0, frames:0, hits:0, lastRaw:'', via:'', target: target || null };
 
   if(!window.isSecureContext){
     camStatus('The camera needs a secure (https) connection. Open the ERP over https, or keep using a handheld scanner or type the code.', 'err');
@@ -7492,11 +7616,19 @@ function onCameraCode(code){
   camScan.seen.set(code, now);
 
   camBeep();
-  scanOutwardBarcode(code);
-
-  const hint = document.getElementById('out-scan-hint');
-  const msg = hint ? hint.textContent : '';
-  const bad = hint && hint.classList.contains('scan-err');
+  let msg, bad;
+  if(camScan.target === 'station'){
+    const r = bsScanCode(code);
+    msg = r.msg; bad = r.bad;
+  }else if(camScan.target){
+    const r = bomScanCode(camScan.target, code);
+    msg = r.msg; bad = r.bad;
+  }else{
+    scanOutwardBarcode(code);
+    const hint = document.getElementById('out-scan-hint');
+    msg = hint ? hint.textContent : '';
+    bad = !!(hint && hint.classList.contains('scan-err'));
+  }
   camStatus(msg || ('Scanned ' + code), bad ? 'err' : 'ok');
 
   const found = document.getElementById('cam-scan-found');
@@ -9400,6 +9532,483 @@ function exportSalaries(){
   exportToExcel(currentLocation+'_Salaries', headers, rows);
 }
 
+/* ---- Finished-good barcodes (parent) ----
+   Every Automation record is one assembled product. It gets its own parent
+   barcode: S-AUTO-#### for SOMTEK, E-AUTO-#### for EVISSAT. The BOM lines on
+   the record are its child barcodes. Code 39 (the label format) takes capitals
+   only, so the prefix is written in capitals. */
+function finishedGoodPrefix(loc){
+  return String(loc || '').toLowerCase().includes('evissat') ? 'E-AUTO-' : 'S-AUTO-';
+}
+function nextFinishedBarcode(d, loc){
+  const prefix = finishedGoodPrefix(loc);
+  let max = 0;
+  (d.automation || []).forEach(r => {
+    const c = String(r.finishedBarcode || '').trim().toUpperCase();
+    if(c.indexOf(prefix) === 0){
+      const n = parseInt(c.slice(prefix.length), 10);
+      if(!isNaN(n) && n > max) max = n;
+    }
+  });
+  return prefix + String(max + 1).padStart(4, '0');
+}
+
+/* ---------------- BARCODE STATION (tab) ----------------
+   Scan or type any barcode. A stock barcode shows the product with its cost and
+   stock. A finished-good barcode (S-AUTO / E-AUTO) shows the product and every
+   component barcode built into it, each with its own details and cost. A
+   component barcode shows which finished goods it went into. */
+function bsNorm(v){ return String(v == null ? '' : v).trim().toUpperCase(); }
+function bsMoney(v){
+  const n = parseFloat(v) || 0;
+  return (typeof money === 'function') ? money(n) : ('₹' + n.toFixed(2));
+}
+function bsStockFor(code){
+  const d = DATA[currentLocation] || {};
+  const inv = d.inventory || [];
+  const inw = d.inward || [];
+  let rec = null;
+  for(let i = inw.length - 1; i >= 0; i--){
+    if(bsNorm(inw[i].barcode) === code){ rec = inw[i]; break; }
+  }
+  let item = null;
+  if(rec){
+    const nm = String(rec.item || '').toLowerCase().trim();
+    item = inv.find(x => String(x.name || '').toLowerCase().trim() === nm) || null;
+  }
+  if(!item) item = inv.find(x => bsNorm(x.barcode) === code) || null;
+  if(!item) item = inv.find(x => bsNorm(getInventoryBarcode(x.name)) === code) || null;
+  if(!item) item = findItemByCode(code) || null;
+  if(!item && !rec) return null;
+  return { item: item, rec: rec };
+}
+function bsCodeVisual(code, h){
+  const svg = code39Svg(code, { narrow: 1.4, height: h || 40, text: false });
+  return svg || '<div style="color:var(--danger); font-size:11px;">This code cannot be drawn as Code 39</div>';
+}
+function bsButtons(code){
+  const c = esc(code);
+  return '<div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">' +
+    '<button type="button" class="btn btn-sm" data-code="' + c + '" onclick="previewLabel(this.getAttribute(\'data-code\'))">&#128269; Preview label</button>' +
+    '<button type="button" class="btn btn-sm" data-code="' + c + '" onclick="printIndividualLabel(this.getAttribute(\'data-code\'))">&#128424; Print label</button>' +
+    '</div>';
+}
+function bsRow(k, v){
+  return '<div style="display:flex; gap:12px; padding:4px 0; border-bottom:1px solid var(--border);">' +
+    '<div style="min-width:150px; color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:0.06em; padding-top:2px;">' + k + '</div>' +
+    '<div style="font-size:13px;">' + v + '</div></div>';
+}
+function bsStockHtml(code, found, line){
+  const it = found ? found.item : null;
+  const rec = found ? found.rec : null;
+  const name = it ? it.name : (rec ? rec.item : (line ? line.item : ''));
+  const unitCost = (it && it.cost) ? it.cost : ((rec && rec.price) || (line && line.cost) || '');
+  const qty = it ? (parseFloat(it.qty) || 0) : null;
+  const loc = it ? getInventoryProductLocation(it) : (rec ? rec.productLocation : (line ? line.barcodeLocation : ''));
+  const spec = (it && it.specs) || (line && line.specification) || '';
+  const days = it ? invAgeDays(it) : null;
+  return '<div style="border:1px solid var(--border); padding:16px; margin-top:14px;">' +
+    '<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap;">' +
+      '<div style="flex:1 1 320px;">' +
+        '<div style="font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em;">Product</div>' +
+        '<div style="font-size:18px; font-weight:800; margin:2px 0 10px 0;">' + esc(name || '-') + '</div>' +
+        bsRow('Barcode', '<b style="font-family:\'IBM Plex Mono\',monospace;">' + esc(code) + '</b>') +
+        (it && it.itemCode ? bsRow('Item code', esc(it.itemCode)) : '') +
+        (it && it.category ? bsRow('Category', esc(it.category)) : '') +
+        bsRow('Specifications', esc(spec || '-')) +
+        bsRow('Barcode location', esc(loc || '-')) +
+        (rec && rec.date ? bsRow('Received on', fd(rec.date)) : '') +
+        (it ? bsRow('In stock', '<b style="color:' + (qty > 0 ? 'var(--success)' : 'var(--danger)') + ';">' + esc(it.qty || '0') + '</b>') : '') +
+        (days !== null && it ? bsRow('Age', days + ' days') : '') +
+      '</div>' +
+      '<div style="flex:0 0 auto; min-width:220px; border:1px solid var(--border); padding:14px; text-align:right;">' +
+        '<div style="font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em;">Cost</div>' +
+        '<div style="font-size:22px; font-weight:800; margin:2px 0 6px 0;">' + (unitCost ? bsMoney(unitCost) : '-') + '</div>' +
+        '<div style="font-size:11px; color:var(--muted);">per unit</div>' +
+        (qty !== null && unitCost ? '<div style="margin-top:10px; font-size:13px;">Stock value <b>' + bsMoney(qty * (parseFloat(unitCost) || 0)) + '</b></div>' : '') +
+      '</div>' +
+    '</div>' +
+    '<div style="margin-top:12px;">' + bsCodeVisual(code, 46) + '</div>' +
+  '</div>';
+}
+function bsUsedInHtml(code, usedIn){
+  if(!usedIn.length) return '';
+  return '<div style="border:1px solid var(--border); padding:14px; margin-top:14px;">' +
+    '<div style="font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:8px;">Used in finished goods</div>' +
+    usedIn.map(r => '<div style="display:flex; justify-content:space-between; gap:12px; padding:6px 0; border-bottom:1px solid var(--border); font-size:13px;">' +
+      '<span style="font-family:\'IBM Plex Mono\',monospace; font-weight:700;">' + esc(r.finishedBarcode || '(no barcode)') + '</span>' +
+      '<span>' + esc(r.item || '') + '</span>' +
+      '<span style="color:var(--muted);">' + fd(r.date) + '</span></div>').join('') +
+  '</div>';
+}
+function bsFinishedHtml(r){
+  const kids = (Array.isArray(r.bom) ? r.bom : []).filter(l => l && (String(l.barcode || '').trim() || String(l.item || '').trim()));
+  let total = 0;
+  const rows = kids.map((l, i) => {
+    const c = bsNorm(l.barcode);
+    const st = c ? bsStockFor(c) : null;
+    const it = st ? st.item : null;
+    const item = l.item || (it ? it.name : '');
+    const loc = l.barcodeLocation || (it ? getInventoryProductLocation(it) : '');
+    const spec = l.specification || (it && it.specs) || '';
+    const cost = parseFloat(l.cost) || (it ? (parseFloat(it.cost) || 0) : 0);
+    total += cost;
+    return '<tr>' +
+      '<td>' + (i + 1) + '</td>' +
+      '<td style="text-align:center;">' + (c ? bsCodeVisual(c, 30) + '<div style="font-family:\'IBM Plex Mono\',monospace; font-size:11px; font-weight:700;">' + esc(c) + '</div>' : '<span style="color:var(--muted);">no barcode</span>') + '</td>' +
+      '<td style="font-family:\'IBM Plex Sans\',sans-serif; white-space:normal;">' + esc(item) + '</td>' +
+      '<td>' + esc(loc || '-') + '</td>' +
+      '<td style="white-space:normal;">' + esc(spec || '-') + '</td>' +
+      '<td style="text-align:right;">' + (cost ? bsMoney(cost) : '-') + '</td>' +
+    '</tr>';
+  }).join('');
+  return '<div style="border:1px solid var(--border); padding:16px; margin-top:14px;">' +
+    '<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap;">' +
+      '<div style="flex:1 1 320px;">' +
+        '<div style="font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em;">Finished good</div>' +
+        '<div style="font-size:18px; font-weight:800; margin:2px 0 10px 0;">' + esc(r.item || r.valveType || 'Assembled product') + '</div>' +
+        bsRow('Finished barcode', '<b style="font-family:\'IBM Plex Mono\',monospace;">' + esc(r.finishedBarcode) + '</b>') +
+        bsRow('Date', fd(r.date) || '-') +
+        bsRow('Type / size', esc([r.valveType, r.valveSize].filter(Boolean).join(' / ') || '-')) +
+        (r.poNumber ? bsRow('P.O No.', esc(r.poNumber)) : '') +
+        bsRow('Status', esc(r.status || '-')) +
+        (r.assignedTo ? bsRow('Assigned to', esc(r.assignedTo)) : '') +
+        (r.notes ? bsRow('Notes', esc(r.notes)) : '') +
+      '</div>' +
+      '<div style="flex:0 0 auto; min-width:220px; border:1px solid var(--border); padding:14px; text-align:right;">' +
+        '<div style="font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em;">Total component cost</div>' +
+        '<div style="font-size:22px; font-weight:800; margin:2px 0 6px 0;">' + bsMoney(total) + '</div>' +
+        '<div style="font-size:11px; color:var(--muted);">' + kids.length + ' component' + (kids.length === 1 ? '' : 's') + '</div>' +
+      '</div>' +
+    '</div>' +
+    '<div style="margin-top:12px;">' + bsCodeVisual(r.finishedBarcode, 56) + '</div>' +
+    '<div style="margin-top:16px; font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em;">Component barcodes built into this product</div>' +
+    (kids.length
+      ? '<div class="table-wrap" style="margin-top:6px; overflow-x:auto;"><table><thead><tr><th>#</th><th>Barcode</th><th>Item</th><th>Barcode location</th><th>Specification</th><th style="text-align:right;">Cost</th></tr></thead><tbody>' + rows +
+        '<tr><td colspan="5" style="text-align:right; font-weight:700;">Total</td><td style="text-align:right; font-weight:700;">' + bsMoney(total) + '</td></tr>' +
+        '</tbody></table></div>'
+      : '<div style="padding:12px 0; color:var(--muted); font-size:13px;">No component barcodes were recorded for this product.</div>') +
+  '</div>';
+}
+/* Resolves a code to the HTML to show, whether it is a finished good, a stock
+   barcode, or a component that went into finished goods. */
+function bsLookup(raw){
+  const code = bsNorm(raw);
+  if(!code) return { html: '', bad: false, label: '' };
+  const d = DATA[currentLocation] || {};
+  const auto = d.automation || [];
+  const fg = auto.find(r => bsNorm(r.finishedBarcode) === code);
+  if(fg) return { html: bsFinishedHtml(fg), bad: false, label: code + ' — ' + (fg.item || 'finished good') };
+  const found = bsStockFor(code);
+  const usedIn = auto.filter(r => (Array.isArray(r.bom) ? r.bom : []).some(l => bsNorm(l.barcode) === code));
+  if(!found && !usedIn.length){
+    return { html: bcMsgHtml('No item carries barcode <b>' + esc(code) + '</b> in ' + esc(currentLocation) + '. Check the label, or the code you typed.', 'err'), bad: true, label: '' };
+  }
+  let line = null;
+  if(!found && usedIn.length){
+    usedIn.forEach(r => { (r.bom || []).forEach(l => { if(!line && bsNorm(l.barcode) === code) line = l; }); });
+  }
+  const name = found && found.item ? found.item.name : (found && found.rec ? found.rec.item : (line ? line.item : code));
+  return {
+    html: bsStockHtml(code, found, line) + bsUsedInHtml(code, usedIn),
+    bad: false,
+    label: code + ' — ' + (name || '')
+  };
+}
+/* ---- Scan log ----
+   Every successful scan is kept on the station for 24 hours, then it is swept
+   away. The log is stored on this device, per company. */
+const BS_LOG_KEY = 'sev7en_bs_scan_log_v1';
+const BS_LOG_MS = 24 * 60 * 60 * 1000;
+function bsLogWrite(list){
+  try{ localStorage.setItem(BS_LOG_KEY, JSON.stringify(list)); }catch(e){}
+}
+function bsLogRead(){
+  let all = [];
+  try{ all = JSON.parse(localStorage.getItem(BS_LOG_KEY) || '[]'); }catch(e){ all = []; }
+  if(!Array.isArray(all)) all = [];
+  const cutoff = Date.now() - BS_LOG_MS;
+  const kept = all.filter(e => e && typeof e.at === 'number' && e.at >= cutoff && e.code && e.loc);
+  if(kept.length !== all.length) bsLogWrite(kept);
+  return kept;
+}
+function bsLogFor(loc){ return bsLogRead().filter(e => e.loc === loc); }
+function bsLogAdd(loc, code){
+  const list = bsLogRead();
+  list.unshift({ loc: loc, code: code, at: Date.now() });
+  bsLogWrite(list.slice(0, 200));
+}
+function bsLogRemove(at, code){
+  const n = Number(at);
+  bsLogWrite(bsLogRead().filter(e => !(e.at === n && e.code === code)));
+  bsRenderLog();
+}
+function bsLogClear(){
+  if(!confirm('Clear all scans from the Barcode Station for ' + currentLocation + '?')) return;
+  bsLogWrite(bsLogRead().filter(e => e.loc !== currentLocation));
+  bsRenderLog();
+}
+function bsEntryHtml(e, open){
+  const res = bsLookup(e.code);
+  const hoursLeft = Math.max(0, Math.ceil((e.at + BS_LOG_MS - Date.now()) / 3600000));
+  const when = new Date(e.at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+  const btn = 'padding:4px 10px; font-size:12px;';
+  return '<details ' + (open ? 'open' : '') + ' style="border:1px solid var(--border); margin-top:12px;">' +
+    '<summary style="padding:10px 14px; cursor:pointer; display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:center;">' +
+      '<span style="font-size:13px;"><b style="font-family:\'IBM Plex Mono\',monospace;">' + esc(e.code) + '</b> &middot; ' + esc(res.label.replace(/^[^—]*—\s*/, '') || e.code) + '</span>' +
+      '<span style="font-size:11px; color:var(--muted);">scanned ' + esc(when) + ' &middot; clears in about ' + hoursLeft + 'h</span>' +
+    '</summary>' +
+    '<div style="padding:0 14px 14px 14px;">' + res.html +
+      '<div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;">' +
+        '<button type="button" class="btn" style="' + btn + '" data-code="' + esc(e.code) + '" onclick="bsPrintReport(this.getAttribute(\'data-code\'))">&#128424; Print report</button>' +
+        '<button type="button" class="btn btn-ghost" style="' + btn + '" data-code="' + esc(e.code) + '" onclick="previewLabel(this.getAttribute(\'data-code\'))">&#128269; Preview label</button>' +
+        '<button type="button" class="btn btn-ghost" style="' + btn + '" data-at="' + e.at + '" data-code="' + esc(e.code) + '" onclick="bsLogRemove(this.getAttribute(\'data-at\'), this.getAttribute(\'data-code\'))">Remove from station</button>' +
+      '</div>' +
+    '</div></details>';
+}
+function bsLogHtml(){
+  const list = bsLogFor(currentLocation);
+  if(!list.length){
+    return '<div style="padding:14px 0; color:var(--muted); font-size:13px;">Nothing scanned yet. Scanned barcodes stay on this station for 24 hours, then are cleared.</div>';
+  }
+  return '<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; margin-top:14px;">' +
+      '<div style="font-size:12px; color:var(--muted);">' + list.length + ' scan' + (list.length === 1 ? '' : 's') + ' from the last 24 hours. Each clears 24 hours after it was scanned.</div>' +
+      '<button type="button" class="icon-btn" onclick="bsLogClear()">Clear all</button></div>' +
+    list.map((e, i) => bsEntryHtml(e, i === 0)).join('');
+}
+function bsRenderLog(){
+  const box = document.getElementById('bs-log');
+  if(box) box.innerHTML = bsLogHtml();
+}
+
+/* ---- Printable product report ---- */
+function bsPrintReport(code){
+  const res = bsLookup(code);
+  if(res.bad){ alert('No item carries barcode ' + code); return; }
+  const w = window.open('', '_blank');
+  if(!w){ alert('The browser blocked the report window. Allow pop-ups for this site and try again.'); return; }
+  const logo = (typeof quoteLogoUri === 'function') ? quoteLogoUri(currentLocation) : '';
+  const company = labelCompanyName(currentLocation);
+  const printed = new Date().toLocaleString('en-IN');
+  const css = '*{box-sizing:border-box;} body{font-family:Arial, Helvetica, sans-serif; color:#111; margin:0; padding:14mm;}' +
+    '.hd{display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #000; padding-bottom:8px; margin-bottom:14px;}' +
+    '.hd img{max-height:48px; max-width:160px; object-fit:contain;}' +
+    '.co{font-size:15px; font-weight:800; letter-spacing:0.03em;}' +
+    '.ti{font-size:12px; color:#444; text-align:right;}' +
+    '.ti b{font-size:14px; color:#000;}' +
+    'table{width:100%; border-collapse:collapse; font-size:11px; margin-top:6px;}' +
+    'th,td{border:1px solid #bbb; padding:5px 6px; vertical-align:middle;}' +
+    'th{background:#f1f3f7; text-align:left;}' +
+    'svg{max-width:100%; height:auto;}' +
+    '.ft{margin-top:18px; border-top:1px solid #999; padding-top:6px; font-size:10px; color:#555; display:flex; justify-content:space-between;}' +
+    '@media print{ body{padding:8mm;} }';
+  w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Barcode report ' + esc(code) + '</title><style>' + css + '</style></head><body>' +
+    '<div class="hd">' +
+      '<div>' + (logo ? '<img src="' + logo + '" alt="">' : '') + '<div class="co">' + esc(company) + '</div></div>' +
+      '<div class="ti"><b>Barcode Product Report</b><br>Location: ' + esc(currentLocation) + '<br>Printed: ' + esc(printed) + '</div>' +
+    '</div>' +
+    res.html +
+    '<div class="ft"><span>Barcode: ' + esc(code) + '</span><span>Generated from ERP records</span></div>' +
+    '</body></html>');
+  w.document.close();
+  setTimeout(() => { try{ w.focus(); w.print(); }catch(e){} }, 400);
+}
+
+function bsScanCode(raw){
+  const code = bsNorm(raw);
+  if(!code) return { msg: '', bad: false };
+  const res = bsLookup(code);
+  const msg = document.getElementById('bs-msg');
+  if(res.bad){
+    if(msg) msg.innerHTML = res.html;
+    return { msg: 'No item carries barcode ' + code, bad: true };
+  }
+  if(msg) msg.innerHTML = '';
+  bsLogAdd(currentLocation, code);
+  bsRenderLog();
+  return { msg: 'Found ' + res.label, bad: false };
+}
+function bsScanInput(el){
+  const raw = el ? el.value : '';
+  if(el){ el.value = ''; el.focus(); }
+  bsScanCode(raw);
+}
+function renderBarcodeStation(){
+  return `
+  ${tabHeader(currentLocation, 'Barcode Station')}
+  ${secHead('<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 8v8M10 8v8M13 8v8M16 8v8"/></svg>', 'Scan or Look Up')}
+  <div class="panel"><div class="panel-head"><h3>Scan a barcode</h3></div>
+  <div class="panel-body">
+    <div class="scan-row" style="margin:0 0 6px 0;">
+      <label class="scan-label">&#127915; Scan or type a barcode</label>
+      <div class="scan-input-wrap">
+        <input type="text" id="bs-input" class="scan-input" autocomplete="off"
+               placeholder="Scan a product or finished-good label, or type the code and press Enter"
+               onkeydown="if(event.key==='Enter'){ event.preventDefault(); bsScanInput(this); }">
+        <button type="button" class="btn scan-cam-btn" onclick="openCameraScanner('station')" title="Scan with the camera">${scanIconSvg()} Camera</button>
+      </div>
+      <div class="scan-hint">Each scan shows the product in detail, with its cost. Scanned items stay here for 24 hours, then are cleared.</div>
+    </div>
+    <div id="bs-msg"></div>
+    <div id="bs-log">${bsLogHtml()}</div>
+  </div></div>`;
+}
+
+/* ---------------- BOM (shared by Automation + Pending Assembly) ---------------- */
+function bomLineHtml(){
+  const inp = 'background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:\'IBM Plex Sans\',sans-serif; font-size:13px; border-radius:4px;';
+  return `<div class="out-line bom-line">
+    <input type="text" class="bom-item" placeholder="Item" style="flex:2 1 180px; min-width:150px; ${inp}">
+    <input type="text" class="bom-loc" placeholder="Barcode location" style="flex:1 1 140px; min-width:120px; ${inp}">
+    <input type="text" class="bom-spec" placeholder="Specification" style="flex:2 1 200px; min-width:160px; ${inp}">
+    <input type="number" step="0.01" class="bom-cost" placeholder="Cost" style="flex:1 1 100px; min-width:90px; ${inp}">
+    <button type="button" class="icon-btn out-line-remove" onclick="removeBomLine(this)" title="Remove this BOM item">&#10005;</button>
+  </div>`;
+}
+function bomToggleHtml(prefix){
+  return `<div class="field"><label>Bill of Materials (BOM)</label>
+    <label style="display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text); text-transform:none; letter-spacing:0;"><input type="checkbox" id="${prefix}-has-bom" onchange="toggleBomEditor('${prefix}', this.checked)"> Add BOM line items</label></div>`;
+}
+function bomEditorHtml(prefix){
+  return `<div id="${prefix}-bom-wrap" class="field" style="grid-column:1/-1; display:none;">
+    <div class="scan-row">
+      <label class="scan-label">&#127915; Scan barcode to add BOM item</label>
+      <div class="scan-input-wrap">
+        <input type="text" id="${prefix}-bom-scan" class="scan-input" autocomplete="off"
+               placeholder="Click here, then scan a label &mdash; or type a barcode and press Enter"
+               onkeydown="if(event.key==='Enter'){ event.preventDefault(); bomScanSubmit('${prefix}', this); }">
+        <button type="button" class="btn scan-cam-btn" onclick="openCameraScanner('${prefix}')" title="Scan a barcode with the camera">${scanIconSvg()} Camera</button>
+      </div>
+      <div class="scan-hint" id="${prefix}-bom-scan-hint">Each scan adds a BOM line with item, barcode location, specification and cost filled from stock. No manual entry needed.</div>
+    </div>
+    <label>BOM line items</label>
+    <div id="${prefix}-bom-lines">${bomLineHtml()}</div>
+    <button type="button" class="icon-btn" onclick="addBomLine('${prefix}')" style="margin-top:6px;">&#10133; Add BOM item</button>
+  </div>`;
+}
+function toggleBomEditor(prefix, on){
+  const el = document.getElementById(prefix+'-bom-wrap');
+  if(el) el.style.display = on ? '' : 'none';
+}
+function addBomLine(prefix){
+  const wrap = document.getElementById(prefix+'-bom-lines');
+  if(wrap) wrap.insertAdjacentHTML('beforeend', bomLineHtml());
+}
+function removeBomLine(btn){
+  const line = btn.closest('.bom-line');
+  const wrap = line && line.parentElement;
+  if(!wrap) return;
+  if(wrap.querySelectorAll('.bom-line').length <= 1){
+    line.querySelectorAll('input').forEach(i=>{ i.value = ''; });
+    return;
+  }
+  line.remove();
+}
+function readBom(prefix){
+  const cb = document.getElementById(prefix+'-has-bom');
+  if(!cb || !cb.checked) return [];
+  const wrap = document.getElementById(prefix+'-bom-lines');
+  if(!wrap) return [];
+  const val = (line, sel)=>{ const el = line.querySelector(sel); return el ? String(el.value||'').trim() : ''; };
+  return [...wrap.querySelectorAll('.bom-line')].map(line=>({
+    item: val(line, '.bom-item'),
+    barcodeLocation: val(line, '.bom-loc'),
+    specification: val(line, '.bom-spec'),
+    cost: val(line, '.bom-cost'),
+    barcode: line.dataset.code || ''
+  })).filter(l => l.item || l.barcodeLocation || l.specification || l.cost);
+}
+/* ---- BOM barcode scanning ----
+   A scanned label resolves to a stock record, and its details fill a BOM line,
+   so nothing is typed by hand. Resolution follows the same barcode rules as the
+   Outward scanner: inward receipts carry the label, inventory supplies the
+   specification and cost. */
+function bomResolveBarcode(raw){
+  const d = DATA[currentLocation] || {};
+  const norm = v => String(v == null ? '' : v).trim().toUpperCase();
+  const code = norm(raw);
+  if(!code) return null;
+  const inv = d.inventory || [];
+  const inw = d.inward || [];
+  let rec = null;
+  for(let i = inw.length - 1; i >= 0; i--){
+    if(norm(inw[i].barcode) === code){ rec = inw[i]; break; }
+  }
+  let item = null;
+  if(rec){
+    const nm = String(rec.item || '').toLowerCase().trim();
+    item = inv.find(x => String(x.name || '').toLowerCase().trim() === nm) || null;
+  }
+  if(!item && !rec){
+    item = inv.find(x => norm(getInventoryBarcode(x.name)) === code) || null;
+  }
+  if(!item && !rec) return null;
+  const name = item ? item.name : rec.item;
+  const location = item ? getInventoryProductLocation(item) : (rec.productLocation || '');
+  const spec = (item && item.specs) || '';
+  const cost = (item && item.cost) || (rec && rec.price) || '';
+  return {
+    code: code,
+    item: String(name || '').trim(),
+    barcodeLocation: String(location || '').trim(),
+    specification: String(spec || '').trim(),
+    cost: String(cost || '').trim()
+  };
+}
+function setBomHint(prefix, msg, bad){
+  const el = document.getElementById(prefix + '-bom-scan-hint');
+  if(!el) return;
+  el.textContent = msg;
+  el.className = 'scan-hint' + (bad ? ' scan-err' : ' scan-ok');
+}
+/* Adds one BOM line for a scanned code. Returns {msg, bad} so the handheld and
+   camera paths can both report the result. */
+function bomScanCode(prefix, raw){
+  const code = String(raw == null ? '' : raw).trim();
+  if(!code) return { msg: '', bad: false };
+  const wrap = document.getElementById(prefix + '-bom-lines');
+  if(!wrap){ return { msg: 'The BOM editor is not open.', bad: true }; }
+  const res = bomResolveBarcode(code);
+  if(!res){
+    const m = 'No stock item carries barcode ' + code + '. Check the label, or add the line manually.';
+    setBomHint(prefix, m, true);
+    return { msg: m, bad: true };
+  }
+  const lines = [...wrap.querySelectorAll('.bom-line')];
+  if(lines.some(l => l.dataset.code === res.code)){
+    const m = res.item + ' is already on this BOM.';
+    setBomHint(prefix, m, false);
+    return { msg: m, bad: false };
+  }
+  let line = lines.find(l => [...l.querySelectorAll('input')].every(i => !String(i.value || '').trim()));
+  if(!line){
+    wrap.insertAdjacentHTML('beforeend', bomLineHtml());
+    const all = wrap.querySelectorAll('.bom-line');
+    line = all[all.length - 1];
+  }
+  line.dataset.code = res.code;
+  line.querySelector('.bom-item').value = res.item;
+  line.querySelector('.bom-loc').value = res.barcodeLocation;
+  line.querySelector('.bom-spec').value = res.specification;
+  line.querySelector('.bom-cost').value = res.cost;
+  const m = res.item + ' added to the BOM.';
+  setBomHint(prefix, m, false);
+  return { msg: m, bad: false };
+}
+function bomScanSubmit(prefix, el){
+  const r = bomScanCode(prefix, el ? el.value : '');
+  if(el){ el.value = ''; el.focus(); }
+  return r;
+}
+
+function bomCellHtml(bom){
+  const list = Array.isArray(bom) ? bom : [];
+  if(list.length === 0) return '';
+  const total = list.reduce((s,l)=>s+(parseFloat(l.cost)||0), 0);
+  return `<details><summary>${list.length} item(s) &middot; ${esc(total.toFixed(2))}</summary>
+    <ul style="margin:6px 0 0 16px; padding:0; font-size:12px;">${list.map(l=>`<li>${esc(l.item)}${l.barcode ? ' [' + esc(l.barcode) + ']' : ''} | Loc: ${esc(l.barcodeLocation)} | ${esc(l.specification)} | Cost: ${esc(l.cost)}</li>`).join('')}</ul></details>`;
+}
+
 /* ---------------- AUTOMATION ---------------- */
 function renderAutomation(){
   const d = DATA[currentLocation];
@@ -9433,6 +10042,8 @@ function renderAutomation(){
         <option value="Completed">Completed</option>
       </select></div>
       <div class="field"><label>Notes</label><input type="text" id="au-notes" placeholder="Optional"></div>
+      ${bomToggleHtml('au')}
+      ${bomEditorHtml('au')}
       <button type="submit" class="btn">Add Job</button>
     </div>
   </form>
@@ -9441,15 +10052,15 @@ function renderAutomation(){
   <div class="panel"><div class="panel-head"><h3>Automation jobs</h3><div class="panel-head-actions">${importBtn('automation')}${exportBtn('exportAutomation')}</div></div>
   <div class="panel-body">
   ${tableToolbar('automation', d.automation)}
-  <table><thead><tr><th>P.O Num</th><th>Date</th><th>Automation Value</th><th>Item Description</th><th>Qty</th><th>Type of Valve</th><th>Size of Valve</th><th>Status</th><th>Notes</th><th>Assigned To</th>${cfHeaders('automation')}<th>Added By</th><th></th></tr></thead><tbody>
-  ${autoRows.length===0 ? noMatchRow(12, d.automation.length) :
+  <table><thead><tr><th>P.O Num</th><th>Date</th><th>Automation Value</th><th>Item Description</th><th>Qty</th><th>Type of Valve</th><th>Size of Valve</th><th>Status</th><th>Notes</th><th>Assigned To</th><th>Finished Barcode</th><th>BOM</th>${cfHeaders('automation')}<th>Added By</th><th></th></tr></thead><tbody>
+  ${autoRows.length===0 ? noMatchRow(14, d.automation.length) :
     autoRows.map(r=>`<tr>
       <td>${esc(r.poNumber)}</td><td>${fd(r.date)}</td><td>${esc(r.automationValue)}</td><td>${descCellHtml('automation:'+r.id+':item', r.item)}</td><td>${esc(r.qty)}</td><td>${esc(r.valveType)}</td><td>${esc(r.valveSize)}</td>
       <td><select class="status-select ${r.status==='Completed'?'status-completed':'status-inprogress'}" onchange="updateAutomationStatus('${r.id}', this.value); this.className='status-select '+(this.value==='Completed'?'status-completed':'status-inprogress');">
         <option value="In Progress" ${r.status==='In Progress'?'selected':''}>In Progress</option>
         <option value="Completed" ${r.status==='Completed'?'selected':''}>Completed</option>
       </select></td>
-      <td>${descCellHtml('automation:'+r.id+':notes', r.notes)}</td><td>${esc(r.assignedTo)}</td>${cfCells('automation', r)}${addedByCell(r)}
+      <td>${descCellHtml('automation:'+r.id+':notes', r.notes)}</td><td>${esc(r.assignedTo)}</td>${barcodeCellHtml(r.finishedBarcode)}<td>${bomCellHtml(r.bom)}</td>${cfCells('automation', r)}${addedByCell(r)}
       <td>${actionCell((r.status==='Completed' && canMoveAutomationToFutureShipments() && !r.movedToFutureShipmentId ? `<button class="icon-btn" onclick="moveAutomationToFutureShipments('${r.id}')">Move to Future Shipments</button>` : (r.movedToFutureShipmentId ? '<span class="chip-tag">Moved</span>' : '')) + editBtn('automation', r.id), deleteBtn(`deleteAutomation('${r.id}')`))}</td>
     </tr>`).join('')}
   </tbody></table>
@@ -9468,6 +10079,8 @@ function renderAutomation(){
       <div class="field"><label>P.O Value</label><input type="number" step="0.01" id="pa-po-value" placeholder="Optional"></div>
       <div class="field"><label>Submission Date</label><input type="date" id="pa-submission-date"></div>
       <div class="field"><label>Assigned To</label><input type="text" id="pa-assigned" placeholder="Optional"></div>
+      ${bomToggleHtml('pa')}
+      ${bomEditorHtml('pa')}
       <button type="submit" class="btn">Add Entry</button>
     </div>
   </form>
@@ -9476,10 +10089,10 @@ function renderAutomation(){
   <div class="panel"><div class="panel-head"><h3>Pending assembly</h3><div class="panel-head-actions">${importBtn('pendingAssembly')}${exportBtn('exportPendingAssembly')}</div></div>
   <div class="panel-body">
   ${tableToolbar('pendingAssembly', paVisible)}
-  <table><thead><tr><th>P.O Num</th><th>Date</th><th>Customer Name</th><th>P.O Value</th><th>Submission Date</th><th>Assigned To</th>${cfHeaders('pendingAssembly')}<th>Added By</th><th></th></tr></thead><tbody>
-  ${paRows.length===0 ? noMatchRow(8, paVisible.length) :
+  <table><thead><tr><th>P.O Num</th><th>Date</th><th>Customer Name</th><th>P.O Value</th><th>Submission Date</th><th>Assigned To</th><th>BOM</th>${cfHeaders('pendingAssembly')}<th>Added By</th><th></th></tr></thead><tbody>
+  ${paRows.length===0 ? noMatchRow(9, paVisible.length) :
     paRows.map(r=>`<tr>
-      <td>${esc(r.poNumber)}</td><td>${fd(r.date)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.customer)}</td><td>${esc(r.poValue)}</td><td>${fd(r.submissionDate)}</td><td>${esc(r.assignedTo)}</td>${cfCells('pendingAssembly', r)}${addedByCell(r)}
+      <td>${esc(r.poNumber)}</td><td>${fd(r.date)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.customer)}</td><td>${esc(r.poValue)}</td><td>${fd(r.submissionDate)}</td><td>${esc(r.assignedTo)}</td><td>${bomCellHtml(r.bom)}</td>${cfCells('pendingAssembly', r)}${addedByCell(r)}
       <td>${actionCell((r.assignedTo? '' : pickBtn(r.id)) + editBtn('pendingAssembly', r.id), deleteBtn(`deletePendingAssembly('${r.id}')`))}</td>
     </tr>`).join('')}
   </tbody></table>
@@ -9500,6 +10113,8 @@ async function addAutomation(e){
     valveSize: document.getElementById('au-valve-size').value,
     status: document.getElementById('au-status').value || 'In Progress',
     notes: document.getElementById('au-notes').value.trim(),
+    bom: readBom('au'),
+    finishedBarcode: nextFinishedBarcode(d, currentLocation),
     assignedTo: actorName(),
     addedBy: actorName()
   });
@@ -9548,8 +10163,8 @@ async function moveAutomationToFutureShipments(id){
 }
 function exportAutomation(){
   const d = DATA[currentLocation];
-  const headers = ['P.O Num','Date','Automation Value','Item Description','Qty','Type of Valve','Size of Valve','Status','Notes','Assigned To','Added By'];
-  const rows = d.automation.map(r=>[r.poNumber, r.date, r.automationValue, r.item, r.qty, r.valveType, r.valveSize, r.status, r.notes, r.assignedTo, r.addedBy]);
+  const headers = ['P.O Num','Date','Automation Value','Item Description','Qty','Type of Valve','Size of Valve','Status','Notes','Assigned To','Added By','Finished Barcode','Component Barcodes'];
+  const rows = d.automation.map(r=>[r.poNumber, r.date, r.automationValue, r.item, r.qty, r.valveType, r.valveSize, r.status, r.notes, r.assignedTo, r.addedBy, r.finishedBarcode||'', (Array.isArray(r.bom)?r.bom:[]).map(l=>l.barcode).filter(Boolean).join(', ')]);
   cfExportAppend('automation', d.automation, headers, rows);
   exportToExcel(currentLocation+'_Automation', headers, rows);
 }
@@ -9572,11 +10187,38 @@ async function addPendingAssembly(e){
     poValue: document.getElementById('pa-po-value').value.trim(),
     submissionDate: document.getElementById('pa-submission-date').value,
     assignedTo: document.getElementById('pa-assigned').value.trim(),
+    bom: readBom('pa'),
     addedBy: actorName()
   });
   await saveLocation(currentLocation);
   render();
   return false;
+}
+/* The BOM recorded on a pending assembly entry, shown in the pick dialog so the
+   person picking it can see every component before moving it to Automation. */
+function pickBomHtml(r){
+  const list = (Array.isArray(r.bom) ? r.bom : []).filter(l => l && (String(l.item || '').trim() || String(l.barcode || '').trim()));
+  let total = 0;
+  const rows = list.map((l, i) => {
+    const c = parseFloat(l.cost) || 0;
+    total += c;
+    const code = String(l.barcode || '').trim();
+    return '<tr>' +
+      '<td>' + (i + 1) + '</td>' +
+      '<td style="text-align:center;">' + (code ? bsCodeVisual(code, 28) + '<div style="font-family:\'IBM Plex Mono\',monospace; font-size:11px; font-weight:700;">' + esc(code) + '</div>' : '<span style="color:var(--muted);">no barcode</span>') + '</td>' +
+      '<td style="font-family:\'IBM Plex Sans\',sans-serif; white-space:normal;">' + esc(l.item || '') + '</td>' +
+      '<td>' + esc(l.barcodeLocation || '-') + '</td>' +
+      '<td style="white-space:normal;">' + esc(l.specification || '-') + '</td>' +
+      '<td style="text-align:right;">' + (c ? bsMoney(c) : '-') + '</td>' +
+    '</tr>';
+  }).join('');
+  return '<div class="field" style="margin-top:14px;"><label>Bill of materials (BOM)</label>' +
+    (list.length
+      ? '<div class="table-wrap" style="overflow-x:auto;"><table><thead><tr><th>#</th><th>Barcode</th><th>Item</th><th>Barcode location</th><th>Specification</th><th style="text-align:right;">Cost</th></tr></thead><tbody>' + rows +
+        '<tr><td colspan="5" style="text-align:right; font-weight:700;">Total</td><td style="text-align:right; font-weight:700;">' + bsMoney(total) + '</td></tr>' +
+        '</tbody></table></div>'
+      : '<div style="color:var(--muted); font-size:13px;">No BOM was recorded for this entry.</div>') +
+  '</div>';
 }
 let pickAssemblyModalState = null;
 function pickPendingAssembly(id){
@@ -9592,10 +10234,10 @@ function closePickAssemblyModal(){
   const el = document.getElementById('pick-assembly-modal-root');
   if(el) el.remove();
 }
-function pickValveLineHtml(){
+function pickValveLineHtml(prefill){
   return `<div class="out-line">
-    <input type="text" class="pa-line-item" placeholder="Item description" style="flex:2 1 220px; min-width:180px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:'IBM Plex Sans',sans-serif; font-size:13px; border-radius:4px;">
-    <input type="number" class="out-line-qty pa-line-qty" min="1" placeholder="Qty">
+    <input type="text" class="pa-line-item" placeholder="Item description" value="${esc(prefill || '')}" style="flex:2 1 220px; min-width:180px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:'IBM Plex Sans',sans-serif; font-size:13px; border-radius:4px;">
+    <input type="number" class="out-line-qty pa-line-qty" min="1" placeholder="Qty" value="${prefill ? 1 : ''}">
     <select class="out-line-item pa-line-valve-type" style="flex:1 1 160px; min-width:150px;">
       <option value="">Type of Valve</option>
       ${VALVE_TYPES.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('')}
@@ -9630,15 +10272,16 @@ function renderPickAssemblyModal(r){
     <div class="modal-card">
       <div class="modal-head"><h3>Assign to Automation</h3><button class="icon-btn" onclick="closePickAssemblyModal()">Close</button></div>
       <div class="modal-body">
-      <p style="margin:0 0 12px; color:var(--muted); font-size:13px;">Picking this entry will assign it to you and move it into Automation. It will be removed from Pending Assembly. Enter each valve item below as a line item.</p>
+      <p style="margin:0 0 12px; color:var(--muted); font-size:13px;">Review the BOM below, then enter each valve item as a line item. Picking assigns this entry to you, moves it into Automation with its BOM and a finished-good barcode, and removes it from Pending Assembly.</p>
       <div class="form-grid">
         <div class="field"><label>P.O Num</label><input type="text" id="pa-pick-po-num" value="${esc(r.poNumber)}"></div>
         <div class="field"><label>Date</label><input type="date" id="pa-pick-date" value="${today()}" required></div>
         <div class="field"><label>Automation Value</label><input type="number" step="0.01" id="pa-pick-value" value="${esc(r.poValue)}" placeholder="Optional"></div>
         <div class="field"><label>Notes</label><input type="text" id="pa-pick-notes" placeholder="Optional" value="Auto-created from pending assembly pick"></div>
       </div>
+      ${pickBomHtml(r)}
       <div class="field" style="margin-top:14px;"><label>Items</label>
-        <div id="pick-valve-lines">${pickValveLineHtml()}</div>
+        <div id="pick-valve-lines">${pickValveLineHtml(r.customer ? 'Assembly for ' + r.customer : '')}</div>
         <button type="button" class="icon-btn" onclick="addPickValveLine()" style="margin-top:6px;">&#10133; Add another item</button>
       </div>
       </div>
@@ -9673,6 +10316,7 @@ async function confirmPickAssembly(){
     })).filter(l => l.item || l.qty || l.valveType || l.valveSize);
     if(lines.length === 0){ alert('Enter at least one item (description, qty, valve type, or valve size).'); return; }
     const me = actorName();
+    const firstAutoIdx = d.automation.length;
     const poNumber = fieldVal('pa-pick-po-num');
     const date = fieldVal('pa-pick-date') || today();
     const automationValue = fieldVal('pa-pick-value');
@@ -9693,6 +10337,8 @@ async function confirmPickAssembly(){
         addedBy: me
       });
     }
+    for(let k = firstAutoIdx; k < d.automation.length; k++){ d.automation[k].finishedBarcode = nextFinishedBarcode(d, pickedLocation); }
+    if(lines.length && Array.isArray(r.bom) && r.bom.length && d.automation[firstAutoIdx]){ d.automation[firstAutoIdx].bom = r.bom; }
     // Remove the picked record from Pending Assembly before saving.
     d.pendingAssembly = d.pendingAssembly.filter(x=>x.id!==pickedId);
     closePickAssemblyModal();
