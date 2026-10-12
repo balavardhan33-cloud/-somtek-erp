@@ -13963,6 +13963,7 @@ function quoteTplDefault(){
       cols: g.cols.map(c=>Object.assign({}, c, {locked: QT_LOCKED_KEYS.indexOf(c.key)>=0}))})),
     cv: QUOTE_CV_ACC.map(f=>Object.assign({}, f)),
     oo: QUOTE_ONOFF_ACC.map(f=>Object.assign({}, f)),
+    terms: QT_DEFAULT_TERMS.slice(),
     titles: {cv:'Accessories / Supply for Control Valve', oo:'Accessories / Supply for On/Off', other:'Other Accessories'}
   };
 }
@@ -14077,6 +14078,23 @@ function quoteSalesPocLine(q){
   if(poc) bits.push(esc(poc) + (ph ? ' &mdash; Ph. ' + esc(ph) : ''));
   return `<div style="margin-top:12px;"><b>Sales Region &amp; POC:</b> ${bits.join(', ')}</div>`;
 }
+/* ---- Terms & conditions clauses ---- */
+function qtTermField(i,l){
+  return `<div class="field"><div class="qt-lab"><label>Clause ${i+1}</label><span class="qt-icons"><button type="button" class="qt-ico qt-del" title="Remove" onclick="qtRemoveTerm(${i})">&#10005;</button></span></div><textarea class="q-term" rows="2" placeholder="Clause text">${esc(l)}</textarea></div>`;
+}
+function qtTermsEdit(fn){
+  captureQuoteDraft();
+  const terms = (QT_DRAFT && Array.isArray(QT_DRAFT.terms)) ? QT_DRAFT.terms.slice() : [];
+  fn(terms);
+  if(QT_DRAFT) QT_DRAFT.terms = terms;
+  render();
+}
+function qtAddTerm(){ qtTermsEdit(t=>{ t.push(''); }); }
+function qtRemoveTerm(i){
+  if(!confirm('Remove clause '+(i+1)+' from the terms & conditions?')) return;
+  qtTermsEdit(t=>{ t.splice(i,1); });
+}
+
 /* ---- Quotation template operations (each one re-renders the tab) ---- */
 function captureQuoteDraft(){
   if(document.getElementById('q-item-cards')) QT_DRAFT = readQuoteForm();
@@ -14227,7 +14245,9 @@ function readQuoteForm(){
     notes: gv('q-notes'),
     signName: gv('q-signname'),
     techContactName: gv('q-techname'),
-    techContactPhone: gv('q-techphone')
+    techContactPhone: gv('q-techphone'),
+    terms: Array.from(document.querySelectorAll('#q-terms textarea.q-term')).map(el=>el.value),
+    termsAsDefault: !!((document.getElementById('q-terms-default')||{}).checked)
   };
 }
 function quoteTotals(q){
@@ -14268,22 +14288,25 @@ function numberToWordsINR(num){
   if(paise) out += ' and ' + two(paise) + ' Paise';
   return out + ' Only';
 }
+/* Standard terms & conditions clauses (used until a quotation or the standard list changes them). */
+const QT_DEFAULT_TERMS = [
+  '1. Validity: Our offer is valid for 30 days from the date of the offer and there after subject to our confirmation.',
+  '2. Prices: Ex-Hyderabad',
+  '3. P&F: 3% extra',
+  '4. Freight: Extra at actual.',
+  '5. Insurance: To your account.',
+  '6. Payment Terms: 30% advance and balance 70% against P.I before dispatch',
+  '7. GST: 18% Extra to your account.',
+  '8. Warranty: We stand warranty for our product for a period of 12 Months from the date of Installation on Non-wearing parts (or) 18 Months from the date of dispatch, whichever is earliest in this context, we reserve the rights to rectify the equipment or components or to replace the same.',
+  '9. Order Cancellation:',
+  '     a) 10% of the order value if cancelled within 2 weeks from order acceptance.',
+  '     b) 35% of the order value if cancelled within 3 weeks from order acceptance.',
+  '     c) 75% of the order value if cancelled within 6 weeks from order acceptance.',
+  '10. LD clause: Not acceptable.'
+];
 function quoteTermsLines(q){
-  return [
-    '1. Validity: Our offer is valid for 30 days from the date of the offer and there after subject to our confirmation.',
-    '2. Prices: Ex-Hyderabad',
-    '3. P&F: 3% extra',
-    '4. Freight: Extra at actual.',
-    '5. Insurance: To your account.',
-    '6. Payment Terms: 30% advance and balance 70% against P.I before dispatch',
-    '7. GST: 18% Extra to your account.',
-    '8. Warranty: We stand warranty for our product for a period of 12 Months from the date of Installation on Non-wearing parts (or) 18 Months from the date of dispatch, whichever is earliest in this context, we reserve the rights to rectify the equipment or components or to replace the same.',
-    '9. Order Cancellation:',
-    '     a) 10% of the order value if cancelled within 2 weeks from order acceptance.',
-    '     b) 35% of the order value if cancelled within 3 weeks from order acceptance.',
-    '     c) 75% of the order value if cancelled within 6 weeks from order acceptance.',
-    '10. LD clause: Not acceptable.'
-  ];
+  if(q && Array.isArray(q.terms)) return q.terms;
+  return tplOf(q).terms;
 }
 function renderQuotation(){
   const d = DATA[currentLocation];
@@ -14345,7 +14368,11 @@ function renderQuotation(){
     <div class="form-grid">
       <div class="field" style="grid-column:1/-1;"><label>Notes / remarks</label><textarea id="q-notes" rows="3" placeholder="Printed below the terms &amp; conditions">${esc(q.notes||'')}</textarea></div>
     </div>
-    <div class="access-title" style="margin-top:14px;">Terms &amp; signature (standard T&amp;C printed automatically)</div>
+    <div class="access-title qt-head" style="margin-top:14px;">Terms &amp; conditions (printed on the T&amp;C page)</div>
+    <div id="q-terms">${(Array.isArray(q.terms) ? q.terms : tpl.terms).map((l,i)=>qtTermField(i,l)).join('')}</div>
+    <div style="margin:8px 0 4px 0;"><button type="button" class="btn btn-ghost" onclick="qtAddTerm()">+ Add term</button></div>
+    <label style="display:flex; align-items:center; gap:6px; font-size:12px; margin:6px 0 4px 0;"><input type="checkbox" id="q-terms-default" ${q.termsAsDefault?'checked':''}> Also use these terms as the standard for new quotations</label>
+    <div class="access-title" style="margin-top:14px;">Signature &amp; contacts</div>
     <div class="form-grid">
       <div class="field"><label>Sales Region</label><input type="text" id="q-salesregion" list="dl-quote-regions" autocomplete="off" value="${esc(q.salesRegion||'')}" placeholder="e.g. North Karnataka"></div>
       <div class="field"><label>Sales POC</label><input type="text" id="q-salespoc" list="dl-sales-poc" autocomplete="off" value="${esc(q.salesPoc||'')}" placeholder="Pick a sales person" oninput="quoteSalesPocPick()" onchange="quoteSalesPocPick()"></div>
@@ -14398,6 +14425,11 @@ async function saveQuotation(e){
   QT_DRAFT = null;
   const q = readQuoteForm();
   const optionsTemplate = JSON.parse(JSON.stringify(activeQuoteTpl()));
+  q.terms = (q.terms||[]).filter(s=>String(s).trim()!=='');
+  if(q.termsAsDefault){
+    DATA[currentLocation].quoteTemplate = Object.assign(JSON.parse(JSON.stringify(quoteTpl())), {terms: q.terms.slice()});
+  }
+  delete q.termsAsDefault;
   if(q.items.length === 0){ alert('Fill at least one item.'); return false; }
   const t = quoteTotals(q);
   const rec = Object.assign({}, q, { totalQty: t.totalQty, totalPrice: t.totalPrice, addedBy: actorName(), optionsTemplate: optionsTemplate });
