@@ -13971,21 +13971,38 @@ function quoteTpl(){
   if(!t || !Array.isArray(t.groups)) return quoteTplDefault();
   return Object.assign(quoteTplDefault(), t);
 }
+/* Options a saved quotation was submitted with. Falls back to the current defaults for older records. */
+function tplOf(rec){
+  const t = rec && rec.optionsTemplate;
+  if(t && Array.isArray(t.groups)) return Object.assign(quoteTplDefault(), t);
+  return quoteTpl();
+}
+/* Options the form is showing right now: the record's own while editing a saved quotation, otherwise the standard defaults. */
+function activeQuoteTpl(){
+  const rec = editingQuoteId ? ((DATA[currentLocation]||{}).quotations||[]).find(x=>x.id===editingQuoteId) : null;
+  return rec ? tplOf(rec) : quoteTpl();
+}
+/* Where option edits are saved: the record while editing it, otherwise the standard defaults. */
 function quoteTplForEdit(){
   const d = DATA[currentLocation];
+  const rec = editingQuoteId ? (d.quotations||[]).find(x=>x.id===editingQuoteId) : null;
+  if(rec){
+    if(!rec.optionsTemplate || !Array.isArray(rec.optionsTemplate.groups)) rec.optionsTemplate = JSON.parse(JSON.stringify(quoteTpl()));
+    if(!rec.optionsTemplate.titles) rec.optionsTemplate.titles = quoteTplDefault().titles;
+    return rec.optionsTemplate;
+  }
   if(!d.quoteTemplate || !Array.isArray(d.quoteTemplate.groups)) d.quoteTemplate = quoteTplDefault();
   if(!d.quoteTemplate.titles) d.quoteTemplate.titles = quoteTplDefault().titles;
   if(!Array.isArray(d.quoteTemplate.cv)) d.quoteTemplate.cv = quoteTplDefault().cv;
   if(!Array.isArray(d.quoteTemplate.oo)) d.quoteTemplate.oo = quoteTplDefault().oo;
   return d.quoteTemplate;
 }
-/* Pencil (rename) and × (remove) buttons shown beside an option or heading. */
 function qtIcons(renameCall, removeCall){
   return `<span class="qt-icons"><button type="button" class="qt-ico" title="Rename" onclick="${renameCall}">&#9998;</button>${removeCall?`<button type="button" class="qt-ico qt-del" title="Remove" onclick="${removeCall}">&#10005;</button>`:''}</span>`;
 }
 function quoteItemCardHtml(it, idx){
   it = it || {};
-  const tpl = quoteTpl();
+  const tpl = activeQuoteTpl();
   const field = (g,c) => `<div class="field"><div class="qt-lab"><label>${esc(c.label)}</label>${qtIcons(`qtRenameCol('${g.id}','${c.key}')`, c.locked?'':`qtRemoveCol('${g.id}','${c.key}')`)}</div><input type="${c.num?'number':'text'}" ${c.num?'step="any" min="0"':''} class="q-it" data-key="${c.key}" value="${esc(it[c.key]||'')}" placeholder="-" ${c.num?'oninput="updateQuoteTotals()"':''}></div>`;
   return `<div class="quote-item-card">
     <div class="quote-item-card-head"><span>Item ${idx+1}</span><button type="button" class="icon-btn out-line-remove" onclick="removeQuoteItemCard(this)" title="Remove this item">&#10005; Remove</button></div>
@@ -14132,7 +14149,16 @@ function qtAddAcc(){
   qtCommit(t=>{ t[type] = (t[type]||[]).concat([{key:'x_'+uid(), label:name, custom:true}]); });
 }
 async function qtReset(){
-  if(!confirm('Reset every option, heading and accessory to the standard list? Custom columns and accessories will be removed from the form. Saved quotations keep their values.')) return;
+  const rec = editingQuoteId ? (DATA[currentLocation].quotations||[]).find(x=>x.id===editingQuoteId) : null;
+  if(rec){
+    if(!confirm('Reset this quotation\'s options to the standard list? Its custom columns and accessories will be removed. Other quotations and the new-entry form are not affected.')) return;
+    captureQuoteDraft();
+    rec.optionsTemplate = quoteTplDefault();
+    await saveLocation(currentLocation);
+    render();
+    return;
+  }
+  if(!confirm('Reset every option, heading and accessory to the standard list? Custom columns and accessories will be removed from the form. Saved quotations keep their own options.')) return;
   captureQuoteDraft();
   delete DATA[currentLocation].quoteTemplate;
   await saveLocation(currentLocation);
@@ -14143,7 +14169,7 @@ function qtAccField(type, f, data){
   return `<div class="field"><div class="qt-lab"><label>${esc(f.label)}</label>${qtIcons(`qtRenameAcc('${type}','${f.key}')`, `qtRemoveAcc('${type}','${f.key}')`)}</div><input type="text" id="q-${type}-${f.key}" value="${esc((data||{})[f.key]||'')}" placeholder="-"></div>`;
 }
 function qtAddColumnBar(){
-  const t = quoteTpl();
+  const t = activeQuoteTpl();
   return `<div class="qt-add">
     <div class="qt-add-title">Add custom column (prints in the quotation only once a value is entered)</div>
     <div class="form-grid">
@@ -14166,7 +14192,7 @@ function qtAccAddBar(){
 }
 /* Columns and accessories that print: custom columns only once a row has a value. */
 function quotePrintGroups(q){
-  const tpl = quoteTpl();
+  const tpl = tplOf(q);
   const items = (q && q.items) || [];
   const has = key => items.some(it => String(((it||{})[key])==null?'':(it||{})[key]).trim()!=='');
   return tpl.groups.map(g=>({label:g.label, cols:g.cols.filter(c=>!c.custom || has(c.key))})).filter(g=>g.cols.length);
@@ -14191,8 +14217,8 @@ function readQuoteForm(){
     kindAttn: gv('q-attn'),
     poReceived: gv('q-poreceived') || 'No',
     items: items,
-    accessoriesCV: acc('q-cv-', quoteTpl().cv),
-    accessoriesOnOff: acc('q-oo-', quoteTpl().oo),
+    accessoriesCV: acc('q-cv-', activeQuoteTpl().cv),
+    accessoriesOnOff: acc('q-oo-', activeQuoteTpl().oo),
     salesRegion: gv('q-salesregion'),
     salesPoc: gv('q-salespoc'),
     salesPocPhone: gv('q-salesphone'),
@@ -14268,7 +14294,8 @@ function renderQuotation(){
   const items = (q.items && q.items.length) ? q.items : [null];
   const cv = q.accessoriesCV || {};
   const oo = q.accessoriesOnOff || {};
-  const tpl = quoteTpl();
+  if(editing && !editing.optionsTemplate) editing.optionsTemplate = JSON.parse(JSON.stringify(quoteTpl()));
+  const tpl = editing ? tplOf(editing) : quoteTpl();
   const qAll = applyTableTools('quotations', d.quotations.slice().reverse());
   const qRows = limitRows('quotations', qAll);
   const fmt2 = n => (parseFloat(n)||0).toLocaleString('en-IN',{minimumFractionDigits:2, maximumFractionDigits:2});
@@ -14370,9 +14397,10 @@ async function saveQuotation(e){
   if(!Array.isArray(d.quotations)) d.quotations = [];
   QT_DRAFT = null;
   const q = readQuoteForm();
+  const optionsTemplate = JSON.parse(JSON.stringify(activeQuoteTpl()));
   if(q.items.length === 0){ alert('Fill at least one item.'); return false; }
   const t = quoteTotals(q);
-  const rec = Object.assign({}, q, { totalQty: t.totalQty, totalPrice: t.totalPrice, addedBy: actorName() });
+  const rec = Object.assign({}, q, { totalQty: t.totalQty, totalPrice: t.totalPrice, addedBy: actorName(), optionsTemplate: optionsTemplate });
   let savedId;
   if(editingQuoteId){
     const idx = d.quotations.findIndex(x=>x.id===editingQuoteId);
@@ -14474,7 +14502,7 @@ async function deleteQuotation(id){
   render();
 }
 function quoteDocumentHtml(q){
-  const tpl = quoteTpl();
+  const tpl = tplOf(q);
   const fmt2 = n => (parseFloat(n)||0).toLocaleString('en-IN',{minimumFractionDigits:2, maximumFractionDigits:2});
   const t = quoteTotals(q);
   const th = 'border:1px solid #444; padding:4px 3px; font-size:7.5px; text-align:center; vertical-align:middle; background:#e8e8e8; font-weight:700;';
@@ -14608,7 +14636,7 @@ function exportQuotationExcel(id){
   if(typeof XLSX === 'undefined'){ alert('Excel export library failed to load. Check your connection.'); return; }
   const t = quoteTotals(q);
   const items = q.items||[];
-  const tpl = quoteTpl();
+  const tpl = tplOf(q);
   const pg = quotePrintGroups(q);
   const cols = pg.flatMap(g=>g.cols);
   /* ----- Sheet R0, laid out exactly like the template ----- */
