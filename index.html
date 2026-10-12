@@ -10969,6 +10969,13 @@ function pfRecalc(){
     }
   }
 }
+function pfAdvanceWordsPreview(){
+  const el = document.getElementById('pf-advance-words');
+  if(!el) return;
+  const v = parseFloat((document.getElementById('pf-advance')||{}).value);
+  el.textContent = (v > 0) ? numberToWordsINR(String(v))
+    : 'Leave blank to show the total invoice value in words.';
+}
 function nextProformaNumber(d){
   const n = (d.proformaInvoices||[]).length + 1;
   return (currentLocation==='SOMTEK' ? 'SE/PI/' : 'ET/PI/') + String(n).padStart(3,'0');
@@ -11029,6 +11036,8 @@ function proformaSection(d){
       <div class="field"><label>Time of Removal</label><input type="text" id="pf-removaltime" placeholder="Optional"></div>
       <div class="field"><label>Tax Payable on Reverse Charge</label><select id="pf-reverse"><option value="">-</option><option value="No">No</option><option value="Yes">Yes</option></select></div>
       <div class="field"><label>Electronic Reference No. &amp; Date</label><input type="text" id="pf-eref" placeholder="Optional"></div>
+      <div class="field"><label>Advance Amount <span style="color:var(--muted); font-weight:400;">(optional)</span></label><input type="number" step="0.01" min="0" id="pf-advance" placeholder="Optional" oninput="pfAdvanceWordsPreview()"></div>
+      <div class="field" style="grid-column:2/-1;"><label>Amount in words</label><div id="pf-advance-words" style="font-size:12px; color:var(--muted); padding:9px 0;">Leave blank to show the total invoice value in words.</div></div>
       <div class="field" style="grid-column:1/-1;"><label>Notes / Remarks</label><input type="text" id="pf-notes" placeholder="Optional"></div>
     </div>
     <div style="margin-top:16px;"><button type="submit" class="btn">Save Proforma Invoice</button></div>
@@ -11107,6 +11116,12 @@ async function addProformaInvoice(e){
     alert('Please fill the required fields before saving:\n\n\u2022 ' + missing.join('\n\u2022 '));
     return false;
   }
+  const advVal = parseFloat(gv('pf-advance')) || 0;
+  const totVal = parseFloat(gv('pf-invval')) || 0;
+  if(advVal && totVal && advVal > totVal){
+    alert('The advance amount (' + advVal.toFixed(2) + ') cannot be more than the total invoice value (' + totVal.toFixed(2) + ').');
+    return false;
+  }
   const first = items[0] || {};
   d.proformaInvoices.push({
     id: uid(),
@@ -11150,6 +11165,8 @@ async function addProformaInvoice(e){
     reverseCharge: gv('pf-reverse'),
     eRefNo: gv('pf-eref'),
     notes: gv('pf-notes'),
+    advanceAmount: advVal ? advVal.toFixed(2) : '',
+    advanceWords: advVal ? numberToWordsINR(advVal.toFixed(2)) : '',
     bankDetails: defaultBankDetails(currentLocation),
     addedBy: actorName()
   });
@@ -11236,8 +11253,8 @@ function convertProformaToSales(id){
 let PROFORMA_CONVERT_ID = null;
 function exportProformaInvoices(){
   const d = DATA[currentLocation];
-  const headers = ['Proforma No','Date','Valid Until','Customer','Bill To','GST No.','PO No','PO Date','Place of Supply','State Code','Contact Person','Mobile','Description of Goods','HSN/SAC','Qty','Taxable Value','Freight','CGST %','CGST','SGST %','SGST','IGST %','IGST','Round Off','Total Value','Payment %','Amount to be Received','Amount Received','Payment Date','Terms','Delivery Period','Notes','Status','Added By'];
-  const rows = (d.proformaInvoices||[]).map(r=>[r.invNo, r.date, r.validity, r.customer, r.billTo, r.gstin, r.poNo, r.poDate, r.placeOfSupply, r.stateCode, r.contactPerson, r.contactMobile, (r.description || saItems(r).map(it=>it.description).filter(Boolean).join('; ')), r.hsnSac, r.qty, r.taxable, r.freight, r.cgstPct, r.cgst, r.sgstPct, r.sgst, r.igstPct, r.igst, r.roundOff, r.invoiceValue, r.receivePct, r.amountToReceive, r.amountReceived, r.paymentDate, r.termsOfDelivery, r.deliveryPeriod, r.notes, (r.convertedInvNo ? 'Converted ('+r.convertedInvNo+')' : 'Open'), r.addedBy]);
+  const headers = ['Proforma No','Date','Valid Until','Customer','Bill To','GST No.','PO No','PO Date','Place of Supply','State Code','Contact Person','Mobile','Description of Goods','HSN/SAC','Qty','Taxable Value','Freight','CGST %','CGST','SGST %','SGST','IGST %','IGST','Round Off','Total Value','Payment %','Amount to be Received','Amount Received','Payment Date','Terms','Delivery Period','Notes','Status','Added By','Advance Amount','Advance In Words'];
+  const rows = (d.proformaInvoices||[]).map(r=>[r.invNo, r.date, r.validity, r.customer, r.billTo, r.gstin, r.poNo, r.poDate, r.placeOfSupply, r.stateCode, r.contactPerson, r.contactMobile, (r.description || saItems(r).map(it=>it.description).filter(Boolean).join('; ')), r.hsnSac, r.qty, r.taxable, r.freight, r.cgstPct, r.cgst, r.sgstPct, r.sgst, r.igstPct, r.igst, r.roundOff, r.invoiceValue, r.receivePct, r.amountToReceive, r.amountReceived, r.paymentDate, r.termsOfDelivery, r.deliveryPeriod, r.notes, (r.convertedInvNo ? 'Converted ('+r.convertedInvNo+')' : 'Open'), r.addedBy, r.advanceAmount||'', r.advanceWords||'']);
   exportToExcel(currentLocation+'_Proforma_Invoices', headers, rows);
 }
 
@@ -12377,7 +12394,11 @@ function invoiceDocumentHtml(r, heading, docTitle){
     </tr>`).join('');
   const insuranceRaw = (r.insurance||'').trim() || (SA_INSURANCE_DEFAULT[currentLocation]||'');
   const insuranceHtml = esc(insuranceRaw).replace(/\n/g,'<br>').replace(/, /g,'<br>');
-  const words = r.valueInWords || (r.invoiceValue ? numberToWordsINR(r.invoiceValue) : '-');
+  const advNum = isPf ? (parseFloat(r.advanceAmount) || 0) : 0;
+  const hasAdv = advNum > 0;
+  const words = hasAdv
+    ? (r.advanceWords || numberToWordsINR(advNum.toFixed(2)))
+    : (r.valueInWords || (r.invoiceValue ? numberToWordsINR(r.invoiceValue) : '-'));
   return `
   <div class="quote-sheet" style="background:#fff; color:#111; margin:0 auto; padding:20px 18px; font-family:'IBM Plex Sans',Arial,sans-serif; font-size:12px; line-height:1.35; max-width:900px;">
     <table style="border-collapse:collapse; width:100%;">
@@ -12518,9 +12539,16 @@ function invoiceDocumentHtml(r, heading, docTitle){
           <td colspan="6" style="border:${B}; padding:8px; font-size:12px; text-align:right; font-weight:800;">TOTAL INVOICE VALUE</td>
           <td style="border:${B}; padding:8px; font-size:13px; text-align:right; font-weight:800;">${fmt2(r.invoiceValue)}</td>
         </tr>
+        ${hasAdv ? `<tr>
+          <td colspan="6" style="border:${B}; padding:7px 8px; font-size:11px; text-align:right; font-weight:800;">ADVANCE AMOUNT</td>
+          <td style="border:${B}; padding:7px 8px; font-size:12px; text-align:right; font-weight:800;">${fmt2(advNum)}</td>
+        </tr>` : ''}
+        ${(isPf && String(r.notes||'').trim()) ? `<tr>
+          <td colspan="7" style="border:${B}; padding:7px 8px; font-size:10.5px; text-align:left; vertical-align:top;"><b>Notes:</b> ${esc(r.notes).replace(/\n/g,'<br>')}</td>
+        </tr>` : ''}
       </tbody>
     </table>
-    <div style="border:${B}; border-top:none; padding:6px 8px; font-size:11.5px; font-weight:800; text-align:center;">Value In Word: ${esc(words)}</div>
+    <div style="border:${B}; border-top:none; padding:6px 8px; font-size:11.5px; font-weight:800; text-align:center;">${hasAdv ? 'Advance In Word' : 'Value In Word'}: ${esc(words)}</div>
     <table style="border-collapse:collapse; width:100%; margin-top:-1px;">
       <tr>
         <td style="${cell} width:47%; line-height:2.05;">
@@ -13462,6 +13490,7 @@ const EDIT_SCHEMAS = {
     {key:'timeOfRemoval', label:'Time of Removal', type:'text'},
     {key:'reverseCharge', label:'Tax Payable on Reverse Charge (Yes/No)', type:'text'},
     {key:'eRefNo', label:'Electronic Reference No. & Date', type:'text'},
+    {key:'advanceAmount', label:'Advance Amount', type:'number'},
     {key:'notes', label:'Notes', type:'text'}
   ],
   salesAccounts: [
@@ -13627,7 +13656,7 @@ function editItemsRecalc(){
 
 function renderEditModal(record){
   const schema0 = EDIT_SCHEMAS[editModalState.table];
-  const isSalesAcct = editModalState.table === 'salesAccounts';
+  const isSalesAcct = editModalState.table === 'salesAccounts' || editModalState.table === 'proformaInvoices';
   /* For sales entries the item details are edited line by line below,
      so the merged flat fields are hidden from the modal. */
   const itemKeys = ['description','hsnSac','qty','uom','rate'];
@@ -13754,6 +13783,35 @@ async function saveEditModal(){
     if(days > 0) record.days = days;
   }
   if(table==='enquiry' && !record.action) record.action = 'Pending';
+  if(table==='proformaInvoices'){
+    /* Same rules as the New Proforma form: items -> taxable -> GST on
+       (taxable + freight) -> total -> words -> amount to be received. */
+    const items = readEditItemLines();
+    record.items = items;
+    const first = items[0] || {};
+    record.description = items.map(it=>it.description).filter(Boolean).join('; ');
+    record.hsnSac = [...new Set(items.map(it=>it.hsnSac).filter(Boolean))].join(', ');
+    record.qty = String(items.reduce((a,it)=>a+(parseFloat(it.qty)||0),0) || '');
+    record.uom = first.uom || '';
+    record.rate = first.rate || '';
+    const r2 = v => Math.round(v*100)/100;
+    const n = v => parseFloat(v)||0;
+    const taxable = r2(items.reduce((a,it)=>a+(parseFloat(it.amount)||0),0));
+    record.taxable = taxable ? taxable.toFixed(2) : '';
+    const gstBase = r2(taxable + n(record.freight));
+    [['cgstPct','cgst'],['sgstPct','sgst'],['igstPct','igst']].forEach(pair=>{
+      const p = n(record[pair[0]]);
+      record[pair[1]] = (p && gstBase) ? r2(gstBase*p/100).toFixed(2) : '';
+    });
+    const total = r2(taxable + n(record.freight) + n(record.cgst) + n(record.sgst) + n(record.igst) + n(record.roundOff));
+    record.invoiceValue = total ? total.toFixed(2) : '';
+    record.valueInWords = total ? numberToWordsINR(record.invoiceValue) : '';
+    const pct = String(record.receivePct == null ? '' : record.receivePct).trim();
+    record.amountToReceive = (pct === '' || !total) ? '' : r2(total*n(pct)/100).toFixed(2);
+    const adv = n(record.advanceAmount);
+    record.advanceAmount = adv ? adv.toFixed(2) : '';
+    record.advanceWords = adv ? numberToWordsINR(adv.toFixed(2)) : '';
+  }
   if(table==='salesAccounts'){
     /* Rebuild the record's items from the line editor and re-derive the
        flat fields that the register and documents rely on. */
