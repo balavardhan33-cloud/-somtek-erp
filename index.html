@@ -757,6 +757,15 @@ form input[readonly]{background:var(--panel-2); color:var(--muted); cursor:defau
 .scan-hint{font-size:11.5px; color:var(--muted); margin-top:6px; line-height:1.5;}
 .scan-hint.scan-ok{color:#1fa574; font-weight:600;}
 .scan-hint.scan-err{color:#e6577a; font-weight:600;}
+.qt-head{display:flex; align-items:center; gap:6px; flex-wrap:wrap;}
+.qt-lab{display:flex; align-items:center; gap:4px; margin-bottom:6px;}
+.qt-lab label{margin:0; flex:1;}
+.qt-icons{display:inline-flex; gap:4px; flex-shrink:0;}
+.qt-ico{background:none; border:1px solid var(--border); border-radius:4px; color:var(--muted); cursor:pointer; font-size:11px; padding:0 6px; line-height:18px;}
+.qt-ico:hover{color:var(--text);}
+.qt-del:hover{color:#c0392b; border-color:#c0392b;}
+.qt-add{margin-top:14px; padding:12px 14px; border:1px dashed var(--border); border-radius:6px;}
+.qt-add-title{font-family:'Oswald',sans-serif; font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--muted); margin-bottom:8px;}
 </style>
 </head>
 <body>
@@ -13942,14 +13951,47 @@ const QUOTE_CV_ACC = [{key:'pneumaticActuator', label:'Pneumatic Actuator'},{key
 const QUOTE_ONOFF_ACC = [{key:'pneumaticActuator', label:'Pneumatic Actuator'},{key:'solenoidValve', label:'Solenoid Valve'},{key:'limitSwitchBox', label:'Limit Switch Box'},{key:'afr', label:'AFR'},{key:'tubing', label:'Tubing & Fittings'},{key:'additional', label:'Additional Accessories'}];
 function accFilled(defs, data){ return defs.some(f => String((data||{})[f.key]==null?'':(data||{})[f.key]).trim() !== ''); }
 function dash(v){ const s = String(v==null?'':v).trim(); return s===''?'-':s; }
+/* ---- Quotation form template: editable options, headings and custom columns ----
+   Stored per location in DATA[loc].quoteTemplate. Saved quotations keep their
+   values by column / accessory key, so renaming never loses data. */
+let QT_DRAFT = null; /* form values captured before a template change, restored on re-render */
+const QT_LOCKED_KEYS = ['slNo','tagNo','unitPrice','qty','totalPrice'];
+const QT_DEFAULT_GROUP_IDS = ['rfq','valve','material','actuator','others','price'];
+function quoteTplDefault(){
+  return {
+    groups: QUOTE_ITEM_GROUPS.map((g,i)=>({id:QT_DEFAULT_GROUP_IDS[i], label:g.label, custom:false,
+      cols: g.cols.map(c=>Object.assign({}, c, {locked: QT_LOCKED_KEYS.indexOf(c.key)>=0}))})),
+    cv: QUOTE_CV_ACC.map(f=>Object.assign({}, f)),
+    oo: QUOTE_ONOFF_ACC.map(f=>Object.assign({}, f)),
+    titles: {cv:'Accessories / Supply for Control Valve', oo:'Accessories / Supply for On/Off', other:'Other Accessories'}
+  };
+}
+function quoteTpl(){
+  const t = (DATA[currentLocation]||{}).quoteTemplate;
+  if(!t || !Array.isArray(t.groups)) return quoteTplDefault();
+  return Object.assign(quoteTplDefault(), t);
+}
+function quoteTplForEdit(){
+  const d = DATA[currentLocation];
+  if(!d.quoteTemplate || !Array.isArray(d.quoteTemplate.groups)) d.quoteTemplate = quoteTplDefault();
+  if(!d.quoteTemplate.titles) d.quoteTemplate.titles = quoteTplDefault().titles;
+  if(!Array.isArray(d.quoteTemplate.cv)) d.quoteTemplate.cv = quoteTplDefault().cv;
+  if(!Array.isArray(d.quoteTemplate.oo)) d.quoteTemplate.oo = quoteTplDefault().oo;
+  return d.quoteTemplate;
+}
+/* Pencil (rename) and × (remove) buttons shown beside an option or heading. */
+function qtIcons(renameCall, removeCall){
+  return `<span class="qt-icons"><button type="button" class="qt-ico" title="Rename" onclick="${renameCall}">&#9998;</button>${removeCall?`<button type="button" class="qt-ico qt-del" title="Remove" onclick="${removeCall}">&#10005;</button>`:''}</span>`;
+}
 function quoteItemCardHtml(it, idx){
   it = it || {};
-  const field = (c) => `<div class="field"><label>${esc(c.label)}</label><input type="${c.num?'number':'text'}" ${c.num?'step="any" min="0"':''} class="q-it" data-key="${c.key}" value="${esc(it[c.key]||'')}" placeholder="-" ${c.num?'oninput="updateQuoteTotals()"':''}></div>`;
+  const tpl = quoteTpl();
+  const field = (g,c) => `<div class="field"><div class="qt-lab"><label>${esc(c.label)}</label>${qtIcons(`qtRenameCol('${g.id}','${c.key}')`, c.locked?'':`qtRemoveCol('${g.id}','${c.key}')`)}</div><input type="${c.num?'number':'text'}" ${c.num?'step="any" min="0"':''} class="q-it" data-key="${c.key}" value="${esc(it[c.key]||'')}" placeholder="-" ${c.num?'oninput="updateQuoteTotals()"':''}></div>`;
   return `<div class="quote-item-card">
     <div class="quote-item-card-head"><span>Item ${idx+1}</span><button type="button" class="icon-btn out-line-remove" onclick="removeQuoteItemCard(this)" title="Remove this item">&#10005; Remove</button></div>
-    ${QUOTE_ITEM_GROUPS.filter(g=>g.cols.some(c=>!c.auto&&!c.calc)).map(g=>`
-      <div class="access-title" style="margin-top:8px;">${esc(g.label)}</div>
-      <div class="form-grid">${g.cols.filter(c=>!c.auto&&!c.calc).map(field).join('')}</div>`).join('')}
+    ${tpl.groups.filter(g=>g.cols.some(c=>!c.auto&&!c.calc)).map(g=>`
+      <div class="access-title qt-head" style="margin-top:8px;">${esc(g.label)}${qtIcons(`qtRenameGroup('${g.id}')`, g.custom?`qtRemoveGroup('${g.id}')`:'')}</div>
+      <div class="form-grid">${g.cols.filter(c=>!c.auto&&!c.calc).map(c=>field(g,c)).join('')}</div>`).join('')}
   </div>`;
 }
 function addQuoteItemCard(){
@@ -14018,6 +14060,117 @@ function quoteSalesPocLine(q){
   if(poc) bits.push(esc(poc) + (ph ? ' &mdash; Ph. ' + esc(ph) : ''));
   return `<div style="margin-top:12px;"><b>Sales Region &amp; POC:</b> ${bits.join(', ')}</div>`;
 }
+/* ---- Quotation template operations (each one re-renders the tab) ---- */
+function captureQuoteDraft(){
+  if(document.getElementById('q-item-cards')) QT_DRAFT = readQuoteForm();
+}
+async function qtCommit(mutate){
+  captureQuoteDraft();
+  mutate(quoteTplForEdit());
+  await saveLocation(currentLocation);
+  render();
+}
+function promptLabel(msg, cur){
+  const v = prompt(msg, cur||'');
+  if(v==null) return null;
+  const s = v.trim();
+  if(!s){ alert('Name cannot be empty.'); return null; }
+  return s;
+}
+function qtFindGroup(t, gid){ return t.groups.find(g=>g.id===gid); }
+function qtRenameTitle(which){
+  const t = quoteTplForEdit();
+  const name = promptLabel('Rename heading', t.titles[which]);
+  if(name==null) return;
+  qtCommit(t2=>{ t2.titles[which] = name; });
+}
+function qtRenameGroup(gid){
+  const t = quoteTplForEdit(); const g = qtFindGroup(t,gid); if(!g) return;
+  const name = promptLabel('Rename section', g.label); if(name==null) return;
+  qtCommit(t2=>{ const x = qtFindGroup(t2,gid); if(x) x.label = name; });
+}
+function qtRemoveGroup(gid){
+  const t = quoteTplForEdit(); const g = qtFindGroup(t,gid); if(!g || !g.custom) return;
+  if(!confirm('Remove the section "'+g.label+'" and all its custom columns from the quotation form?')) return;
+  qtCommit(t2=>{ t2.groups = t2.groups.filter(x=>x.id!==gid); });
+}
+function qtRenameCol(gid,key){
+  const t = quoteTplForEdit(); const g = qtFindGroup(t,gid); const c = g && g.cols.find(x=>x.key===key); if(!c) return;
+  const name = promptLabel('Rename option', c.label); if(name==null) return;
+  qtCommit(t2=>{ const x = qtFindGroup(t2,gid); const y = x && x.cols.find(z=>z.key===key); if(y) y.label = name; });
+}
+function qtRemoveCol(gid,key){
+  const t = quoteTplForEdit(); const g = qtFindGroup(t,gid); const c = g && g.cols.find(x=>x.key===key);
+  if(!c || c.locked) return;
+  if(!confirm('Remove "'+c.label+'" from the quotation form? Values already entered for it will not print.')) return;
+  qtCommit(t2=>{ const x = qtFindGroup(t2,gid); if(x) x.cols = x.cols.filter(z=>z.key!==key); });
+}
+function qtRenameAcc(type,key){
+  const t = quoteTplForEdit(); const a = (t[type]||[]).find(x=>x.key===key); if(!a) return;
+  const name = promptLabel('Rename accessory', a.label); if(name==null) return;
+  qtCommit(t2=>{ const y = (t2[type]||[]).find(x=>x.key===key); if(y) y.label = name; });
+}
+function qtRemoveAcc(type,key){
+  const t = quoteTplForEdit(); const a = (t[type]||[]).find(x=>x.key===key); if(!a) return;
+  if(!confirm('Remove "'+a.label+'" from the accessories list?')) return;
+  qtCommit(t2=>{ t2[type] = (t2[type]||[]).filter(x=>x.key!==key); });
+}
+function qtAddColumn(){
+  const sec = ((document.getElementById('qt-add-section')||{}).value || '').trim();
+  const name = ((document.getElementById('qt-add-name')||{}).value || '').trim();
+  if(!sec || !name){ alert('Enter the section and the column name.'); return; }
+  qtCommit(t=>{
+    let g = t.groups.find(x=>String(x.label).trim().toLowerCase()===sec.toLowerCase());
+    if(!g){ g = {id:'g_'+uid(), label:sec, custom:true, cols:[]}; t.groups.push(g); }
+    g.cols.push({key:'c_'+uid(), label:name, custom:true});
+  });
+}
+function qtAddAcc(){
+  const type = ((document.getElementById('qt-add-acc-type')||{}).value)==='oo' ? 'oo' : 'cv';
+  const name = ((document.getElementById('qt-add-acc-name')||{}).value || '').trim();
+  if(!name){ alert('Enter the accessory name.'); return; }
+  qtCommit(t=>{ t[type] = (t[type]||[]).concat([{key:'x_'+uid(), label:name, custom:true}]); });
+}
+async function qtReset(){
+  if(!confirm('Reset every option, heading and accessory to the standard list? Custom columns and accessories will be removed from the form. Saved quotations keep their values.')) return;
+  captureQuoteDraft();
+  delete DATA[currentLocation].quoteTemplate;
+  await saveLocation(currentLocation);
+  render();
+}
+function qtEnter(ev, fn){ if(ev.key==='Enter'){ ev.preventDefault(); window[fn](); } }
+function qtAccField(type, f, data){
+  return `<div class="field"><div class="qt-lab"><label>${esc(f.label)}</label>${qtIcons(`qtRenameAcc('${type}','${f.key}')`, `qtRemoveAcc('${type}','${f.key}')`)}</div><input type="text" id="q-${type}-${f.key}" value="${esc((data||{})[f.key]||'')}" placeholder="-"></div>`;
+}
+function qtAddColumnBar(){
+  const t = quoteTpl();
+  return `<div class="qt-add">
+    <div class="qt-add-title">Add custom column (prints in the quotation only once a value is entered)</div>
+    <div class="form-grid">
+      <div class="field"><label>Section</label><input type="text" id="qt-add-section" list="dl-qt-sections" autocomplete="off" placeholder="Pick a section or type a new one" onkeydown="qtEnter(event,'qtAddColumn')"></div>
+      <div class="field"><label>Column name</label><input type="text" id="qt-add-name" placeholder="e.g. Hardness" onkeydown="qtEnter(event,'qtAddColumn')"></div>
+    </div>
+    <datalist id="dl-qt-sections">${t.groups.map(g=>`<option value="${esc(g.label)}">`).join('')}</datalist>
+    <button type="button" class="btn btn-ghost" onclick="qtAddColumn()">+ Add column</button>
+  </div>`;
+}
+function qtAccAddBar(){
+  return `<div class="qt-add">
+    <div class="qt-add-title">Add custom accessory (prints only once a value is entered)</div>
+    <div class="form-grid">
+      <div class="field"><label>Accessory list</label><select id="qt-add-acc-type"><option value="cv">Control Valve</option><option value="oo">On/Off</option></select></div>
+      <div class="field"><label>Accessory name</label><input type="text" id="qt-add-acc-name" placeholder="e.g. Solenoid Valve" onkeydown="qtEnter(event,'qtAddAcc')"></div>
+    </div>
+    <button type="button" class="btn btn-ghost" onclick="qtAddAcc()">+ Add accessory</button>
+  </div>`;
+}
+/* Columns and accessories that print: custom columns only once a row has a value. */
+function quotePrintGroups(q){
+  const tpl = quoteTpl();
+  const items = (q && q.items) || [];
+  const has = key => items.some(it => String(((it||{})[key])==null?'':(it||{})[key]).trim()!=='');
+  return tpl.groups.map(g=>({label:g.label, cols:g.cols.filter(c=>!c.custom || has(c.key))})).filter(g=>g.cols.length);
+}
 function readQuoteForm(){
   const gv = id => { const el=document.getElementById(id); return el ? (el.value||'').trim() : ''; };
   const items = [...document.querySelectorAll('#q-item-cards .quote-item-card')].map(card=>{
@@ -14038,8 +14191,8 @@ function readQuoteForm(){
     kindAttn: gv('q-attn'),
     poReceived: gv('q-poreceived') || 'No',
     items: items,
-    accessoriesCV: acc('q-cv-', QUOTE_CV_ACC),
-    accessoriesOnOff: acc('q-oo-', QUOTE_ONOFF_ACC),
+    accessoriesCV: acc('q-cv-', quoteTpl().cv),
+    accessoriesOnOff: acc('q-oo-', quoteTpl().oo),
     salesRegion: gv('q-salesregion'),
     salesPoc: gv('q-salespoc'),
     salesPocPhone: gv('q-salesphone'),
@@ -14110,10 +14263,12 @@ function renderQuotation(){
   const d = DATA[currentLocation];
   if(!Array.isArray(d.quotations)) d.quotations = [];
   const editing = editingQuoteId ? d.quotations.find(x=>x.id===editingQuoteId) : null;
-  const q = editing || {};
-  const items = (editing && editing.items && editing.items.length) ? editing.items : [null];
+  const dq = QT_DRAFT; QT_DRAFT = null;
+  const q = dq ? Object.assign({}, editing || {}, dq) : (editing || {});
+  const items = (q.items && q.items.length) ? q.items : [null];
   const cv = q.accessoriesCV || {};
   const oo = q.accessoriesOnOff || {};
+  const tpl = quoteTpl();
   const qAll = applyTableTools('quotations', d.quotations.slice().reverse());
   const qRows = limitRows('quotations', qAll);
   const fmt2 = n => (parseFloat(n)||0).toLocaleString('en-IN',{minimumFractionDigits:2, maximumFractionDigits:2});
@@ -14126,7 +14281,7 @@ function renderQuotation(){
     <div class="access-title">Quote &amp; RFQ details (as per template header)</div>
     <div class="form-grid">
       <div class="field"><label>Customer</label><input type="text" id="q-customer" list="dl-customers" autocomplete="off" value="${esc(q.customer||'')}" required></div>
-      <div class="field"><label>Quote #</label><input type="text" id="q-number" value="${esc(editing?q.quoteNumber:nextQuoteNumber(d))}" required></div>
+      <div class="field"><label>Quote #</label><input type="text" id="q-number" value="${esc(editing||dq ? (q.quoteNumber||'') : nextQuoteNumber(d))}" required></div>
       <div class="field"><label>RFQ Type</label><input type="text" id="q-rfqtype" value="${esc(q.rfqType||'')}" placeholder="-"></div>
       <div class="field"><label>Quote Date</label><input type="date" id="q-date" value="${esc(q.quoteDate||today())}" required></div>
       <div class="field"><label>RFQ Ref</label><input type="text" id="q-rfqref" value="${esc(q.rfqRef||'')}" placeholder="-"></div>
@@ -14144,16 +14299,18 @@ function renderQuotation(){
     <div class="access-title" style="margin-top:16px;">Items (valve spec sheet &mdash; blank fields print as "-")</div>
     <div id="q-item-cards">${items.map((it,i)=>quoteItemCardHtml(it,i)).join('')}</div>
     <div style="margin:10px 0 4px 0;"><button type="button" class="btn btn-ghost" onclick="addQuoteItemCard()">+ Add another item</button></div>
+    ${qtAddColumnBar()}
     <div id="q-totals-preview" style="margin:10px 0 4px 0; font-size:13px; font-family:'IBM Plex Mono',monospace; color:var(--text);"></div>
-    <div class="access-title" style="margin-top:16px;">Accessories / Supply for Control Valve</div>
+    <div class="access-title qt-head" style="margin-top:16px;">${esc(tpl.titles.cv)}${qtIcons(`qtRenameTitle('cv')`,'')}</div>
     <div class="form-grid">
-      ${QUOTE_CV_ACC.map(f=>`<div class="field"><label>${esc(f.label)}</label><input type="text" id="q-cv-${f.key}" value="${esc(cv[f.key]||'')}" placeholder="-"></div>`).join('')}
+      ${tpl.cv.map(f=>qtAccField('cv', f, cv)).join('')}
     </div>
-    <div class="access-title" style="margin-top:14px;">Accessories / Supply for On/Off</div>
+    <div class="access-title qt-head" style="margin-top:14px;">${esc(tpl.titles.oo)}${qtIcons(`qtRenameTitle('oo')`,'')}</div>
     <div class="form-grid">
-      ${QUOTE_ONOFF_ACC.map(f=>`<div class="field"><label>${esc(f.label)}</label><input type="text" id="q-oo-${f.key}" value="${esc(oo[f.key]||'')}" placeholder="-"></div>`).join('')}
+      ${tpl.oo.map(f=>qtAccField('oo', f, oo)).join('')}
     </div>
-    <div class="access-title" style="margin-top:14px;">Other Accessories</div>
+    ${qtAccAddBar()}
+    <div class="access-title qt-head" style="margin-top:14px;">${esc(tpl.titles.other)}${qtIcons(`qtRenameTitle('other')`,'')}</div>
     <div class="form-grid">
       <div class="field" style="grid-column:1/-1;"><label>Other accessories / supply</label><textarea id="q-otheracc" rows="3" placeholder="One per line &mdash; printed on the quotation">${esc(q.otherAccessories||'')}</textarea></div>
     </div>
@@ -14172,7 +14329,7 @@ function renderQuotation(){
       <div class="field"><label>Techno-commercial Contact</label><input type="text" id="q-techname" value="${esc(q.techContactName||'Mr. Shiva Prasad')}"></div>
       <div class="field"><label>Contact Phone</label><input type="text" id="q-techphone" value="${esc(q.techContactPhone||'+91 9000787699')}"></div>
     </div>
-    <div style="margin-top:16px;"><button type="submit" class="btn">${editing ? 'Update &amp; Preview Quotation' : 'Generate Quotation'}</button></div>
+    <div style="margin-top:16px;"><button type="submit" class="btn">${editing ? 'Update &amp; Preview Quotation' : 'Generate Quotation'}</button> <button type="button" class="btn btn-ghost" style="margin-left:8px;" onclick="qtReset()">Reset to standard options</button></div>
   </form>
   </div></div>
   ${secHead('&#128203;', 'Records')}
@@ -14211,6 +14368,7 @@ async function saveQuotation(e){
   e.preventDefault();
   const d = DATA[currentLocation];
   if(!Array.isArray(d.quotations)) d.quotations = [];
+  QT_DRAFT = null;
   const q = readQuoteForm();
   if(q.items.length === 0){ alert('Fill at least one item.'); return false; }
   const t = quoteTotals(q);
@@ -14229,11 +14387,12 @@ async function saveQuotation(e){
 }
 function loadQuoteForEdit(id){
   editingQuoteId = id;
+  QT_DRAFT = null;
   render();
   const el = document.querySelector('.panel');
   if(el && el.scrollIntoView) el.scrollIntoView({behavior:'smooth'});
 }
-function cancelQuoteEdit(){ editingQuoteId = null; render(); }
+function cancelQuoteEdit(){ editingQuoteId = null; QT_DRAFT = null; render(); }
 async function markFollowedUp(id){
   const d = DATA[currentLocation];
   const r = d.salesAccounts.find(x=>x.id===id);
@@ -14315,21 +14474,29 @@ async function deleteQuotation(id){
   render();
 }
 function quoteDocumentHtml(q){
+  const tpl = quoteTpl();
   const fmt2 = n => (parseFloat(n)||0).toLocaleString('en-IN',{minimumFractionDigits:2, maximumFractionDigits:2});
   const t = quoteTotals(q);
   const th = 'border:1px solid #444; padding:4px 3px; font-size:7.5px; text-align:center; vertical-align:middle; background:#e8e8e8; font-weight:700;';
   const td = 'border:1px solid #444; padding:4px 3px; font-size:8px; text-align:center; vertical-align:middle;';
   const groupTh = 'border:1px solid #444; padding:4px 3px; font-size:8.5px; text-align:center; background:#d5d5d5; font-weight:700;';
+  const pg = quotePrintGroups(q);
+  const cols = pg.flatMap(g=>g.cols);
   const items = q.items||[];
-  const itemRows = items.map((it,i)=>`<tr>
-    <td style="${td}">${i+1}</td>
-    ${QUOTE_ITEM_FIELDS.map(c=>{
-      if(c.key==='unitPrice') return `<td style="${td} text-align:right;">${dash((parseFloat(it.unitPrice)||0)? fmt2(it.unitPrice) : it.unitPrice)}</td>`;
-      if(c.key==='qty') return `<td style="${td}">${dash(it.qty)}</td>`;
-      return `<td style="${td}">${esc(dash(it[c.key]))}</td>`;
-    }).join('')}
-    <td style="${td} text-align:right;">${((parseFloat(it.qty)||0)&&(parseFloat(it.unitPrice)||0)) ? fmt2((parseFloat(it.qty))*(parseFloat(it.unitPrice))) : '-'}</td>
-  </tr>`).join('');
+  const cellFor = (c, it, i) => {
+    if(c.auto) return `<td style="${td}">${i+1}</td>`;
+    if(c.calc) return `<td style="${td} text-align:right;">${((parseFloat(it.qty)||0)&&(parseFloat(it.unitPrice)||0)) ? fmt2((parseFloat(it.qty))*(parseFloat(it.unitPrice))) : '-'}</td>`;
+    if(c.key==='unitPrice') return `<td style="${td} text-align:right;">${dash((parseFloat(it.unitPrice)||0)? fmt2(it.unitPrice) : it.unitPrice)}</td>`;
+    if(c.key==='qty') return `<td style="${td}">${dash(it.qty)}</td>`;
+    return `<td style="${td}">${esc(dash(it[c.key]))}</td>`;
+  };
+  const itemRows = items.map((it,i)=>`<tr>${cols.map(c=>cellFor(c,it,i)).join('')}</tr>`).join('');
+  const totalCell = c => {
+    if(c.key==='unitPrice') return `<td style="${td} font-weight:700; background:#e8e8e8;">TOTAL</td>`;
+    if(c.key==='qty') return `<td style="${td} font-weight:700;">${t.totalQty||'-'}</td>`;
+    if(c.calc) return `<td style="${td} font-weight:700; text-align:right;">${t.totalPrice?fmt2(t.totalPrice):'-'}</td>`;
+    return `<td style="${td}"></td>`;
+  };
   const headerCell = (label, val) => `<td style="border:1px solid #444; padding:5px 8px; font-weight:700; background:#efefef; white-space:nowrap;">${label}</td><td style="border:1px solid #444; padding:5px 8px;">${esc(dash(val))}</td>`;
   const accTable = (title, defs, data) => `
     <div style="margin-top:14px;">
@@ -14354,23 +14521,18 @@ function quoteDocumentHtml(q){
     </table>
     <table style="border-collapse:collapse; width:100%; margin-top:14px;">
       <thead>
-        <tr>${QUOTE_ITEM_GROUPS.map(g=>`<th colspan="${g.cols.length}" style="${groupTh}">${esc(g.label)}</th>`).join('')}</tr>
-        <tr>${QUOTE_ITEM_GROUPS.flatMap(g=>g.cols).map(c=>`<th style="${th}">${esc(c.label)}</th>`).join('')}</tr>
+        <tr>${pg.map(g=>`<th colspan="${g.cols.length}" style="${groupTh}">${esc(g.label)}</th>`).join('')}</tr>
+        <tr>${cols.map(c=>`<th style="${th}">${esc(c.label)}</th>`).join('')}</tr>
       </thead>
       <tbody>
         ${itemRows}
-        <tr>
-          <td colspan="${QUOTE_ITEM_GROUPS.flatMap(g=>g.cols).length-3}" style="border:1px solid #444;"></td>
-          <td style="${td} font-weight:700; background:#e8e8e8;">TOTAL</td>
-          <td style="${td} font-weight:700;">${t.totalQty||'-'}</td>
-          <td style="${td} font-weight:700; text-align:right;">${t.totalPrice?fmt2(t.totalPrice):'-'}</td>
-        </tr>
+        <tr>${cols.map(totalCell).join('')}</tr>
       </tbody>
     </table>
     <div style="margin-top:6px; font-style:italic; font-size:11px;"><b>Total in words:</b> ${esc(numberToWordsINR(t.totalPrice))} (GST 18% extra)</div>
-    ${accFilled(QUOTE_CV_ACC, q.accessoriesCV) ? accTable('Accessories/ Supply for Control Valve:', QUOTE_CV_ACC, q.accessoriesCV) : ''}
-    ${accFilled(QUOTE_ONOFF_ACC, q.accessoriesOnOff) ? accTable('Accessories/ Supply for On/Off:', QUOTE_ONOFF_ACC, q.accessoriesOnOff) : ''}
-    ${q.otherAccessories ? `<div style="margin-top:12px;"><div style="font-weight:700; margin-bottom:4px;">Other Accessories:</div><div style="white-space:pre-line;">${esc(q.otherAccessories)}</div></div>` : ''}
+    ${accFilled(tpl.cv, q.accessoriesCV) ? accTable(esc(tpl.titles.cv)+':', tpl.cv, q.accessoriesCV) : ''}
+    ${accFilled(tpl.oo, q.accessoriesOnOff) ? accTable(esc(tpl.titles.oo)+':', tpl.oo, q.accessoriesOnOff) : ''}
+    ${q.otherAccessories ? `<div style="margin-top:12px;"><div style="font-weight:700; margin-bottom:4px;">${esc(tpl.titles.other)}:</div><div style="white-space:pre-line;">${esc(q.otherAccessories)}</div></div>` : ''}
     <!-- PAGE 2 : Terms & Conditions -->
     <div class="quote-page-break"></div>
     <div style="margin-top:26px;">
@@ -14446,7 +14608,9 @@ function exportQuotationExcel(id){
   if(typeof XLSX === 'undefined'){ alert('Excel export library failed to load. Check your connection.'); return; }
   const t = quoteTotals(q);
   const items = q.items||[];
-  const cols = QUOTE_ITEM_GROUPS.flatMap(g=>g.cols);
+  const tpl = quoteTpl();
+  const pg = quotePrintGroups(q);
+  const cols = pg.flatMap(g=>g.cols);
   /* ----- Sheet R0, laid out exactly like the template ----- */
   const aoa = [];
   aoa.push([]); /* row1: logo space */
@@ -14460,7 +14624,7 @@ function exportQuotationExcel(id){
   const groupRow = new Array(cols.length).fill('');
   let colIdx = 0;
   const merges = [];
-  QUOTE_ITEM_GROUPS.forEach(g=>{
+  pg.forEach(g=>{
     groupRow[colIdx] = g.label;
     if(g.cols.length>1) merges.push({s:{r:7,c:colIdx}, e:{r:7,c:colIdx+g.cols.length-1}});
     colIdx += g.cols.length;
@@ -14470,7 +14634,7 @@ function exportQuotationExcel(id){
   items.forEach((it,i)=>{
     aoa.push(cols.map(c=>{
       if(c.key==='slNo') return i+1;
-      if(c.key==='totalPrice'){ const v=(parseFloat(it.qty)||0)*(parseFloat(it.unitPrice)||0); return v||'-'; }
+      if(c.calc){ const v=(parseFloat(it.qty)||0)*(parseFloat(it.unitPrice)||0); return v||'-'; }
       if(c.num){ const v=parseFloat(it[c.key]); return isNaN(v)?dash(it[c.key]):v; }
       return dash(it[c.key]);
     }));
@@ -14478,17 +14642,17 @@ function exportQuotationExcel(id){
   aoa.push([]);
   const nCols = cols.length;
   const totalRow = new Array(nCols).fill('');
-  totalRow[nCols-3]='TOTAL'; totalRow[nCols-2]=t.totalQty; totalRow[nCols-1]=t.totalPrice;
+  cols.forEach((c,ci)=>{ if(c.key==='unitPrice') totalRow[ci]='TOTAL'; else if(c.key==='qty') totalRow[ci]=t.totalQty; else if(c.calc) totalRow[ci]=t.totalPrice; });
   aoa.push(totalRow);
-  if(accFilled(QUOTE_CV_ACC, q.accessoriesCV)){
+  if(accFilled(tpl.cv, q.accessoriesCV)){
     aoa.push([]);
-    aoa.push(['Accessories/ Supply for Control Valve:']);
-    QUOTE_CV_ACC.forEach(f=>{ const v=String((q.accessoriesCV||{})[f.key]||'').trim(); if(v) aoa.push([f.label, v]); });
+    aoa.push([tpl.titles.cv+':']);
+    tpl.cv.forEach(f=>{ const v=String((q.accessoriesCV||{})[f.key]||'').trim(); if(v) aoa.push([f.label, v]); });
   }
-  if(accFilled(QUOTE_ONOFF_ACC, q.accessoriesOnOff)){
+  if(accFilled(tpl.oo, q.accessoriesOnOff)){
     aoa.push([]);
-    aoa.push(['Accessories/ Supply for On/Off:']);
-    QUOTE_ONOFF_ACC.forEach(f=>{ const v=String((q.accessoriesOnOff||{})[f.key]||'').trim(); if(v) aoa.push([f.label, v]); });
+    aoa.push([tpl.titles.oo+':']);
+    tpl.oo.forEach(f=>{ const v=String((q.accessoriesOnOff||{})[f.key]||'').trim(); if(v) aoa.push([f.label, v]); });
   }
   /* ----- Sheet T&C ----- */
   const tc = [[],['The terms and conditions of sale are:']];
