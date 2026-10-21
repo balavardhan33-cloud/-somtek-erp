@@ -818,12 +818,13 @@ const ROLE_TABS = {
   stores: ['dashboard','inward','inventory','outward','barcode','reports'],
   logistics: ['dashboard','outward','logistics','reports'],
   automation: ['dashboard','automation','barcode','reports'],
-  enquiry: ['dashboard','enquiry','inventory','po','reports']
+  enquiry: ['dashboard','enquiry','inventory','po','reports'],
+  sales: ['dashboard','sales','reports']
 };
 
 /* ---------------- PER-USER ACCESS (role tabs + extra grants) ---------------- */
 const LOCKED_TABS = ['dashboard','users']; /* can never be granted/removed via the access panel */
-const BUILTIN_ROLES = ['admin','stores','logistics','automation','enquiry'];
+const BUILTIN_ROLES = ['admin','stores','logistics','automation','enquiry','sales'];
 const VALVE_TYPES = ['Gate Valve','Globe Valve','Ball Valve','Butterfly Valve','Check Valve','Plug Valve','Diaphragm Valve','Needle Valve','Control Valve','Safety Relief Valve','Solenoid Valve','Pressure Reducing Valve'];
 const VALVE_SIZES = ['1/2"','3/4"','1"','1.5"','2"','2.5"','3"','4"','5"','6"','8"','10"','12"','14"','16"','18"','20"','24"'];
 let CUSTOM_ROLES = {}; /* {roleName: {tabs:[...]}} - created by admin in the Users tab */
@@ -867,10 +868,10 @@ const DEFAULT_USERS = [
 ];
 
 function emptyLocationData(){
-  return { inventory:[], po:[], vendorPO:[], customerPO:[], poContractDocs:[], inward:[], outward:[], logistics:[], futureShipments:[], invoice:[], sales:[], employees:[], attendance:[], leaves:[], salaries:[], automation:[], pendingAssembly:[], enquiry:[], purchaseAccounts:[], salesAccounts:[], proformaInvoices:[], quotations:[], customers:[], opportunities:[], rfqs:[], followups:[], quoteCompany:null };
+  return { inventory:[], po:[], vendorPO:[], customerPO:[], poContractDocs:[], inward:[], outward:[], logistics:[], futureShipments:[], invoice:[], sales:[], employees:[], attendance:[], leaves:[], salaries:[], automation:[], pendingAssembly:[], enquiry:[], purchaseAccounts:[], salesAccounts:[], proformaInvoices:[], quotations:[], customers:[], opportunities:[], rfqs:[], followups:[], leads:[], salesQuotes:[], salesPOs:[], poContracts:[], projects:[], tenders:[], salesActivities:[], soAcks:[], quoteCompany:null };
 }
 function ensureShape(d){
-  const keys = ['inventory','po','vendorPO','customerPO','poContractDocs','inward','outward','logistics','futureShipments','invoice','sales','employees','attendance','leaves','salaries','automation','pendingAssembly','enquiry','purchaseAccounts','salesAccounts','proformaInvoices','quotations','customers','opportunities','rfqs','followups'];
+  const keys = ['inventory','po','vendorPO','customerPO','poContractDocs','inward','outward','logistics','futureShipments','invoice','sales','employees','attendance','leaves','salaries','automation','pendingAssembly','enquiry','purchaseAccounts','salesAccounts','proformaInvoices','quotations','customers','opportunities','rfqs','followups','leads','salesQuotes','salesPOs','poContracts','projects','tenders','salesActivities','soAcks'];
   keys.forEach(k=>{ if(!Array.isArray(d[k])) d[k] = []; });
   return d;
 }
@@ -8223,66 +8224,165 @@ function salesKpiTiles(d, can, inr, widget, ymNow, todayStr){
 }
 
 /* All new Sales-module sections, appended into the Sales tab render. */
-function salesModuleSectionsHtml(d){
-  return `
-  ${secHead('&#127970;', 'Customer Master')}
-  ${crmForm('customers','cm','name')}
-  ${crmTable('customers','exportCustomers')}
-
-  ${secHead('&#127919;', 'Lead &amp; Opportunity')}
-  ${crmForm('opportunities','op','customer')}
-  ${crmTable('opportunities','exportOpportunities')}
-
-  ${secHead('&#128203;', 'RFQ Management')}
-  ${crmForm('rfqs','rq','customer')}
-  ${crmTable('rfqs','exportRfqs')}
-
-  ${secHead('&#128222;', 'Follow-up')}
-  ${crmForm('followups','fu','customer')}
-  ${crmTable('followups','exportFollowups')}
-  `;
+/* ---------------- SALES TAB (v2 sections) ----------------
+   Admin sees every sales person's records. A sales-role user sees only
+   records where they are the Sales Person. Each section is a sub-tab. */
+const SL_FIXED = {
+  'poc-ext':  {dept:'External Sales'},
+  'poc-ins':  {dept:'Inside Sales'},
+  'poc-prod': {dept:'Production Team'}
+};
+function slOwn(r){ return ((r && (r.salesPerson || r.addedBy)) || '') === actorName(); }
+function slVisible(r){ return isAdmin() || slOwn(r); }
+function slNum(v){ const n = parseFloat(v); return isNaN(n) ? 0 : n; }
+function slMoney(v){ return '&#8377; ' + slNum(v).toLocaleString('en-IN', {maximumFractionDigits:2}); }
+function slSalesNames(){ return USERS.map(u=>u.name).filter(Boolean); }
+function slFields(table, opts){
+  const all = EDIT_SCHEMAS[table] || [];
+  return (opts && opts.formKeys) ? all.filter(f => opts.formKeys.includes(f.key)) : all;
+}
+function slInputHtml(f, id, required){
+  const req = required ? ' required' : '';
+  if(f.key === 'salesPerson'){
+    if(!isAdmin()) return `<input type="hidden" id="${id}" value="${esc(actorName())}">`;
+    const names = slSalesNames();
+    return `<div class="field"><label>${esc(f.label)}</label><select id="${id}">${names.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('')}</select></div>`;
+  }
+  if(f.type === 'select'){
+    return `<div class="field"><label>${esc(f.label)}</label><select id="${id}"${req}>${(f.options||[]).map(o=>`<option value="${esc(o)}">${o===''?'Select':esc(o)}</option>`).join('')}</select></div>`;
+  }
+  const t = f.type === 'date' ? 'date' : (f.type === 'number' ? 'number' : 'text');
+  const dv = (f.type === 'date' && f.key === 'date') ? today() : '';
+  return `<div class="field"><label>${esc(f.label)}${required?' *':''}</label><input type="${t}" id="${id}"${t==='number'?' step="any"':''}${dv?` value="${dv}"`:''}${req}></div>`;
+}
+function slFormHtml(table, sid, title, opts){
+  const fixed = SL_FIXED[sid] || {};
+  const fields = slFields(table, opts);
+  const visible = fields.filter(f => fixed[f.key] === undefined);
+  const inputs = fields.map(f => {
+    const id = 'sf-' + sid + '-' + f.key;
+    if(fixed[f.key] !== undefined) return `<input type="hidden" id="${id}" value="${esc(fixed[f.key])}">`;
+    return slInputHtml(f, id, f === visible[0]);
+  }).join('');
+  return `<div class="panel"><div class="panel-head"><h3>New ${esc(title)} entry</h3></div>
+  <div class="panel-body">
+  <form onsubmit="return slAdd(event,'${table}','${sid}')">
+    <div class="form-grid">${inputs}</div>
+    <div style="margin-top:10px;"><button type="submit" class="btn">Save entry</button></div>
+  </form>
+  </div></div>`;
+}
+async function slAdd(e, table, sid){
+  e.preventDefault();
+  const d = DATA[currentLocation];
+  d[table] = d[table] || [];
+  const rec = { id: uid() };
+  (EDIT_SCHEMAS[table] || []).forEach(f=>{
+    const el = document.getElementById('sf-' + sid + '-' + f.key);
+    rec[f.key] = el ? (el.value || '').trim() : '';
+  });
+  Object.assign(rec, SL_FIXED[sid] || {});
+  if(!rec.salesPerson) rec.salesPerson = actorName();
+  rec.addedBy = actorName();
+  d[table].push(rec);
+  await saveLocation(currentLocation);
+  render();
+  return false;
+}
+async function slDelete(table, id){
+  const d = DATA[currentLocation];
+  const r = (d[table] || []).find(x => x.id === id);
+  if(!r || !slVisible(r)) return;
+  if(!confirm('Delete this record?')) return;
+  d[table] = d[table].filter(x => x.id !== id);
+  await saveLocation(currentLocation);
+  render();
+}
+function slCell(f, v){
+  if(v == null || v === '') return '';
+  if(f.type === 'date') return fd(v);
+  if(f.money) return slMoney(v);
+  return esc(v);
+}
+function slSection(sid, icon, label, table, opts){
+  opts = opts || {};
+  const d = DATA[currentLocation];
+  const rows = (d[table] || []).filter(r => slVisible(r) && (!opts.filter || opts.filter(r))).slice().reverse();
+  const schema = EDIT_SCHEMAS[table] || [];
+  const fixed = SL_FIXED[sid] || {};
+  const cols = (opts.cols ? opts.cols.map(k => schema.find(f => f.key === k)).filter(Boolean) : schema)
+                 .filter(f => fixed[f.key] === undefined);
+  const head = cols.map(f => `<th>${esc(f.label)}</th>`).join('') + '<th></th>';
+  const body = rows.length === 0
+    ? `<tr><td colspan="${cols.length + 1}" style="text-align:center; color:var(--muted); padding:18px;">No records yet.</td></tr>`
+    : rows.map(r => `<tr>${cols.map(f => `<td>${slCell(f, r[f.key])}</td>`).join('')}<td>${actionCell(editBtn(table, r.id), deleteBtn(`slDelete('${table}','${r.id}')`))}</td></tr>`).join('');
+  const form = opts.noForm ? '' : slFormHtml(table, sid, label, opts);
+  return secHead(icon, label) + form + `<div class="panel"><div class="panel-head"><h3>${esc(label)} register</h3><div class="panel-head-actions"><span style="color:var(--muted); font-size:12px;">${rows.length} record${rows.length===1?'':'s'}</span></div></div>
+  <div class="panel-body table-scroll"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div></div>`;
+}
+function slPerformanceHtml(){
+  const d = DATA[currentLocation];
+  const names = new Set();
+  USERS.filter(u => u.role === 'sales').forEach(u => names.add(u.name));
+  ['customers','leads','salesQuotes','salesPOs','soAcks','tenders','followups','salesActivities','projects'].forEach(t => {
+    (d[t] || []).forEach(r => { const n = r.salesPerson || r.addedBy; if(n) names.add(n); });
+  });
+  let list = [...names].filter(Boolean);
+  if(!isAdmin()) list = list.filter(n => n === actorName());
+  const recs = (t, n) => (d[t] || []).filter(r => (r.salesPerson || r.addedBy) === n);
+  const count = (t, n, pred) => recs(t, n).filter(pred || (() => true)).length;
+  const total = (t, n, f) => recs(t, n).reduce((a, r) => a + slNum(r[f]), 0);
+  const rows = list.map(n => ({
+    name: n,
+    leads: count('leads', n),
+    converted: count('leads', n, r => r.converted === 'Yes'),
+    quotes: count('salesQuotes', n),
+    quoteVal: total('salesQuotes', n, 'amount'),
+    pos: count('salesPOs', n),
+    poVal: total('salesPOs', n, 'amount'),
+    soaVal: total('soAcks', n, 'orderValue'),
+    bids: count('tenders', n, r => ['Submitted','Awarded','Lost'].includes(r.status)),
+    won: count('tenders', n, r => r.status === 'Awarded'),
+    acts: count('salesActivities', n),
+    fups: count('followups', n)
+  }));
+  const keys = ['leads','converted','quotes','quoteVal','pos','poVal','soaVal','bids','won','acts','fups'];
+  const sumRow = {};
+  keys.forEach(k => { sumRow[k] = rows.reduce((a, r) => a + r[k], 0); });
+  const money = new Set(['quoteVal','poVal','soaVal']);
+  const cell = (k, r) => money.has(k) ? slMoney(r[k]) : Number(r[k]).toLocaleString('en-IN');
+  const head = ['Sales Person','Leads','Converted','Quotes','Quoted Value','P.O Count','P.O Value','SO Ack Value','Bids Submitted','Tenders Won','Activities','Follow-ups'];
+  const dataRows = rows.map(r => `<tr><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.name)}</td>${keys.map(k => `<td>${cell(k, r)}</td>`).join('')}</tr>`).join('');
+  const totalRow = (isAdmin() && rows.length > 1)
+    ? `<tr class="totals-row"><td>Total</td>${keys.map(k => `<td>${cell(k, sumRow)}</td>`).join('')}</tr>` : '';
+  const body = rows.length === 0
+    ? `<tr><td colspan="${head.length}" style="text-align:center; color:var(--muted); padding:18px;">No sales persons yet.</td></tr>`
+    : dataRows + totalRow;
+  return secHead('&#127942;', 'Sales Performance') + `<div class="panel"><div class="panel-head"><h3>${isAdmin() ? 'All sales persons' : 'My performance'}</h3></div>
+  <div class="panel-body table-scroll"><table><thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div></div>`;
 }
 
 function renderSales(){
   const d = DATA[currentLocation];
-  d.sales = d.sales || [];
-  const slAll = applyTableTools('sales', d.sales.slice().reverse());
-  const slRows = limitRows('sales', slAll);
+  ['customers','leads','salesQuotes','salesPOs','poContracts','projects','tenders','salesActivities','followups','soAcks'].forEach(k => { if(!Array.isArray(d[k])) d[k] = []; });
+  const customers = isAdmin()
+    ? slSection('cust', '&#127970;', 'Customer Master', 'customers', {})
+    : slSection('cust', '&#127970;', 'My Customers', 'customers', {formKeys:['name','region'], cols:['name','region','salesPerson']});
   return `
   ${tabHeader(currentLocation, 'Sales')}
-  ${leadsSectionHtml(d)}
-  ${secHead('&#128188;', 'Sales Activity')}
-  <div class="panel"><div class="panel-head"><h3>New sales entry</h3></div>
-  <div class="panel-body">
-  <form onsubmit="return addSales(event)">
-    <div class="form-grid">
-      <div class="field"><label>Date</label><input type="date" id="sl-date" value="${today()}" required></div>
-      <div class="field"><label>Customer name</label><input type="text" id="sl-customer" required></div>
-      <div class="field"><label>Customer P.O</label><input type="text" id="sl-po" placeholder="Optional"></div>
-      <div class="field"><label>Item description</label><input type="text" id="sl-item" placeholder="Optional"></div>
-      <div class="field"><label>Qty</label><input type="number" id="sl-qty" step="any" placeholder="Optional" oninput="slCalcTotal()"></div>
-      <div class="field"><label>Unit price</label><input type="number" id="sl-price" step="any" placeholder="Optional" oninput="slCalcTotal()"></div>
-      <div class="field"><label>Total value</label><input type="number" id="sl-total" step="any" placeholder="Auto" readonly style="background:var(--panel-2);"></div>
-      <div class="field"><label>Remarks</label><input type="text" id="sl-remarks" placeholder="Optional"></div>
-      <button type="submit" class="btn">Add Sale</button>
-    </div>
-  </form>
-  </div></div>
-  <div class="panel"><div class="panel-head"><h3>Sales register</h3><div class="panel-head-actions">${importBtn('sales')}${exportBtn('exportSales')}</div></div>
-  <div class="panel-body">
-  ${leadStatusCountsHtml(d.sales)}
-  ${tableToolbar('sales', d.sales)}
-  <table><thead><tr><th>Date</th><th>Lead Status</th><th>Order Status</th><th>Customer</th><th>Customer P.O</th><th>Item</th><th>Qty</th><th>Unit Price</th><th>Total Value</th><th>Remarks</th>${cfHeaders('sales')}<th>Added By</th><th></th></tr></thead><tbody>
-  ${slRows.length===0 ? noMatchRow(13, d.sales.length) :
-    slRows.map(r=>`<tr>
-      <td>${fd(r.date)}</td><td>${leadStatusSelect(r)}</td><td>${orderStatusSelect(r)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.customer)}</td><td>${esc(r.customerPO||'')}</td><td>${descCellHtml('sales:'+r.id+':item', r.item||'')}</td>
-      <td>${esc(r.qty||'')}</td><td>${r.unitPrice!=='' && r.unitPrice!=null ? '&#8377; '+fmt2(r.unitPrice) : ''}</td><td>${r.totalValue!=='' && r.totalValue!=null ? '&#8377; '+fmt2(r.totalValue) : ''}</td><td>${descCellHtml('sales:'+r.id+':remarks', r.remarks||'')}</td>${cfCells('sales', r)}${addedByCell(r)}
-      <td>${actionCell(`<button type="button" class="icon-btn" onclick="showOrderTimeline('${r.id}')" title="Order timeline / history">&#128337;</button><button type="button" class="icon-btn" onclick="duplicateSalesOrder('${r.id}')" title="Duplicate this order">&#10697;</button>` + editBtn('sales', r.id), deleteBtn(`deleteSales('${r.id}')`))}</td>
-    </tr>`).join('')}
-  </tbody></table>
-  ${showMoreBar('sales', slAll.length)}
-  </div></div>
-  ${salesModuleSectionsHtml(d)}`;
+  ${customers}
+  ${slSection('lead', '&#127919;', 'Leads / Enquiry Generation', 'leads', {formKeys:['date','customer','region','requirement','qty','followUp','converted','reason','salesPerson']})}
+  ${slSection('quo', '&#128221;', 'Quotation Generation', 'salesQuotes', {})}
+  ${slSection('po', '&#128230;', 'Purchase Order', 'salesPOs', {})}
+  ${slSection('poc-ext', '&#128188;', 'P.O Contract: External Sales', 'poContracts', {filter: r => r.dept === 'External Sales'})}
+  ${slSection('poc-ins', '&#128188;', 'P.O Contract: Inside Sales', 'poContracts', {filter: r => r.dept === 'Inside Sales'})}
+  ${slSection('poc-prod', '&#128188;', 'P.O Contract: Production Team', 'poContracts', {filter: r => r.dept === 'Production Team'})}
+  ${slSection('proj', '&#128200;', 'Projects Tracker', 'projects', {})}
+  ${slSection('tend', '&#128196;', 'Tenders', 'tenders', {})}
+  ${slSection('act', '&#128337;', 'Sales Activity', 'salesActivities', {})}
+  ${slSection('fup', '&#128222;', 'Follow-ups', 'followups', {})}
+  ${slSection('soa', '&#9989;', 'Sales Order Acknowledgement', 'soAcks', {})}
+  ${slPerformanceHtml()}`;
 }
 function leadsSectionHtml(d){
   d.leads = d.leads || [];
@@ -13190,6 +13290,103 @@ function renderReports(){
 
 /* ---------------- EDIT RECORD MODAL (available to all users) ---------------- */
 const EDIT_SCHEMAS = {
+  leads: [
+    {key:'date', label:'Date', type:'date'},
+    {key:'customer', label:'Customer / Enquiry From', type:'text'},
+    {key:'region', label:'Region', type:'text'},
+    {key:'requirement', label:'Requirement', type:'text'},
+    {key:'qty', label:'Qty', type:'number'},
+    {key:'followUp', label:'Follow-up Date', type:'date'},
+    {key:'converted', label:'Lead to Customer', type:'select', options:['Pending','Yes','No','Hold']},
+    {key:'reason', label:'Reason (if No)', type:'text'},
+    {key:'salesPerson', label:'Sales Person', type:'text'}
+  ],
+  salesQuotes: [
+    {key:'date', label:'Date', type:'date'},
+    {key:'quoteNo', label:'Quotation No.', type:'text'},
+    {key:'customer', label:'Customer', type:'text'},
+    {key:'region', label:'Region', type:'text'},
+    {key:'project', label:'Project / Enquiry', type:'text'},
+    {key:'scope', label:'Scope / Items', type:'text'},
+    {key:'amount', label:'Quoted Value', type:'number', money:true},
+    {key:'validTill', label:'Valid Till', type:'date'},
+    {key:'status', label:'Status', type:'select', options:['Draft','Submitted','Revised','Won','Lost']},
+    {key:'salesPerson', label:'Sales Person', type:'text'},
+    {key:'remarks', label:'Remarks', type:'text'}
+  ],
+  salesPOs: [
+    {key:'date', label:'Date Received', type:'date'},
+    {key:'poNo', label:'Customer P.O No.', type:'text'},
+    {key:'customer', label:'Customer', type:'text'},
+    {key:'region', label:'Region', type:'text'},
+    {key:'item', label:'Item / Description', type:'text'},
+    {key:'amount', label:'P.O Value', type:'number', money:true},
+    {key:'deliveryDate', label:'Delivery Date', type:'date'},
+    {key:'status', label:'Status', type:'select', options:['Received','In Production','Dispatched','Invoiced','Closed','Cancelled']},
+    {key:'salesPerson', label:'Sales Person', type:'text'},
+    {key:'remarks', label:'Remarks', type:'text'}
+  ],
+  poContracts: [
+    {key:'dept', label:'Department', type:'select', options:['External Sales','Inside Sales','Production Team']},
+    {key:'contractNo', label:'Contract No.', type:'text'},
+    {key:'poNo', label:'Customer P.O No.', type:'text'},
+    {key:'customer', label:'Customer', type:'text'},
+    {key:'date', label:'Contract Date', type:'date'},
+    {key:'scope', label:'Scope / Terms', type:'text'},
+    {key:'amount', label:'Contract Value', type:'number', money:true},
+    {key:'deliveryDate', label:'Delivery Date', type:'date'},
+    {key:'owner', label:'Owner / Incharge', type:'text'},
+    {key:'status', label:'Status', type:'select', options:['Open','In Progress','Completed','On Hold']},
+    {key:'salesPerson', label:'Sales Person', type:'text'},
+    {key:'remarks', label:'Remarks', type:'text'}
+  ],
+  projects: [
+    {key:'name', label:'Project Name', type:'text'},
+    {key:'customer', label:'Customer', type:'text'},
+    {key:'region', label:'Region', type:'text'},
+    {key:'startDate', label:'Start Date', type:'date'},
+    {key:'targetDate', label:'Target Date', type:'date'},
+    {key:'value', label:'Project Value', type:'number', money:true},
+    {key:'stage', label:'Stage', type:'select', options:['Enquiry','Design','Quoted','PO Received','Manufacturing','Dispatched','Commissioned','On Hold']},
+    {key:'progress', label:'% Complete', type:'number'},
+    {key:'salesPerson', label:'Sales Person', type:'text'},
+    {key:'remarks', label:'Remarks', type:'text'}
+  ],
+  tenders: [
+    {key:'tenderNo', label:'Tender No.', type:'text'},
+    {key:'title', label:'Tender Title', type:'text'},
+    {key:'authority', label:'Issuing Authority', type:'text'},
+    {key:'region', label:'Region', type:'text'},
+    {key:'issueDate', label:'Issue Date', type:'date'},
+    {key:'dueDate', label:'Bid Due Date', type:'date'},
+    {key:'emd', label:'EMD', type:'number', money:true},
+    {key:'bidValue', label:'Bid Value', type:'number', money:true},
+    {key:'status', label:'Status', type:'select', options:['Identified','Bid In Progress','Submitted','Awarded','Lost','Not Participating']},
+    {key:'salesPerson', label:'Sales Person', type:'text'},
+    {key:'remarks', label:'Remarks', type:'text'}
+  ],
+  salesActivities: [
+    {key:'date', label:'Date', type:'date'},
+    {key:'activityType', label:'Activity', type:'select', options:['Visit','Call','Meeting','Email','WhatsApp','Demo','Exhibition']},
+    {key:'customer', label:'Customer / Party', type:'text'},
+    {key:'location', label:'Location', type:'text'},
+    {key:'outcome', label:'Outcome', type:'text'},
+    {key:'nextStep', label:'Next Step', type:'text'},
+    {key:'salesPerson', label:'Sales Person', type:'text'},
+    {key:'remarks', label:'Remarks', type:'text'}
+  ],
+  soAcks: [
+    {key:'date', label:'Order Date', type:'date'},
+    {key:'soNo', label:'SO / Ack No.', type:'text'},
+    {key:'poNo', label:'Customer P.O No.', type:'text'},
+    {key:'customer', label:'Customer', type:'text'},
+    {key:'orderValue', label:'Order Value', type:'number', money:true},
+    {key:'deliveryDate', label:'Committed Delivery', type:'date'},
+    {key:'ackSentOn', label:'Ack Sent On', type:'date'},
+    {key:'ackStatus', label:'Ack Status', type:'select', options:['Pending','Sent','Customer Confirmed','Revised','Cancelled']},
+    {key:'salesPerson', label:'Sales Person', type:'text'},
+    {key:'remarks', label:'Remarks', type:'text'}
+  ],
   customers: [
     {key:'name', label:'Customer Name', type:'text'},
     {key:'category', label:'Category', type:'select', options:['','EPC','End User','OEM','Dealer','Government/PSU','Consultant']},
@@ -13201,6 +13398,8 @@ const EDIT_SCHEMAS = {
     {key:'paymentTerms', label:'Payment Terms', type:'text'},
     {key:'creditLimit', label:'Credit Limit', type:'number'},
     {key:'valveHistory', label:'Installed / Supplied Valve History', type:'text'},
+    {key:'region', label:'Region', type:'text'},
+    {key:'salesPerson', label:'Sales Person', type:'text'},
     {key:'remarks', label:'Remarks', type:'text'}
   ],
   opportunities: [
@@ -13233,6 +13432,7 @@ const EDIT_SCHEMAS = {
     {key:'summary', label:'Summary', type:'text'},
     {key:'nextAction', label:'Next Action', type:'text'},
     {key:'nextDate', label:'Next Action Date', type:'date'},
+    {key:'salesPerson', label:'Sales Person', type:'text'},
     {key:'remarks', label:'Remarks', type:'text'}
   ],
   inventory: [
@@ -13562,7 +13762,7 @@ const EDIT_SCHEMAS = {
     {key:'name', label:'Full name', type:'text'},
     {key:'username', label:'Username', type:'text'},
     {key:'password', label:'Password', type:'text'},
-    {key:'role', label:'Role', type:'select', options:['stores','admin','logistics','automation','enquiry']},
+    {key:'role', label:'Role', type:'select', options:['stores','admin','logistics','automation','enquiry','sales']},
     {key:'mobile', label:'Mobile Number', type:'tel'},
     {key:'dob', label:'Date of Birth', type:'date'},
     {key:'address', label:'Address', type:'text'},
