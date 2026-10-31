@@ -5011,7 +5011,9 @@ function renderPO(){
   <div class="panel"><div class="panel-head"><h3>Import / Export</h3><div class="panel-head-actions">${importBtn('vendorPO')}${exportBtn('exportVendorPO')}</div></div><div class="panel-body"><p style="margin:0; font-size:12px; color:var(--muted);">Import or export all vendor P.O records (internal, external and untagged).</p></div></div>
   `}`;
 
+  const salesPoSection = slSection('po', '&#128230;', 'Sales Purchase Orders', 'salesPOs', {});
   const customerSection = `
+  ${salesPoSection}
   <div class="subsection-title alt">Customer P.O</div>
   ${secHead('&#10133;', 'New Entry')}
   <div class="panel"><div class="panel-head"><h3>New customer purchase order</h3></div>
@@ -5064,45 +5066,37 @@ function renderPO(){
     </tr>`).join('')}
   </tbody></table>
   ${showMoreBar('customerPO', cpoAll.length)}
-  </div></div>`;
+  </div></div>
+  ${pocQueueSectionsHtml(pocEdit)}`;
 
   const contactSection = `
   <div class="subsection-title">P.O Contract Information</div>
-  ${secHead('&#10133;', 'New Entry')}
-  <div class="panel"><div class="panel-head"><h3>${pocEdit ? 'Edit P.O Contract Document' : 'New P.O Contract Document'}</h3></div>
-  <div class="panel-body">
-  <form onsubmit="return addPoContractDoc(event)">
-    <div class="access-title">Customer PO Details</div>
-    <table class="poc-doc-table"><thead><tr><th style="width:50px;">Sl.No</th><th style="width:220px;">Terms</th><th>Description of terms &amp; Conditions</th></tr></thead><tbody>
-    ${POC_CUSTOMER_FIELDS.map((label,i)=>`<tr><td style="text-align:center;">${i+1}</td><td>${esc(label)}</td><td><input type="text" class="poc-cell-input" id="poc-cust-${i}" placeholder="-" value="${esc(pocEdit && pocEdit.customer ? (pocEdit.customer[i]||'') : '')}"></td></tr>`).join('')}
-    </tbody></table>
-
-    <div class="access-title" style="margin-top:18px;">Principal Quotation Details</div>
-    <table class="poc-doc-table"><thead><tr><th style="width:50px;">Sl.No</th><th style="width:220px;">Terms</th><th>Description of Terms &amp; Conditions</th></tr></thead><tbody>
-    ${POC_PRINCIPAL_FIELDS.map((label,i)=>`<tr><td style="text-align:center;">${i+1}</td><td>${esc(label)}</td><td><input type="text" class="poc-cell-input" id="poc-prin-${i}" placeholder="-" value="${esc(pocEdit && pocEdit.principal ? (pocEdit.principal[i]||'') : '')}"></td></tr>`).join('')}
-    </tbody></table>
-
-    <div class="form-grid" style="margin-top:16px;">
-      <div class="field"><label>Prepared By</label><input type="text" id="poc-prepared-by" placeholder="Name" value="${esc(pocEdit ? (pocEdit.preparedBy||'') : '')}"></div>
-      <div class="field"><label>Prepared On Date</label><input type="date" id="poc-prepared-date" value="${pocEdit ? esc(pocEdit.preparedDate||today()) : today()}"></div>
-      <div class="field"><label>Verified By</label><input type="text" id="poc-verified-by" placeholder="Name" value="${esc(pocEdit ? (pocEdit.verifiedBy||'') : '')}"></div>
-    </div>
-    <div style="margin-top:16px; display:flex; gap:10px;">
-      <button type="submit" class="btn">${pocEdit ? 'Update &amp; Preview P.O Contract Document' : 'Save &amp; Preview P.O Contract Document'}</button>
-      ${pocEdit ? '<button type="button" class="btn" style="background:var(--panel-2); color:inherit;" onclick="cancelPocEdit()">Cancel Edit</button>' : ''}
-    </div>
-  </form>
-  </div></div>
+  ${pocEdit ? pocReviewFormHtml(pocEdit) : ''}
   ${secHead('&#128203;', 'Records')}
   <div class="panel"><div class="panel-head"><h3>P.O Contract Documents</h3><div class="panel-head-actions">${exportBtn('exportPoContractDocs')}</div></div>
   <div class="panel-body">
   ${tableToolbar('poContractDocs', d.poContractDocs||[])}
-  <table><thead><tr><th>Customer</th><th>PO Details &amp; Date</th><th>Principal</th><th>Prepared By</th><th>Prepared Date</th><th>Verified By</th><th>Added By</th><th></th></tr></thead><tbody>
-  ${pocRows.length===0 ? noMatchRow(8, (d.poContractDocs||[]).length) :
-    pocRows.map(r=>`<tr>
-      <td style="font-family:'IBM Plex Sans',sans-serif;">${esc((r.customer&&r.customer[0])||'-')}</td><td>${esc((r.customer&&r.customer[1])||'-')}</td><td>${esc((r.principal&&r.principal[0])||'-')}</td><td>${esc(r.preparedBy)}</td><td>${fd(r.preparedDate)}</td><td>${esc(r.verifiedBy)}</td>${addedByCell(r)}
-      <td>${actionCell(`<button class="icon-btn" onclick="editPoContractDoc('${r.id}')">&#9998; Edit</button> <button class="icon-btn" onclick="openPocDocPreview('${r.id}')">View / Print</button>`, deleteBtn(`deletePoContractDoc('${r.id}')`))}</td>
-    </tr>`).join('')}
+  <table><thead><tr><th>Customer</th><th>PO Details &amp; Date</th><th>Status</th><th>Entered By</th><th>Entered On</th><th>Principal</th><th>Prepared By</th><th>Prepared Date</th><th>Verified By</th><th></th></tr></thead><tbody>
+  ${pocRows.length===0 ? noMatchRow(10, (d.poContractDocs||[]).length) :
+    pocRows.map(r=>{
+      const pending = r.status === 'Pending Review';
+      let actions;
+      if(pending){
+        actions = `<button class="icon-btn" onclick="editPoContractDoc('${r.id}')">&#128269; Review</button>`;
+      } else {
+        actions = `<button class="icon-btn" onclick="editPoContractDoc('${r.id}')">&#9998; Edit</button> <button class="icon-btn" onclick="openPocDocPreview('${r.id}')">View / Print</button>`;
+      }
+      return `<tr>
+      <td style="font-family:'IBM Plex Sans',sans-serif;">${esc((r.customer&&r.customer[0])||'-')}</td>
+      <td>${esc((r.customer&&r.customer[1])||'-')}</td>
+      <td>${pocStatusLabel(r)}</td>
+      <td>${esc(r.salesPerson||r.addedBy||'')}</td>
+      <td>${fd(r.enteredOn)}</td>
+      <td>${esc((r.principal&&r.principal[0])||'-')}</td>
+      <td>${esc(r.preparedBy)}</td><td>${fd(r.preparedDate)}</td><td>${esc(r.verifiedBy)}</td>
+      <td>${actionCell(actions, deleteBtn(`deletePoContractDoc('${r.id}')`))}</td>
+    </tr>`;
+    }).join('')}
   </tbody></table>
   ${showMoreBar('poContractDocs', pocAll.length)}
   </div></div>`;
@@ -5433,7 +5427,7 @@ let pocEditId = null;
 function editPoContractDoc(id){
   pocEditId = id;
   render();
-  const el = document.getElementById('poc-cust-0');
+  const el = document.getElementById('poc-prin-0');
   if(el) el.scrollIntoView({behavior:'smooth', block:'center'});
 }
 function cancelPocEdit(){ pocEditId = null; render(); }
@@ -5441,28 +5435,24 @@ async function addPoContractDoc(e){
   e.preventDefault();
   const d = DATA[currentLocation];
   if(!Array.isArray(d.poContractDocs)) d.poContractDocs = [];
-  const customer = POC_CUSTOMER_FIELDS.map((_,i)=>{ const el = document.getElementById('poc-cust-'+i); return el ? el.value.trim() : ''; });
   const principal = POC_PRINCIPAL_FIELDS.map((_,i)=>{ const el = document.getElementById('poc-prin-'+i); return el ? el.value.trim() : ''; });
   const preparedBy = document.getElementById('poc-prepared-by').value.trim();
   const preparedDate = document.getElementById('poc-prepared-date').value;
   const verifiedBy = document.getElementById('poc-verified-by').value.trim();
-  let rec;
-  if(pocEditId){
-    rec = (d.poContractDocs||[]).find(x=>x && x.id===pocEditId);
-    if(rec){
-      rec.customer = customer;
-      rec.principal = principal;
-      rec.preparedBy = preparedBy;
-      rec.preparedDate = preparedDate;
-      rec.verifiedBy = verifiedBy;
-      rec.editedBy = actorName();
-    }
-    pocEditId = null;
-  }
+  let rec = pocEditId ? d.poContractDocs.find(x => x && x.id === pocEditId) : null;
   if(!rec){
-    rec = { id: uid(), customer, principal, preparedBy, preparedDate, verifiedBy, addedBy: actorName() };
+    rec = { id: uid(), customer: POC_CUSTOMER_FIELDS.map(()=>''), enteredOn: today(), addedBy: actorName() };
     d.poContractDocs.push(rec);
   }
+  if(!rec.customer) rec.customer = POC_CUSTOMER_FIELDS.map(()=>'');
+  rec.principal = principal;
+  rec.preparedBy = preparedBy;
+  rec.preparedDate = preparedDate;
+  rec.verifiedBy = verifiedBy;
+  if(rec.status !== 'Approved') rec.status = 'Reviewed';
+  rec.reviewedBy = actorName();
+  rec.editedBy = actorName();
+  pocEditId = null;
   await saveLocation(currentLocation);
   render();
   openPocDocPreview(rec.id);
@@ -8399,6 +8389,205 @@ function custTableHtml(rows, title){
   </div></div>`;
 }
 
+/* ---- P.O Contract Information: sales entry + purchase review ---- */
+function salesPocFormHtml(){
+  const rows = POC_CUSTOMER_FIELDS.map((label,i)=>`<tr><td style="text-align:center;">${i+1}</td><td>${esc(label)}</td><td><input type="text" class="poc-cell-input" id="spc-cust-${i}" placeholder="-"></td></tr>`).join('');
+  return `<div class="panel"><div class="panel-head"><h3>New P.O Contract entry &mdash; customer P.O details</h3></div>
+  <div class="panel-body">
+  <form onsubmit="return salesPocAdd(event)">
+    <div class="access-title">Customer PO Details</div>
+    <table class="poc-doc-table"><thead><tr><th style="width:50px;">Sl.No</th><th style="width:220px;">Terms</th><th>Description of terms &amp; Conditions</th></tr></thead><tbody>${rows}</tbody></table>
+    <div style="margin-top:12px;"><button type="submit" class="btn">Save P.O Contract details</button></div>
+  </form>
+  <p style="margin:10px 0 0 0; font-size:11.5px; color:var(--muted);">Saved entries go to the Purchase tab, where they wait for review and the Principal Quotation Details.</p>
+  </div></div>`;
+}
+async function salesPocAdd(e){
+  e.preventDefault();
+  const d = DATA[currentLocation];
+  if(!Array.isArray(d.poContractDocs)) d.poContractDocs = [];
+  const customer = POC_CUSTOMER_FIELDS.map((_,i)=>{ const el = document.getElementById('spc-cust-'+i); return el ? el.value.trim() : ''; });
+  d.poContractDocs.push({
+    id: uid(),
+    customer,
+    principal: POC_PRINCIPAL_FIELDS.map(()=>''),
+    preparedBy: '', preparedDate: '', verifiedBy: '',
+    status: 'Pending Review',
+    salesPerson: actorName(),
+    enteredOn: today(),
+    addedBy: actorName()
+  });
+  await saveLocation(currentLocation);
+  render();
+  return false;
+}
+function salesPocSectionHtml(){
+  const d = DATA[currentLocation];
+  const rows = (d.poContractDocs||[]).filter(slVisible).slice().reverse();
+  const body = rows.length === 0
+    ? `<tr><td colspan="6" style="text-align:center; color:var(--muted); padding:18px;">No P.O contract entries yet.</td></tr>`
+    : rows.map(r => {
+        const pending = r.status === 'Pending Review';
+        let del = '';
+        if(pending || isAdmin()) del = `<button class="icon-btn" onclick="slDelete('poContractDocs','${r.id}')">Delete</button>`;
+        return `<tr>
+          <td style="font-family:'IBM Plex Sans',sans-serif;">${esc((r.customer&&r.customer[0])||'-')}</td>
+          <td>${esc((r.customer&&r.customer[1])||'-')}</td>
+          <td>${pocStatusLabel(r)}</td>
+          <td>${fd(r.enteredOn)}</td>
+          <td>${esc(r.salesPerson||r.addedBy||'')}</td>
+          <td><button class="icon-btn" onclick="openSalesPocPreview('${r.id}')">View / Print</button> ${del}</td>
+        </tr>`;
+      }).join('');
+  return secHead('&#128230;', 'Purchase Order') + '<div class="subsection-title">P.O Contract Information</div>' + salesPocFormHtml() +
+    `<div class="panel"><div class="panel-head"><h3>P.O Contract register</h3><div class="panel-head-actions"><span style="color:var(--muted); font-size:12px;">${rows.length} record${rows.length===1?'':'s'}</span></div></div>
+    <div class="panel-body table-scroll"><table><thead><tr><th>Customer</th><th>PO Details &amp; Date</th><th>Status</th><th>Entered On</th><th>Sales Person</th><th></th></tr></thead><tbody>${body}</tbody></table></div></div>`;
+}
+function pocReviewFormHtml(rec){
+  const custRows = POC_CUSTOMER_FIELDS.map((label,i)=>`<tr><td style="text-align:center;">${i+1}</td><td>${esc(label)}</td><td>${esc((rec.customer&&rec.customer[i])||'-')}</td></tr>`).join('');
+  const prinRows = POC_PRINCIPAL_FIELDS.map((label,i)=>`<tr><td style="text-align:center;">${i+1}</td><td>${esc(label)}</td><td><input type="text" class="poc-cell-input" id="poc-prin-${i}" placeholder="-" value="${esc((rec.principal&&rec.principal[i])||'')}"></td></tr>`).join('');
+  return secHead('&#128269;', 'Review P.O Contract') +
+  `<div class="panel"><div class="panel-head"><h3>Review &mdash; customer P.O details from Sales</h3></div>
+  <div class="panel-body">
+  <form onsubmit="return addPoContractDoc(event)">
+    <div class="access-title">Customer PO Details <span style="font-weight:400; font-size:11px; color:var(--muted);">(entered by sales, read-only)</span></div>
+    <table class="poc-doc-table"><thead><tr><th style="width:50px;">Sl.No</th><th style="width:220px;">Terms</th><th>Description of terms &amp; Conditions</th></tr></thead><tbody>${custRows}</tbody></table>
+
+    <div class="access-title" style="margin-top:18px;">Principal Quotation Details</div>
+    <table class="poc-doc-table"><thead><tr><th style="width:50px;">Sl.No</th><th style="width:220px;">Terms</th><th>Description of Terms &amp; Conditions</th></tr></thead><tbody>${prinRows}</tbody></table>
+
+    <div class="form-grid" style="margin-top:16px;">
+      <div class="field"><label>Prepared By</label><input type="text" id="poc-prepared-by" placeholder="Name" value="${esc(rec.preparedBy||'')}"></div>
+      <div class="field"><label>Prepared On Date</label><input type="date" id="poc-prepared-date" value="${esc(rec.preparedDate||today())}"></div>
+      <div class="field"><label>Verified By</label><input type="text" id="poc-verified-by" placeholder="Name" value="${esc(rec.verifiedBy||'')}"></div>
+    </div>
+    <div style="margin-top:16px; display:flex; gap:10px;">
+      <button type="submit" class="btn">Save &amp; Preview P.O Contract Document</button>
+      <button type="button" class="btn" style="background:var(--panel-2); color:inherit;" onclick="cancelPocEdit()">Cancel</button>
+    </div>
+  </form>
+  </div></div>`;
+}
+
+/* ---- Sales view / print: only the customer P.O details this sales person entered ---- */
+function salesPocDocumentHtml(r){
+  const th = 'border:1px solid #444; padding:5px 8px; background:#e8e8e8; font-weight:700; text-align:left;';
+  const custRows = POC_CUSTOMER_FIELDS.map((label,i)=>`<tr>
+    <td style="border:1px solid #444; padding:5px 6px; text-align:center; width:44px;">${i+1}</td>
+    <td style="border:1px solid #444; padding:5px 8px; width:220px;">${esc(label)}</td>
+    <td style="border:1px solid #444; padding:5px 8px;">${esc((r.customer&&r.customer[i])||'')}</td>
+  </tr>`).join('');
+  const status = r.status === 'Pending Review' ? 'PENDING REVIEW' : 'REVIEWED';
+  return `
+  <div class="quote-sheet" style="background:#fff; color:#111; margin:0 auto; padding:26px 24px; font-family:'IBM Plex Sans',Arial,sans-serif; font-size:12px; line-height:1.4; max-width:900px;">
+    <div style="display:flex; justify-content:center; margin-bottom:6px;">
+      <img src="${quoteLogoUri(currentLocation)}" style="height:56px; width:auto;" alt="">
+    </div>
+    <div style="text-align:center; font-size:16px; font-weight:800; text-decoration:underline; margin-bottom:6px;">P.O CONTRACT DETAILS &mdash; CUSTOMER P.O</div>
+    <div style="text-align:center; font-size:11px; margin-bottom:18px;">Status: <b>${status}</b> &middot; Entered by ${esc(r.salesPerson||r.addedBy||'')} on ${esc(fd(r.enteredOn))}</div>
+    <div style="font-weight:700; margin-bottom:6px;">Customer PO Details:</div>
+    <table style="border-collapse:collapse; width:100%; margin-bottom:24px;">
+      <thead><tr><th style="${th} width:44px; text-align:center;">Sl.No</th><th style="${th}">Terms</th><th style="${th}">Description of terms &amp; Conditions</th></tr></thead>
+      <tbody>${custRows}</tbody>
+    </table>
+    ${quoteFooterHtml(currentLocation)}
+  </div>`;
+}
+function openSalesPocPreview(id){
+  const d = DATA[currentLocation];
+  const r = (d.poContractDocs||[]).find(x => x && x.id === id);
+  if(!r) return;
+  closeQuotePreview();
+  previewPocDocId = id;
+  const overlay = document.createElement('div');
+  overlay.id = 'quote-preview';
+  overlay.innerHTML = `
+    <div class="quote-actions">
+      <button type="button" class="btn" onclick="printPocDoc()">&#128424; Print / Save as PDF</button>
+      <button type="button" class="btn quote-close-btn" onclick="closeQuotePreview()">&#10005; Close</button>
+    </div>
+    ${salesPocDocumentHtml(r)}`;
+  document.body.appendChild(overlay);
+  const pageStyle = document.createElement('style');
+  pageStyle.id = 'quote-page-style';
+  pageStyle.textContent = '@page{ size: A4 portrait; margin: 10mm; }';
+  document.head.appendChild(pageStyle);
+  document.body.classList.add('quote-open');
+}
+
+/* ---- P.O Queue (pending review) and Approved sections in Purchase > Customer P.O ---- */
+function canApprovePoc(){
+  const role = String((session && session.role) || '').trim().toLowerCase();
+  return role === 'admin' || role === 'enquiry';
+}
+function pocStatusLabel(r){
+  if(r.status === 'Pending Review') return '<span style="color:var(--accent); font-weight:600;">Pending Review</span>';
+  if(r.status === 'Approved' || !r.status) return '<span style="color:var(--success); font-weight:600;">Approved</span>';
+  return 'Reviewed &mdash; awaiting approval';
+}
+function pocIsApproved(r){ return r.status === 'Approved' || !r.status; }
+async function approvePocDoc(id){
+  if(!canApprovePoc()) return;
+  const d = DATA[currentLocation];
+  const r = (d.poContractDocs||[]).find(x => x && x.id === id);
+  if(!r || r.status !== 'Reviewed') return;
+  if(!confirm('Approve this P.O contract? It will move to the Approved section.')) return;
+  r.status = 'Approved';
+  r.approvedBy = actorName();
+  r.approvedOn = today();
+  await saveLocation(currentLocation);
+  render();
+}
+function pocQueueTableHtml(rows, approvedView, totalCount){
+  const cols = approvedView ? 11 : 11;
+  const body = rows.length === 0
+    ? `<tr><td colspan="${cols}" style="text-align:center; color:var(--muted); padding:18px;">${approvedView ? 'No approved P.O contracts yet.' : 'Queue is empty &mdash; nothing waiting for review.'}</td></tr>`
+    : rows.map(r => {
+        const pending = r.status === 'Pending Review';
+        const approved = pocIsApproved(r);
+        let actions = '';
+        if(!approved){
+          actions += `<button class="icon-btn" onclick="editPoContractDoc('${r.id}')">&#128269; ${pending ? 'Review' : 'Edit Review'}</button> `;
+        }
+        if(!approved && !pending && canApprovePoc()){
+          actions += `<button class="icon-btn" onclick="approvePocDoc('${r.id}')">&#10003; Approve</button> `;
+        }
+        if(approved && canApprovePoc()){
+          actions += `<button class="icon-btn" onclick="editPoContractDoc('${r.id}')">&#9998; Edit</button> `;
+        }
+        if(!pending){
+          actions += `<button class="icon-btn" onclick="openPocDocPreview('${r.id}')">View / Print</button>`;
+        }
+        return `<tr>
+          <td style="font-family:'IBM Plex Sans',sans-serif;">${esc((r.customer&&r.customer[0])||'-')}</td>
+          <td>${esc((r.customer&&r.customer[1])||'-')}</td>
+          <td>${pocStatusLabel(r)}</td>
+          <td>${esc(r.salesPerson||r.addedBy||'')}</td>
+          <td>${fd(r.enteredOn)}</td>
+          <td>${esc((r.principal&&r.principal[0])||'-')}</td>
+          <td>${esc(r.preparedBy)}</td>
+          <td>${fd(r.preparedDate)}</td>
+          <td>${esc(r.verifiedBy)}</td>
+          <td>${esc(r.approvedBy||'')}${r.approvedOn ? ' &middot; ' + fd(r.approvedOn) : ''}</td>
+          <td>${actionCell(actions, '')}</td>
+        </tr>`;
+      }).join('');
+  return `<table><thead><tr><th>Customer</th><th>PO Details &amp; Date</th><th>Status</th><th>Entered By</th><th>Entered On</th><th>Principal</th><th>Prepared By</th><th>Prepared Date</th><th>Verified By</th><th>Approved By / On</th><th></th></tr></thead><tbody>${body}</tbody></table>`;
+}
+function pocQueueSectionsHtml(pocEditRec){
+  const d = DATA[currentLocation];
+  const all = (d.poContractDocs||[]).filter(x => x);
+  const queue = all.filter(r => !pocIsApproved(r)).slice().reverse();
+  const approved = all.filter(r => pocIsApproved(r)).slice().reverse();
+  return secHead('&#128276;', 'P.O Queue') +
+    (pocEditRec ? pocReviewFormHtml(pocEditRec) : '') +
+    `<div class="panel"><div class="panel-head"><h3>P.O Queue &mdash; waiting for review / approval</h3><div class="panel-head-actions"><span style="color:var(--muted); font-size:12px;">${queue.length} pending</span></div></div>
+    <div class="panel-body table-scroll">${pocQueueTableHtml(queue, false)}</div></div>` +
+    secHead('&#9989;', 'Approved') +
+    `<div class="panel"><div class="panel-head"><h3>Approved P.O contracts</h3><div class="panel-head-actions"><span style="color:var(--muted); font-size:12px;">${approved.length} approved</span></div></div>
+    <div class="panel-body table-scroll">${pocQueueTableHtml(approved, true)}</div></div>`;
+}
+
 function renderSales(){
   const d = DATA[currentLocation];
   ['customers','leads','salesActivities','salesQuotes','salesPOs','soAcks','dispatches','projects','tenders'].forEach(k => { if(!Array.isArray(d[k])) d[k] = []; });
@@ -8416,7 +8605,7 @@ function renderSales(){
   ${slSection('act', '&#128337;', 'Sales Activity', 'salesActivities', {})}
   ${slSection('lead', '&#127919;', 'Leads / Enquiry Form', 'leads', {formKeys:['date','customer','region','requirement','qty','followUp','converted','reason','salesPerson']})}
   ${slSection('quo', '&#128221;', 'Quotations', 'salesQuotes', {})}
-  ${slSection('po', '&#128230;', 'Purchase Order', 'salesPOs', {})}
+  ${salesPocSectionHtml()}
   ${slSection('soa', '&#9989;', 'Order Acknowledgement', 'soAcks', {})}
   ${slSection('disp', '&#128666;', 'Dispatches', 'dispatches', {})}
   ${slSection('proj', '&#128200;', 'Project Tracker', 'projects', {})}
@@ -13356,11 +13545,13 @@ const EDIT_SCHEMAS = {
     {key:'date', label:'Date Received', type:'date'},
     {key:'poNo', label:'Customer P.O No.', type:'text'},
     {key:'customer', label:'Customer', type:'text'},
+    {key:'location', label:'Location', type:'text'},
     {key:'region', label:'Region', type:'text'},
+    {key:'industryType', label:'Industry Type', type:'text'},
     {key:'item', label:'Item / Description', type:'text'},
     {key:'amount', label:'P.O Value', type:'number', money:true},
     {key:'deliveryDate', label:'Delivery Date', type:'date'},
-    {key:'status', label:'Status', type:'select', options:['Received','In Production','Dispatched','Invoiced','Closed','Cancelled']},
+    {key:'status', label:'Status', type:'select', options:['Received','In Progress','Acknowledged','In Production','Dispatched','Invoiced','Closed','Cancelled']},
     {key:'salesPerson', label:'Sales Person', type:'text'},
     {key:'remarks', label:'Remarks', type:'text'}
   ],
