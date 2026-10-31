@@ -868,10 +868,10 @@ const DEFAULT_USERS = [
 ];
 
 function emptyLocationData(){
-  return { inventory:[], po:[], vendorPO:[], customerPO:[], poContractDocs:[], inward:[], outward:[], logistics:[], futureShipments:[], invoice:[], sales:[], employees:[], attendance:[], leaves:[], salaries:[], automation:[], pendingAssembly:[], enquiry:[], purchaseAccounts:[], salesAccounts:[], proformaInvoices:[], quotations:[], customers:[], opportunities:[], rfqs:[], followups:[], leads:[], salesQuotes:[], salesPOs:[], poContracts:[], projects:[], tenders:[], salesActivities:[], soAcks:[], quoteCompany:null };
+  return { inventory:[], po:[], vendorPO:[], customerPO:[], poContractDocs:[], inward:[], outward:[], logistics:[], futureShipments:[], invoice:[], sales:[], employees:[], attendance:[], leaves:[], salaries:[], automation:[], pendingAssembly:[], enquiry:[], purchaseAccounts:[], salesAccounts:[], proformaInvoices:[], quotations:[], customers:[], opportunities:[], rfqs:[], followups:[], leads:[], salesQuotes:[], salesPOs:[], poContracts:[], projects:[], tenders:[], salesActivities:[], soAcks:[], dispatches:[], quoteCompany:null };
 }
 function ensureShape(d){
-  const keys = ['inventory','po','vendorPO','customerPO','poContractDocs','inward','outward','logistics','futureShipments','invoice','sales','employees','attendance','leaves','salaries','automation','pendingAssembly','enquiry','purchaseAccounts','salesAccounts','proformaInvoices','quotations','customers','opportunities','rfqs','followups','leads','salesQuotes','salesPOs','poContracts','projects','tenders','salesActivities','soAcks'];
+  const keys = ['inventory','po','vendorPO','customerPO','poContractDocs','inward','outward','logistics','futureShipments','invoice','sales','employees','attendance','leaves','salaries','automation','pendingAssembly','enquiry','purchaseAccounts','salesAccounts','proformaInvoices','quotations','customers','opportunities','rfqs','followups','leads','salesQuotes','salesPOs','poContracts','projects','tenders','salesActivities','soAcks','dispatches'];
   keys.forEach(k=>{ if(!Array.isArray(d[k])) d[k] = []; });
   return d;
 }
@@ -8364,25 +8364,17 @@ function slPerformanceHtml(){
 
 function renderSales(){
   const d = DATA[currentLocation];
-  ['customers','leads','salesQuotes','salesPOs','poContracts','projects','tenders','salesActivities','followups','soAcks'].forEach(k => { if(!Array.isArray(d[k])) d[k] = []; });
-  const customers = isAdmin()
-    ? slSection('cust', '&#127970;', 'Customer Master', 'customers', {})
-    : slSection('cust', '&#127970;', 'My Customers', 'customers', {formKeys:['name','region'], cols:['name','region','salesPerson']});
+  ['leads','salesActivities','salesQuotes','salesPOs','soAcks','dispatches','projects','tenders'].forEach(k => { if(!Array.isArray(d[k])) d[k] = []; });
   return `
   ${tabHeader(currentLocation, 'Sales')}
-  ${customers}
-  ${slSection('lead', '&#127919;', 'Leads / Enquiry Generation', 'leads', {formKeys:['date','customer','region','requirement','qty','followUp','converted','reason','salesPerson']})}
-  ${slSection('quo', '&#128221;', 'Quotation Generation', 'salesQuotes', {})}
-  ${slSection('po', '&#128230;', 'Purchase Order', 'salesPOs', {})}
-  ${slSection('poc-ext', '&#128188;', 'P.O Contract: External Sales', 'poContracts', {filter: r => r.dept === 'External Sales'})}
-  ${slSection('poc-ins', '&#128188;', 'P.O Contract: Inside Sales', 'poContracts', {filter: r => r.dept === 'Inside Sales'})}
-  ${slSection('poc-prod', '&#128188;', 'P.O Contract: Production Team', 'poContracts', {filter: r => r.dept === 'Production Team'})}
-  ${slSection('proj', '&#128200;', 'Projects Tracker', 'projects', {})}
-  ${slSection('tend', '&#128196;', 'Tenders', 'tenders', {})}
   ${slSection('act', '&#128337;', 'Sales Activity', 'salesActivities', {})}
-  ${slSection('fup', '&#128222;', 'Follow-ups', 'followups', {})}
-  ${slSection('soa', '&#9989;', 'Sales Order Acknowledgement', 'soAcks', {})}
-  ${slPerformanceHtml()}`;
+  ${slSection('lead', '&#127919;', 'Leads / Enquiry Form', 'leads', {formKeys:['date','customer','region','requirement','qty','followUp','converted','reason','salesPerson']})}
+  ${slSection('quo', '&#128221;', 'Quotations', 'salesQuotes', {})}
+  ${slSection('po', '&#128230;', 'Purchase Order', 'salesPOs', {})}
+  ${slSection('soa', '&#9989;', 'Order Acknowledgement', 'soAcks', {})}
+  ${slSection('disp', '&#128666;', 'Dispatches', 'dispatches', {})}
+  ${slSection('proj', '&#128200;', 'Project Tracker', 'projects', {})}
+  ${slSection('tend', '&#128196;', 'Tenders', 'tenders', {})}`;
 }
 function leadsSectionHtml(d){
   d.leads = d.leads || [];
@@ -13372,6 +13364,19 @@ const EDIT_SCHEMAS = {
     {key:'location', label:'Location', type:'text'},
     {key:'outcome', label:'Outcome', type:'text'},
     {key:'nextStep', label:'Next Step', type:'text'},
+    {key:'salesPerson', label:'Sales Person', type:'text'},
+    {key:'remarks', label:'Remarks', type:'text'}
+  ],
+  dispatches: [
+    {key:'date', label:'Dispatch Date', type:'date'},
+    {key:'dispatchNo', label:'Dispatch / DC No.', type:'text'},
+    {key:'poNo', label:'Customer P.O No.', type:'text'},
+    {key:'customer', label:'Customer', type:'text'},
+    {key:'item', label:'Item / Description', type:'text'},
+    {key:'qty', label:'Qty', type:'number'},
+    {key:'transporter', label:'Transporter / Courier', type:'text'},
+    {key:'lrNo', label:'LR / Tracking No.', type:'text'},
+    {key:'status', label:'Status', type:'select', options:['Planned','Dispatched','Delivered','Returned']},
     {key:'salesPerson', label:'Sales Person', type:'text'},
     {key:'remarks', label:'Remarks', type:'text'}
   ],
