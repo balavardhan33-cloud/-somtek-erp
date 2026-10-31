@@ -8244,9 +8244,10 @@ function slFields(table, opts){
 function slInputHtml(f, id, required){
   const req = required ? ' required' : '';
   if(f.key === 'salesPerson'){
-    if(!isAdmin()) return `<input type="hidden" id="${id}" value="${esc(actorName())}">`;
-    const names = slSalesNames();
-    return `<div class="field"><label>${esc(f.label)}</label><select id="${id}">${names.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('')}</select></div>`;
+    /* Sales persons: login name only (read-only), so ownership always matches the login.
+       Admin: can type any name, defaulting to the admin's own login name. */
+    if(!isAdmin()) return `<div class="field"><label>${esc(f.label)}</label><input type="text" id="${id}" value="${esc(actorName())}" readonly style="opacity:.75;"></div>`;
+    return `<div class="field"><label>${esc(f.label)}</label><input type="text" id="${id}" value="${esc(actorName())}"></div>`;
   }
   if(f.type === 'select'){
     return `<div class="field"><label>${esc(f.label)}</label><select id="${id}"${req}>${(f.options||[]).map(o=>`<option value="${esc(o)}">${o===''?'Select':esc(o)}</option>`).join('')}</select></div>`;
@@ -8362,11 +8363,56 @@ function slPerformanceHtml(){
   <div class="panel-body table-scroll"><table><thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div></div>`;
 }
 
+/* ---- Customer Master / My Customers (shared 'customers' table) ---- */
+const CUST_COMPANY_KEYS = ['name','category','industry','plant','region','paymentTerms','creditLimit','valveHistory','salesPerson','remarks'];
+const CUST_PERSON_KEYS  = ['contactName','designation','department','contactPhone','contactEmail'];
+function custFormHtml(idpfx, title){
+  const fields = EDIT_SCHEMAS.customers || [];
+  const pick = keys => keys.map(k => fields.find(f => f.key === k)).filter(Boolean);
+  const inp = f => slInputHtml(f, idpfx + '-' + f.key, f.key === 'name');
+  const sub = t => `<div style="font-family:'Oswald',sans-serif; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; color:var(--muted); margin:14px 0 8px;">${t}</div>`;
+  return `<div class="panel"><div class="panel-head"><h3>New ${esc(title)} entry</h3></div>
+  <div class="panel-body">
+  <form onsubmit="return crmAdd(event,'customers','${idpfx}')">
+    ${sub('Company information')}
+    <div class="form-grid">${pick(CUST_COMPANY_KEYS).map(inp).join('')}</div>
+    ${sub('Person information')}
+    <div class="form-grid">${pick(CUST_PERSON_KEYS).map(inp).join('')}</div>
+    <div style="margin-top:12px;"><button type="submit" class="btn">Save customer</button></div>
+  </form>
+  </div></div>`;
+}
+function custTableHtml(rows, title){
+  const fields = EDIT_SCHEMAS.customers || [];
+  const all = applyTableTools('customers', rows.slice().reverse());
+  const shown = limitRows('customers', all);
+  const head = fields.map(f => `<th>${esc(f.label)}</th>`).join('') + '<th>Added By</th><th></th>';
+  const colspan = fields.length + 2;
+  const body = shown.length === 0
+    ? noMatchRow(colspan, rows.length)
+    : shown.map(r => `<tr>${fields.map(f => `<td>${f.type === 'date' ? fd(r[f.key]) : esc(r[f.key] == null ? '' : r[f.key])}</td>`).join('')}${addedByCell(r)}<td>${actionCell(editBtn('customers', r.id), deleteBtn(`crmDelete('customers','${r.id}')`))}</td></tr>`).join('');
+  return `<div class="panel"><div class="panel-head"><h3>${esc(title)} register</h3><div class="panel-head-actions">${isAdmin() ? exportBtn('exportCustomers') : ''}</div></div>
+  <div class="panel-body table-scroll">
+  ${tableToolbar('customers', rows)}
+  <table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>
+  ${showMoreBar('customers', all.length)}
+  </div></div>`;
+}
+
 function renderSales(){
   const d = DATA[currentLocation];
-  ['leads','salesActivities','salesQuotes','salesPOs','soAcks','dispatches','projects','tenders'].forEach(k => { if(!Array.isArray(d[k])) d[k] = []; });
+  ['customers','leads','salesActivities','salesQuotes','salesPOs','soAcks','dispatches','projects','tenders'].forEach(k => { if(!Array.isArray(d[k])) d[k] = []; });
+  const allCustomers = d.customers;
+  const myCustomers = allCustomers.filter(slOwn);
+  const masterBlock = isAdmin()
+    ? secHead('&#127970;', 'Customer Master') + custFormHtml('cm', 'Customer') + custTableHtml(allCustomers, 'Customer Master')
+    : '';
   return `
   ${tabHeader(currentLocation, 'Sales')}
+  ${masterBlock}
+  ${secHead('&#128100;', 'My Customers')}
+  ${custFormHtml('cu', 'Customer')}
+  ${custTableHtml(myCustomers, 'My Customers')}
   ${slSection('act', '&#128337;', 'Sales Activity', 'salesActivities', {})}
   ${slSection('lead', '&#127919;', 'Leads / Enquiry Form', 'leads', {formKeys:['date','customer','region','requirement','qty','followUp','converted','reason','salesPerson']})}
   ${slSection('quo', '&#128221;', 'Quotations', 'salesQuotes', {})}
@@ -13397,15 +13443,17 @@ const EDIT_SCHEMAS = {
     {key:'category', label:'Category', type:'select', options:['','EPC','End User','OEM','Dealer','Government/PSU','Consultant']},
     {key:'industry', label:'Industry', type:'text'},
     {key:'plant', label:'Plant / Location', type:'text'},
-    {key:'contactName', label:'Contact Person', type:'text'},
-    {key:'contactPhone', label:'Contact Phone', type:'text'},
-    {key:'contactEmail', label:'Contact Email', type:'text'},
+    {key:'region', label:'Region', type:'text'},
     {key:'paymentTerms', label:'Payment Terms', type:'text'},
     {key:'creditLimit', label:'Credit Limit', type:'number'},
     {key:'valveHistory', label:'Installed / Supplied Valve History', type:'text'},
-    {key:'region', label:'Region', type:'text'},
     {key:'salesPerson', label:'Sales Person', type:'text'},
-    {key:'remarks', label:'Remarks', type:'text'}
+    {key:'remarks', label:'Remarks', type:'text'},
+    {key:'contactName', label:'Contact Person', type:'text'},
+    {key:'designation', label:'Designation', type:'text'},
+    {key:'department', label:'Department', type:'text'},
+    {key:'contactPhone', label:'Contact Phone', type:'text'},
+    {key:'contactEmail', label:'Contact Email', type:'text'}
   ],
   opportunities: [
     {key:'date', label:'Date', type:'date'},
