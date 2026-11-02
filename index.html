@@ -797,7 +797,7 @@ const CHIP_SWITCHBOX_URI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAUAAAA
 
 const TABS = [
   {id:'dashboard', num:'', label:'Dashboard', icon:'&#128202;'},
-  {id:'po', num:'01', label:'Purchase', icon:'&#128196;'},
+  {id:'salesdesk', num:'', label:'Sales Desk', icon:'&#128188;'},
   {id:'inward', num:'02', label:'Inward', icon:'&#128230;'},
   {id:'inventory', num:'03', label:'Inventory', icon:'&#127970;'},
   {id:'outward', num:'04', label:'Outward', icon:'&#128666;'},
@@ -805,20 +805,25 @@ const TABS = [
   {id:'sales', num:'06', label:'Sales', icon:'&#128200;'},
   {id:'automation', num:'07', label:'Automation', icon:'&#9881;'},
   {id:'barcode', num:'', label:'Barcode Station', icon:'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 8v8M10 8v8M13 8v8M16 8v8"/></svg>'},
-  {id:'enquiry', num:'08', label:'Enquiry', icon:'&#129489;&#8205;&#128187;'},
   {id:'accounts', num:'09', label:'Accounts', icon:'&#128176;'},
-  {id:'quotation', num:'10', label:'Quotation', icon:'&#128221;'},
   {id:'hr', num:'11', label:'HR', icon:'&#128101;'},
   {id:'reports', num:'12', label:'Reports', icon:'&#128203;'},
   {id:'users', num:'', label:'Users', icon:'&#128100;'}
 ];
 
+let salesDeskSection = 'purchase';
+let SD_EMBED = false;
+const SD_LEGACY_TABS = ['po','enquiry','quotation'];
+function normalizeSalesDeskTab(){
+  const map = {po:'purchase', enquiry:'enquiry', quotation:'quotation'};
+  if(map[currentTab]){ salesDeskSection = map[currentTab]; currentTab = 'salesdesk'; }
+}
 const ROLE_TABS = {
-  admin: ['dashboard','po','inward','inventory','outward','logistics','sales','automation','barcode','enquiry','accounts','quotation','hr','reports','users'],
+  admin: ['dashboard','salesdesk','inward','inventory','outward','logistics','sales','automation','barcode','accounts','hr','reports','users'],
   stores: ['dashboard','inward','inventory','outward','barcode','reports'],
   logistics: ['dashboard','outward','logistics','reports'],
   automation: ['dashboard','automation','barcode','reports'],
-  enquiry: ['dashboard','enquiry','inventory','po','reports'],
+  enquiry: ['dashboard','salesdesk','inventory','reports'],
   sales: ['dashboard','sales','reports']
 };
 
@@ -848,13 +853,19 @@ function userAllowedTabs(u){
   const denied = Array.isArray(u.deniedTabs) ? u.deniedTabs : [];
   const roleTabs = roleTabsFor(u.role).filter(t => LOCKED_TABS.includes(t) || !denied.includes(t));
   const extras = (Array.isArray(u.extraTabs) ? u.extraTabs : [])
-    .filter(t => TABS.some(x=>x.id===t) && !LOCKED_TABS.includes(t) && !roleTabs.includes(t));
+    .filter(t => (TABS.some(x=>x.id===t) || SD_LEGACY_TABS.includes(t)) && !LOCKED_TABS.includes(t) && !roleTabs.includes(t));
   return roleTabs.concat(extras);
 }
 function sessionAllowedTabs(){
   if(!session) return [];
   const u = USERS.find(x=>x.username===session.username);
-  return u ? userAllowedTabs(u) : roleTabsFor(session.role);
+  return expandSalesDeskTabs(u ? userAllowedTabs(u) : roleTabsFor(session.role));
+}
+function expandSalesDeskTabs(list){
+  const set = new Set(list);
+  if(SD_LEGACY_TABS.some(t => set.has(t))) set.add('salesdesk');
+  if(set.has('salesdesk')) SD_LEGACY_TABS.forEach(t => set.add(t));
+  return Array.from(set);
 }
 
 const DEFAULT_USERS = [
@@ -2637,6 +2648,7 @@ function restoreScrollPositions(snap){
   });
 }
 function render(customHtml){
+  normalizeSalesDeskTab();
   if(_bulkSuppress) return;
   const scrollSnap = captureScrollPositions();
   applyLocationBranding();
@@ -2644,12 +2656,12 @@ function render(customHtml){
   const banner = errorBanner();
   if(customHtml){ app.innerHTML = banner + customHtml; return; }
   app.innerHTML = banner + (session ? (locationChosen ? renderShell() : renderLocationPicker()) : renderLogin());
-  if(session && locationChosen) applyTabSections();
+  if(session && locationChosen && currentTab !== 'salesdesk') applyTabSections();
   restoreScrollPositions(scrollSnap);
   setTimeout(()=>restoreScrollPositions(scrollSnap), 0);
   if(!session && loginStage==='totp-setup'){ setTimeout(()=>{ try{ renderLoginTotpQr(); }catch(e){} }, 0); }
   if(!session){ setTimeout(()=>{ const el=document.getElementById('totp-code'); if(el) el.focus(); }, 0); }
-  if(session && locationChosen && currentTab==='quotation'){ setTimeout(()=>{ try{ updateQuoteTotals(); }catch(e){} }, 0); }
+  if(session && locationChosen && currentTab==='salesdesk' && salesDeskSection==='quotation'){ setTimeout(()=>{ try{ updateQuoteTotals(); }catch(e){} }, 0); }
   if(session && locationChosen){ setTimeout(injectCustomFieldInputs, 0); }
   if(session && locationChosen){ setTimeout(injectBulkCheckboxes, 0); }
   if(session && locationChosen){ setTimeout(injectSerialNumbers, 0); }
@@ -3638,10 +3650,37 @@ function hasUnsavedFormInput(){
   return false;
 }
 
+function getSalesDeskSections(){
+  return [
+    {id:'purchase',  label:'Purchase',  icon:'&#128196;', render:()=>renderPO()},
+    {id:'enquiry',   label:'Enquiry',   icon:'&#129489;&#8205;&#128187;', render:()=>renderEnquiry()},
+    {id:'quotation', label:'Quotation', icon:'&#128221;', render:()=>renderQuotation()},
+    {id:'ack', label:'Order Acknowledgement', icon:'&#9989;', render:()=>{
+      const d = DATA[currentLocation];
+      if(!Array.isArray(d.soAcks)) d.soAcks = [];
+      return slSection('soa', '&#9989;', 'Order Acknowledgement', 'soAcks', {});
+    }}
+  ];
+}
+function switchSalesDeskSection(id){ salesDeskSection = id; render(); }
+function renderSalesDesk(){
+  pendingSectionLabel = null;   /* this tab uses its own switcher, not applyTabSections */
+  const sections = getSalesDeskSections();
+  const cur = sections.find(s => s.id === salesDeskSection) || sections[0];
+  let body = '';
+  SD_EMBED = true;
+  try { body = cur.render(); } finally { SD_EMBED = false; }
+  const switcher = `<div class="acct-switch" style="margin-bottom:14px;">${sections.map(s =>
+    `<button type="button" class="acct-switch-btn ${s.id===cur.id?'active':''}" onclick="switchSalesDeskSection('${s.id}')">${s.icon} ${s.label}</button>`
+  ).join('')}</div>`;
+  return `${tabHeader(currentLocation, 'Sales Desk')}
+  ${switcher}
+  ${body}`;
+}
 function renderTabContent(){
   switch(currentTab){
     case 'dashboard': return renderDashboard();
-    case 'po': return renderPO();
+    case 'salesdesk': return renderSalesDesk();
     case 'inward': return renderInward();
     case 'inventory': return renderInventory();
     case 'outward': return renderOutward();
@@ -3651,9 +3690,7 @@ function renderTabContent(){
     case 'reports': return renderReports();
     case 'automation': return renderAutomation();
     case 'barcode': return renderBarcodeStation();
-    case 'enquiry': return renderEnquiry();
     case 'accounts': return canSeeTab('accounts') ? renderAccounts() : renderDashboard();
-    case 'quotation': return canSeeTab('quotation') ? renderQuotation() : renderDashboard();
     case 'users': return isAdmin() ? renderUsers() : renderDashboard();
     default: return '';
   }
@@ -3752,6 +3789,7 @@ function topbarDateBadge(){
   return `<div class="topbar-date"><div class="td-day">${esc(dayLine)}</div><div class="td-full">${esc(fullLine)}</div></div>`;
 }
 function tabHeader(eyebrow, title, showDate){
+  if(SD_EMBED) return '';
   const isLoc = LOCATIONS.includes(eyebrow);
   return `<div class="topbar"><div><div class="eyebrow">${isLoc ? locationLabel(eyebrow, 14) : esc(eyebrow)}</div><h2>${esc(title)}</h2></div>
     <div style="display:flex; align-items:center; gap:10px;">
@@ -8532,7 +8570,6 @@ function renderSales(){
   ${slSection('lead', '&#127919;', 'Leads / Enquiry Form', 'leads', {formKeys:['date','customer','region','requirement','qty','followUp','converted','reason','salesPerson']})}
   ${slSection('quo', '&#128221;', 'Quotations', 'salesQuotes', {})}
   ${salesPocSectionHtml()}
-  ${slSection('soa', '&#9989;', 'Order Acknowledgement', 'soAcks', {})}
   ${slSection('disp', '&#128666;', 'Dispatches', 'dispatches', {})}
   ${slSection('proj', '&#128200;', 'Project Tracker', 'projects', {})}
   ${slSection('tend', '&#128196;', 'Tenders', 'tenders', {})}`;
