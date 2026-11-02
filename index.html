@@ -5066,8 +5066,7 @@ function renderPO(){
     </tr>`).join('')}
   </tbody></table>
   ${showMoreBar('customerPO', cpoAll.length)}
-  </div></div>
-  ${pocQueueSectionsHtml(pocEdit)}`;
+  </div></div>`;
 
   const contactSection = `
   <div class="subsection-title">P.O Contract Information</div>
@@ -5089,7 +5088,7 @@ function renderPO(){
       return `<tr>
       <td style="font-family:'IBM Plex Sans',sans-serif;">${esc((r.customer&&r.customer[0])||'-')}</td>
       <td>${esc((r.customer&&r.customer[1])||'-')}</td>
-      <td>${pocStatusLabel(r)}</td>
+      <td>${pending ? '<span style="color:var(--accent); font-weight:600;">Pending Review</span>' : 'Reviewed'}</td>
       <td>${esc(r.salesPerson||r.addedBy||'')}</td>
       <td>${fd(r.enteredOn)}</td>
       <td>${esc((r.principal&&r.principal[0])||'-')}</td>
@@ -5449,7 +5448,7 @@ async function addPoContractDoc(e){
   rec.preparedBy = preparedBy;
   rec.preparedDate = preparedDate;
   rec.verifiedBy = verifiedBy;
-  if(rec.status !== 'Approved') rec.status = 'Reviewed';
+  rec.status = 'Reviewed';
   rec.reviewedBy = actorName();
   rec.editedBy = actorName();
   pocEditId = null;
@@ -8433,7 +8432,7 @@ function salesPocSectionHtml(){
         return `<tr>
           <td style="font-family:'IBM Plex Sans',sans-serif;">${esc((r.customer&&r.customer[0])||'-')}</td>
           <td>${esc((r.customer&&r.customer[1])||'-')}</td>
-          <td>${pocStatusLabel(r)}</td>
+          <td>${pending ? '<span style="color:var(--accent); font-weight:600;">Pending Review</span>' : 'Reviewed'}</td>
           <td>${fd(r.enteredOn)}</td>
           <td>${esc(r.salesPerson||r.addedBy||'')}</td>
           <td><button class="icon-btn" onclick="openSalesPocPreview('${r.id}')">View / Print</button> ${del}</td>
@@ -8513,79 +8512,6 @@ function openSalesPocPreview(id){
   pageStyle.textContent = '@page{ size: A4 portrait; margin: 10mm; }';
   document.head.appendChild(pageStyle);
   document.body.classList.add('quote-open');
-}
-
-/* ---- P.O Queue (pending review) and Approved sections in Purchase > Customer P.O ---- */
-function canApprovePoc(){
-  const role = String((session && session.role) || '').trim().toLowerCase();
-  return role === 'admin' || role === 'enquiry';
-}
-function pocStatusLabel(r){
-  if(r.status === 'Pending Review') return '<span style="color:var(--accent); font-weight:600;">Pending Review</span>';
-  if(r.status === 'Approved' || !r.status) return '<span style="color:var(--success); font-weight:600;">Approved</span>';
-  return 'Reviewed &mdash; awaiting approval';
-}
-function pocIsApproved(r){ return r.status === 'Approved' || !r.status; }
-async function approvePocDoc(id){
-  if(!canApprovePoc()) return;
-  const d = DATA[currentLocation];
-  const r = (d.poContractDocs||[]).find(x => x && x.id === id);
-  if(!r || r.status !== 'Reviewed') return;
-  if(!confirm('Approve this P.O contract? It will move to the Approved section.')) return;
-  r.status = 'Approved';
-  r.approvedBy = actorName();
-  r.approvedOn = today();
-  await saveLocation(currentLocation);
-  render();
-}
-function pocQueueTableHtml(rows, approvedView, totalCount){
-  const cols = approvedView ? 11 : 11;
-  const body = rows.length === 0
-    ? `<tr><td colspan="${cols}" style="text-align:center; color:var(--muted); padding:18px;">${approvedView ? 'No approved P.O contracts yet.' : 'Queue is empty &mdash; nothing waiting for review.'}</td></tr>`
-    : rows.map(r => {
-        const pending = r.status === 'Pending Review';
-        const approved = pocIsApproved(r);
-        let actions = '';
-        if(!approved){
-          actions += `<button class="icon-btn" onclick="editPoContractDoc('${r.id}')">&#128269; ${pending ? 'Review' : 'Edit Review'}</button> `;
-        }
-        if(!approved && !pending && canApprovePoc()){
-          actions += `<button class="icon-btn" onclick="approvePocDoc('${r.id}')">&#10003; Approve</button> `;
-        }
-        if(approved && canApprovePoc()){
-          actions += `<button class="icon-btn" onclick="editPoContractDoc('${r.id}')">&#9998; Edit</button> `;
-        }
-        if(!pending){
-          actions += `<button class="icon-btn" onclick="openPocDocPreview('${r.id}')">View / Print</button>`;
-        }
-        return `<tr>
-          <td style="font-family:'IBM Plex Sans',sans-serif;">${esc((r.customer&&r.customer[0])||'-')}</td>
-          <td>${esc((r.customer&&r.customer[1])||'-')}</td>
-          <td>${pocStatusLabel(r)}</td>
-          <td>${esc(r.salesPerson||r.addedBy||'')}</td>
-          <td>${fd(r.enteredOn)}</td>
-          <td>${esc((r.principal&&r.principal[0])||'-')}</td>
-          <td>${esc(r.preparedBy)}</td>
-          <td>${fd(r.preparedDate)}</td>
-          <td>${esc(r.verifiedBy)}</td>
-          <td>${esc(r.approvedBy||'')}${r.approvedOn ? ' &middot; ' + fd(r.approvedOn) : ''}</td>
-          <td>${actionCell(actions, '')}</td>
-        </tr>`;
-      }).join('');
-  return `<table><thead><tr><th>Customer</th><th>PO Details &amp; Date</th><th>Status</th><th>Entered By</th><th>Entered On</th><th>Principal</th><th>Prepared By</th><th>Prepared Date</th><th>Verified By</th><th>Approved By / On</th><th></th></tr></thead><tbody>${body}</tbody></table>`;
-}
-function pocQueueSectionsHtml(pocEditRec){
-  const d = DATA[currentLocation];
-  const all = (d.poContractDocs||[]).filter(x => x);
-  const queue = all.filter(r => !pocIsApproved(r)).slice().reverse();
-  const approved = all.filter(r => pocIsApproved(r)).slice().reverse();
-  return secHead('&#128276;', 'P.O Queue') +
-    (pocEditRec ? pocReviewFormHtml(pocEditRec) : '') +
-    `<div class="panel"><div class="panel-head"><h3>P.O Queue &mdash; waiting for review / approval</h3><div class="panel-head-actions"><span style="color:var(--muted); font-size:12px;">${queue.length} pending</span></div></div>
-    <div class="panel-body table-scroll">${pocQueueTableHtml(queue, false)}</div></div>` +
-    secHead('&#9989;', 'Approved') +
-    `<div class="panel"><div class="panel-head"><h3>Approved P.O contracts</h3><div class="panel-head-actions"><span style="color:var(--muted); font-size:12px;">${approved.length} approved</span></div></div>
-    <div class="panel-body table-scroll">${pocQueueTableHtml(approved, true)}</div></div>`;
 }
 
 function renderSales(){
