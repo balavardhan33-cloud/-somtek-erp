@@ -879,14 +879,15 @@ const DEFAULT_USERS = [
 ];
 
 function emptyLocationData(){
-  return { inventory:[], po:[], vendorPO:[], customerPO:[], poContractDocs:[], inward:[], outward:[], logistics:[], futureShipments:[], invoice:[], sales:[], employees:[], attendance:[], leaves:[], salaries:[], automation:[], pendingAssembly:[], enquiry:[], purchaseAccounts:[], salesAccounts:[], proformaInvoices:[], quotations:[], customers:[], opportunities:[], rfqs:[], followups:[], leads:[], salesQuotes:[], salesPOs:[], poContracts:[], projects:[], tenders:[], salesActivities:[], soAcks:[], dispatches:[], quoteCompany:null };
+  return { inventory:[], po:[], vendorPO:[], customerPO:[], poContractDocs:[], inward:[], outward:[], logistics:[], futureShipments:[], invoice:[], sales:[], employees:[], attendance:[], leaves:[], salaries:[], automation:[], pendingAssembly:[], enquiry:[], purchaseAccounts:[], salesAccounts:[], proformaInvoices:[], quotations:[], customers:[], opportunities:[], rfqs:[], followups:[], leads:[], salesQuotes:[], salesPOs:[], poContracts:[], projects:[], tenders:[], salesActivities:[], soAcks:[], dispatches:[], valveEnquiries:[], pumpEnquiries:[], quoteCompany:null };
 }
 function ensureShape(d){
-  const keys = ['inventory','po','vendorPO','customerPO','poContractDocs','inward','outward','logistics','futureShipments','invoice','sales','employees','attendance','leaves','salaries','automation','pendingAssembly','enquiry','purchaseAccounts','salesAccounts','proformaInvoices','quotations','customers','opportunities','rfqs','followups','leads','salesQuotes','salesPOs','poContracts','projects','tenders','salesActivities','soAcks','dispatches'];
+  const keys = ['inventory','po','vendorPO','customerPO','poContractDocs','inward','outward','logistics','futureShipments','invoice','sales','employees','attendance','leaves','salaries','automation','pendingAssembly','enquiry','purchaseAccounts','salesAccounts','proformaInvoices','quotations','customers','opportunities','rfqs','followups','leads','salesQuotes','salesPOs','poContracts','projects','tenders','salesActivities','soAcks','dispatches','valveEnquiries','pumpEnquiries'];
   keys.forEach(k=>{ if(!Array.isArray(d[k])) d[k] = []; });
   return d;
 }
 function actorName(){ return session ? session.name : 'Unknown'; }
+function actorLogin(){ return session ? session.username : 'Unknown'; }
 function addedByCell(rec){ return `<td class="added-by">${esc(rec && rec.addedBy ? rec.addedBy : '')}</td>`; }
 
 let session = null;
@@ -8259,7 +8260,7 @@ const SL_FIXED = {
   'poc-ins':  {dept:'Inside Sales'},
   'poc-prod': {dept:'Production Team'}
 };
-function slOwn(r){ return ((r && (r.salesPerson || r.addedBy)) || '') === actorName(); }
+function slOwn(r){ const who = (r && (r.salesPerson || r.addedBy)) || ''; return who === actorName() || who === actorLogin(); }
 function slVisible(r){ return isAdmin() || slOwn(r); }
 function slNum(v){ const n = parseFloat(v); return isNaN(n) ? 0 : n; }
 function slMoney(v){ return '&#8377; ' + slNum(v).toLocaleString('en-IN', {maximumFractionDigits:2}); }
@@ -8273,8 +8274,8 @@ function slInputHtml(f, id, required){
   if(f.key === 'salesPerson'){
     /* Sales persons: login name only (read-only), so ownership always matches the login.
        Admin: can type any name, defaulting to the admin's own login name. */
-    if(!isAdmin()) return `<div class="field"><label>${esc(f.label)}</label><input type="text" id="${id}" value="${esc(actorName())}" readonly style="opacity:.75;"></div>`;
-    return `<div class="field"><label>${esc(f.label)}</label><input type="text" id="${id}" value="${esc(actorName())}"></div>`;
+    if(!isAdmin()) return `<div class="field"><label>${esc(f.label)}</label><input type="text" id="${id}" value="${esc(actorLogin())}" readonly style="opacity:.75;"></div>`;
+    return `<div class="field"><label>${esc(f.label)}</label><input type="text" id="${id}" value="${esc(actorLogin())}"></div>`;
   }
   if(f.type === 'select'){
     return `<div class="field"><label>${esc(f.label)}</label><select id="${id}"${req}>${(f.options||[]).map(o=>`<option value="${esc(o)}">${o===''?'Select':esc(o)}</option>`).join('')}</select></div>`;
@@ -8552,9 +8553,25 @@ function openSalesPocPreview(id){
   document.body.classList.add('quote-open');
 }
 
+let enquirySection = 'valve';
+function switchEnquirySection(id){ enquirySection = id; render(); }
+function enquiryFormSectionHtml(){
+  const d = DATA[currentLocation];
+  ['valveEnquiries','pumpEnquiries'].forEach(k => { if(!Array.isArray(d[k])) d[k] = []; });
+  const cols = t => (EDIT_SCHEMAS[t] || []).map(f => f.key);
+  const isPump = enquirySection === 'pump';
+  const inner = isPump
+    ? slSection('pump', '&#9881;', 'Pump', 'pumpEnquiries', {formKeys: cols('pumpEnquiries'), cols: cols('pumpEnquiries')})
+    : slSection('valve', '&#9881;', 'Valve', 'valveEnquiries', {formKeys: cols('valveEnquiries'), cols: cols('valveEnquiries')});
+  const body = inner.replace(/<div class="sec-head">[\s\S]*?<\/div>/, '');
+  const btn = (id, label) => `<button type="button" class="acct-switch-btn ${enquirySection===id?'active':''}" onclick="switchEnquirySection('${id}')">${label}</button>`;
+  return secHead('&#127919;', 'Enquiry Form')
+    + `<div class="acct-switch" style="margin-bottom:14px;">${btn('valve','&#9881; Valve')}${btn('pump','&#9881; Pump')}</div>`
+    + body;
+}
 function renderSales(){
   const d = DATA[currentLocation];
-  ['customers','leads','salesActivities','salesQuotes','salesPOs','soAcks','dispatches','projects','tenders'].forEach(k => { if(!Array.isArray(d[k])) d[k] = []; });
+  ['customers','leads','salesActivities','salesQuotes','salesPOs','soAcks','dispatches','projects','tenders','valveEnquiries','pumpEnquiries'].forEach(k => { if(!Array.isArray(d[k])) d[k] = []; });
   const allCustomers = d.customers;
   const myCustomers = allCustomers.filter(slOwn);
   const masterBlock = isAdmin()
@@ -8567,7 +8584,7 @@ function renderSales(){
   ${custFormHtml('cu', 'Customer')}
   ${custTableHtml(myCustomers, 'My Customers')}
   ${slSection('act', '&#128337;', 'Sales Activity', 'salesActivities', {})}
-  ${slSection('lead', '&#127919;', 'Leads / Enquiry Form', 'leads', {formKeys:['date','customer','region','requirement','qty','followUp','converted','reason','salesPerson']})}
+  ${enquiryFormSectionHtml()}
   ${slSection('quo', '&#128221;', 'Quotations', 'salesQuotes', {})}
   ${salesPocSectionHtml()}
   ${slSection('disp', '&#128666;', 'Dispatches', 'dispatches', {})}
@@ -13480,16 +13497,55 @@ function renderReports(){
 
 /* ---------------- EDIT RECORD MODAL (available to all users) ---------------- */
 const EDIT_SCHEMAS = {
-  leads: [
+  valveEnquiries: [
     {key:'date', label:'Date', type:'date'},
-    {key:'customer', label:'Customer / Enquiry From', type:'text'},
+    {key:'customer', label:'Customer', type:'text'},
     {key:'region', label:'Region', type:'text'},
-    {key:'requirement', label:'Requirement', type:'text'},
+    {key:'followUp', label:'Due date', type:'date'},
+    {key:'application', label:'Application', type:'text'},
+    {key:'valveType', label:'Valve Type', type:'select', options:['', ...VALVE_TYPES]},
+    {key:'valveSize', label:'Valve Size', type:'select', options:['', ...VALVE_SIZES]},
+    {key:'bodyMoc', label:'Body MOC', type:'text'},
+    {key:'discMoc', label:'Disc MOC', type:'text'},
+    {key:'seatMoc', label:'Seat MOC', type:'text'},
+    {key:'endConnection', label:'End Connection', type:'text'},
+    {key:'media', label:'Media', type:'text'},
+    {key:'mediaType', label:'Media Type', type:'text'},
+    {key:'operatingTemp', label:'Operating Temperature', type:'text'},
+    {key:'seatLeakageClass', label:'Seat Leakage Class', type:'text'},
+    {key:'operationPressure', label:'Operation Pressure', type:'text'},
+    {key:'operationType', label:'Operation Type', type:'text'},
+    {key:'actuatorType', label:'Actuator Type', type:'text'},
+    {key:'positionerRequired', label:'Positioner Required', type:'select', options:['','Yes','No']},
+    {key:'airFailPosition', label:'Air Fail Position', type:'select', options:['','Fail Open','Fail Close','Fail Last']},
+    {key:'airSupplyAvailable', label:'Air Supply Available', type:'select', options:['','Yes','No']},
+    {key:'mor', label:'MOR', type:'text'},
+    {key:'afrRequired', label:'AFR Required', type:'select', options:['','Yes','No']},
+    {key:'limitSwitch', label:'Limit Switches', type:'select', options:['','Proximity Sensor','Micro Switch','Custom']},
+    {key:'limitSwitchCustom', label:'Limit Switch (custom)', type:'text'},
+    {key:'solenoidValve', label:'Solenoid Valve', type:'select', options:['','Yes','No']},
     {key:'qty', label:'Qty', type:'number'},
-    {key:'followUp', label:'Follow-up Date', type:'date'},
-    {key:'converted', label:'Lead to Customer', type:'select', options:['Pending','Yes','No','Hold']},
-    {key:'reason', label:'Reason (if No)', type:'text'},
-    {key:'salesPerson', label:'Sales Person', type:'text'}
+    {key:'salesPerson', label:'Sales Person (login name)', type:'text'}
+  ],
+  pumpEnquiries: [
+    {key:'date', label:'Date', type:'date'},
+    {key:'customer', label:'Customer', type:'text'},
+    {key:'region', label:'Region', type:'text'},
+    {key:'followUp', label:'Due date', type:'date'},
+    {key:'application', label:'Application', type:'text'},
+    {key:'pumpType', label:'Pump Type', type:'select', options:['','Centrifugal','Gear','Diaphragm','Screw','Piston','Other']},
+    {key:'flowRate', label:'Flow Rate', type:'text'},
+    {key:'head', label:'Head', type:'text'},
+    {key:'bodyMoc', label:'Body MOC', type:'text'},
+    {key:'impellerMoc', label:'Impeller MOC', type:'text'},
+    {key:'sealType', label:'Seal Type', type:'select', options:['','Mechanical Seal','Gland Packing']},
+    {key:'media', label:'Media', type:'text'},
+    {key:'mediaType', label:'Media Type', type:'text'},
+    {key:'operatingTemp', label:'Operating Temperature', type:'text'},
+    {key:'operatingPressure', label:'Operating Pressure', type:'text'},
+    {key:'motorRating', label:'Motor Rating', type:'text'},
+    {key:'qty', label:'Qty', type:'number'},
+    {key:'salesPerson', label:'Sales Person (login name)', type:'text'}
   ],
   salesQuotes: [
     {key:'date', label:'Date', type:'date'},
@@ -13778,9 +13834,8 @@ const EDIT_SCHEMAS = {
     {key:'date', label:'Date', type:'date'},
     {key:'customer', label:'Customer', type:'text'},
     {key:'region', label:'Region', type:'text'},
-    {key:'followUp', label:'Follow-up Date', type:'date'},
-    {key:'converted', label:'Lead to Customer', type:'select', options:['','Yes','No','Hold']},
-    {key:'reason', label:'Reason (if No)', type:'text'}
+    {key:'followUp', label:'Due date', type:'date'},
+    {key:'salesPerson', label:'Sales Person (login name)', type:'text'}
   ],
   sales: [
     {key:'leadStatus', label:'Lead Status', type:'select', options:['New','Contacted','Follow-up','Qualified','Proposal Sent','Negotiation','Won','Lost']},
