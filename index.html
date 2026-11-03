@@ -8555,19 +8555,107 @@ function openSalesPocPreview(id){
 
 let enquirySection = 'valve';
 function switchEnquirySection(id){ enquirySection = id; render(); }
+/* Enquiry numbers: ET-001, ET-002... for EVISSAT and ST-001, ST-002... for SOMTEK.
+   One series per location, shared by valve and pump enquiries. */
+function enqPrefix(loc){ return loc === 'SOMTEK' ? 'ST-' : 'ET-'; }
+function enqMaxNumber(d){
+  const prefix = enqPrefix(currentLocation);
+  let max = 0;
+  [...(d.valveEnquiries || []), ...(d.pumpEnquiries || [])].forEach(r => {
+    const m = String((r && r.enqNo) || '').trim().match(new RegExp('^' + prefix + '(\\d+)$'));
+    if(m) max = Math.max(max, parseInt(m[1], 10));
+  });
+  return max;
+}
+function enqNextNumber(d){ return enqPrefix(currentLocation) + String(enqMaxNumber(d) + 1).padStart(3, '0'); }
+/* Gives every enquiry without a number the next one in the series. */
+function enqStampNumbers(d){
+  const prefix = enqPrefix(currentLocation);
+  let max = enqMaxNumber(d);
+  [...(d.valveEnquiries || []), ...(d.pumpEnquiries || [])].forEach(r => {
+    if(r && !String(r.enqNo || '').trim()){ max++; r.enqNo = prefix + String(max).padStart(3, '0'); }
+  });
+}
 function enquiryFormSectionHtml(){
   const d = DATA[currentLocation];
   ['valveEnquiries','pumpEnquiries'].forEach(k => { if(!Array.isArray(d[k])) d[k] = []; });
+  enqStampNumbers(d);
   const cols = t => (EDIT_SCHEMAS[t] || []).map(f => f.key);
   const isPump = enquirySection === 'pump';
   const inner = isPump
     ? slSection('pump', '&#9881;', 'Pump', 'pumpEnquiries', {formKeys: cols('pumpEnquiries'), cols: cols('pumpEnquiries')})
     : slSection('valve', '&#9881;', 'Valve', 'valveEnquiries', {formKeys: cols('valveEnquiries'), cols: cols('valveEnquiries')});
-  const body = inner.replace(/<div class="sec-head">[\s\S]*?<\/div>/, '');
-  const btn = (id, label) => `<button type="button" class="acct-switch-btn ${enquirySection===id?'active':''}" onclick="switchEnquirySection('${id}')">${label}</button>`;
+  let body = inner.replace(/<div class="sec-head">[\s\S]*?<\/div>/, '');
+  /* Show the auto-generated number inside the Enquiry No. input and lock it. */
+  const nextNo = enqNextNumber(d);
+  body = body.replace(/<input([^>]*\bid="[^"]*enqNo[^"]*"[^>]*)>/, (m, attrs) =>
+    `<input${attrs.replace(/\svalue="[^"]*"/, '')} value="${esc(nextNo)}" readonly style="background:var(--panel-2); color:var(--accent-2); font-weight:600; cursor:not-allowed;">`);
+  const picker = `<div class="field" style="max-width:260px; margin-bottom:14px;"><label>Enquiry for *</label><select onchange="switchEnquirySection(this.value)" style="border:2px solid #1f4491; font-weight:600; color:#1f4491;"><option value="valve" ${isPump?'':'selected'}>Valve</option><option value="pump" ${isPump?'selected':''}>Pump</option></select></div>`;
   return secHead('&#127919;', 'Enquiry Form')
-    + `<div class="acct-switch" style="margin-bottom:14px;">${btn('valve','&#9881; Valve')}${btn('pump','&#9881; Pump')}</div>`
+    + picker
     + body;
+}
+/* ---- Sales tab > Quotations: My Quotations (by Sales POC) and All Quotations.
+   Reads the quotations created in the Quotation tab (DATA[loc].quotations). ---- */
+let salesQuoView = 'mine';
+function switchSalesQuoView(id){ salesQuoView = id; render(); }
+function salesQuotationsSectionHtml(){
+  const d = DATA[currentLocation];
+  const me = String(actorName() || '').trim().toLowerCase();
+  const every = (d.quotations || []).slice().reverse();
+  const mine = every.filter(q => {
+    const poc = String(q.salesPoc || '').trim().toLowerCase();
+    const by = String(q.addedBy || '').trim().toLowerCase();
+    return me && (poc === me || (!poc && by === me));
+  });
+  const list = salesQuoView === 'all' ? every : mine;
+  const qAll = applyTableTools('quotations', list);
+  const qRows = limitRows('quotations', qAll);
+  const money = v => (parseFloat(v) || 0).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  const btn = (id, label) => `<button type="button" class="acct-switch-btn ${salesQuoView===id?'active':''}" onclick="switchSalesQuoView('${id}')">${label}</button>`;
+  const rows = qRows.map(r => `<tr>
+      <td>${esc(r.quoteNumber)}</td><td>${fd(r.quoteDate || r.date)}</td><td>${esc(r.revNo || 'R0')}</td>
+      <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.customer)}</td>
+      <td>${esc(r.salesPoc || r.addedBy || '-')}</td><td>${esc(r.salesPocPhone || '')}</td>
+      <td>${(r.items || []).length}</td>
+      <td>&#8377; ${money(r.totalPrice != null ? r.totalPrice : r.grandTotal)}</td>
+      <td>${esc(r.quoteStatus || 'Pending')}</td>
+      <td><div class="action-cell"><button class="icon-btn" onclick="openQuotePreview('${r.id}')">View / Print</button></div></td>
+    </tr>`).join('');
+  return secHead('&#128221;', 'Quotations')
+    + `<div class="acct-switch" style="margin-bottom:14px;">${btn('mine', 'My Quotations')}${btn('all', 'All Quotations')}</div>`
+    + `<div class="panel"><div class="panel-head"><h3>${salesQuoView==='all' ? 'All quotations' : 'My quotations'} <span style="font-weight:400; color:var(--muted); font-size:11px;">(${qAll.length})</span></h3></div>
+  <div class="panel-body table-scroll">
+  ${tableToolbar('quotations', d.quotations)}
+  <table><thead><tr><th>Quote #</th><th>Date</th><th>Rev</th><th>Customer</th><th>Sales POC</th><th>POC Contact</th><th>Items</th><th>Total Price INR</th><th>Status</th><th></th></tr></thead>
+  <tbody>${rows || '<tr><td colspan="10" style="text-align:center; color:var(--muted); padding:18px;">No quotations match.</td></tr>'}</tbody></table>
+  ${showMoreBar('quotations', qAll.length)}
+  </div></div>`;
+}
+/* ---- Sales tab > Dispatches: read-only view of the Shipment Tracker (DATA[loc].logistics). ---- */
+function salesDispatchesSectionHtml(){
+  const d = DATA[currentLocation];
+  const list = (d.logistics || []).slice().reverse();
+  const lAll = applyTableTools('logistics', list);
+  const lRows = limitRows('logistics', lAll);
+  const rows = lRows.map(r => `<tr>
+      <td>${esc(r.lr || '-')}</td>
+      <td>${fd(r.date) || '-'}</td>
+      <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.transporter || '-')}</td>
+      <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.customer || '-')}</td>
+      <td>${esc(r.customerPO || '-')}</td>
+      <td><span class="badge ${r.status==='Delivered' ? 'badge-delivered' : 'badge-transit'}">${esc(r.status || 'In Transit')}</span></td>
+      <td>${fd(r.deliveredDate) || '-'}</td>
+      <td style="white-space:normal; max-width:240px;">${esc(r.remarks || '')}</td>
+    </tr>`).join('');
+  return secHead('&#128666;', 'Dispatches')
+    + `<div class="panel"><div class="panel-head"><h3>Dispatch register <span style="font-weight:400; color:var(--muted); font-size:11px;">(from Shipment Tracker &middot; ${lAll.length})</span></h3></div>
+  <div class="panel-body table-scroll">
+  ${tableToolbar('logistics', d.logistics || [])}
+  <table><thead><tr><th>L.R Number</th><th>Date</th><th>Transporter</th><th>Customer Name</th><th>Customer P.O</th><th>Status</th><th>Delivery Date</th><th>Remarks</th></tr></thead>
+  <tbody>${rows || '<tr><td colspan="8" style="text-align:center; color:var(--muted); padding:18px;">No shipments match.</td></tr>'}</tbody></table>
+  ${showMoreBar('logistics', lAll.length)}
+  </div></div>`;
 }
 function renderSales(){
   const d = DATA[currentLocation];
@@ -8585,9 +8673,9 @@ function renderSales(){
   ${custTableHtml(myCustomers, 'My Customers')}
   ${slSection('act', '&#128337;', 'Sales Activity', 'salesActivities', {})}
   ${enquiryFormSectionHtml()}
-  ${slSection('quo', '&#128221;', 'Quotations', 'salesQuotes', {})}
+  ${salesQuotationsSectionHtml()}
   ${salesPocSectionHtml()}
-  ${slSection('disp', '&#128666;', 'Dispatches', 'dispatches', {})}
+  ${salesDispatchesSectionHtml()}
   ${slSection('proj', '&#128200;', 'Project Tracker', 'projects', {})}
   ${slSection('tend', '&#128196;', 'Tenders', 'tenders', {})}`;
 }
@@ -13498,6 +13586,7 @@ function renderReports(){
 /* ---------------- EDIT RECORD MODAL (available to all users) ---------------- */
 const EDIT_SCHEMAS = {
   valveEnquiries: [
+    {key:'enqNo', label:'Enquiry No.', type:'text'},
     {key:'date', label:'Date', type:'date'},
     {key:'customer', label:'Customer', type:'text'},
     {key:'region', label:'Region', type:'text'},
@@ -13528,6 +13617,7 @@ const EDIT_SCHEMAS = {
     {key:'salesPerson', label:'Sales Person (login name)', type:'text'}
   ],
   pumpEnquiries: [
+    {key:'enqNo', label:'Enquiry No.', type:'text'},
     {key:'date', label:'Date', type:'date'},
     {key:'customer', label:'Customer', type:'text'},
     {key:'region', label:'Region', type:'text'},
