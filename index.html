@@ -223,6 +223,11 @@ h1,h2,h3,.stencil{font-family:'Oswald', sans-serif; text-transform:uppercase; le
 .panel-body table{min-width:max-content; width:100%;}
 .panel-body table td, .panel-body table th{white-space:nowrap;}
 .panel-body table td[style*="white-space:normal"], .panel-body .cell-clamp{white-space:normal;}
+/* ERP-wide: long free-text cells stop stretching the table. Shown on one line with "..."; the full text
+   is available through the cell's show more link where the module uses one. Buttons, selects and inputs are left alone. */
+.panel-body table td:not(:has(button, select, input, .action-cell, .bulk-cb)){max-width:240px; overflow:hidden; text-overflow:ellipsis;}
+.panel-body table td:not(:has(button, select, input, .action-cell, .bulk-cb)) > span,
+.panel-body table td:not(:has(button, select, input, .action-cell, .bulk-cb)) > a{max-width:100%;}
 /* thin, unobtrusive horizontal scrollbar so wide tables scroll inside the panel
    instead of pushing the whole page sideways */
 .panel-body::-webkit-scrollbar{height:9px;}
@@ -5052,7 +5057,6 @@ function renderPO(){
 
   const salesPoSection = slSection('po', '&#128230;', 'Sales Purchase Orders', 'salesPOs', {});
   const customerSection = `
-  ${salesPoSection}
   <div class="subsection-title alt">Customer P.O</div>
   ${secHead('&#10133;', 'New Entry')}
   <div class="panel"><div class="panel-head"><h3>New customer purchase order</h3></div>
@@ -5145,10 +5149,9 @@ function renderPO(){
   <div class="acct-switch">
     <button type="button" class="acct-switch-btn ${poSection==='vendor'?'active':''}" onclick="switchPoSection('vendor')">&#128230; Vendor P.O</button>
     <button type="button" class="acct-switch-btn ${poSection==='customer'?'active':''}" onclick="switchPoSection('customer')">&#128188; Customer P.O</button>
-    <button type="button" class="acct-switch-btn ${poSection==='contact'?'active':''}" onclick="switchPoSection('contact')">&#128222; P.O Contract Information</button>
   </div>
 
-  ${poSection==='vendor' ? vendorSection : poSection==='customer' ? customerSection : contactSection}`;
+  ${poSection==='vendor' ? vendorSection : customerSection}`;
 }
 
 function vpoItemLineHtml(pfx){
@@ -8657,6 +8660,32 @@ function salesDispatchesSectionHtml(){
   ${showMoreBar('logistics', lAll.length)}
   </div></div>`;
 }
+/* ---- Sales tab > Customer P.O: read-only list of the customer POs from the Purchase tab.
+   Vendor details (Vendor P.O Num) are left out on purpose. ---- */
+function customerPoSalesSectionHtml(){
+  const d = DATA[currentLocation];
+  const all = applyTableTools('customerPO', (d.customerPO || []).slice().reverse());
+  const rows = limitRows('customerPO', all).map(p => `<tr>
+      <td>${esc(p.poNumber || '-')}</td>
+      <td>${fd(p.poDate) || '-'}</td>
+      <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(p.customer || '-')}</td>
+      <td style="white-space:normal; max-width:200px;">${descCellHtml('customerPO:'+p.id+':customerAddress', p.customerAddress || '', 45)}</td>
+      <td style="font-family:'IBM Plex Sans',sans-serif; max-width:260px; white-space:normal;">${descCellHtml('customerPO:'+p.id+':item', p.item || '', 60)}</td>
+      <td>${esc(p.qty || '')}</td>
+      <td>${esc(p.unitPrice || '')}</td>
+      <td>${rowTotal(p.qty, p.unitPrice) || '-'}</td>
+      <td>${fd(p.dod) || '-'}</td>
+      <td><span class="badge ${p.status==='Executed' || p.status==='Invoiced' ? 'badge-delivered' : (p.status==='Cancelled' ? 'badge-cancelled' : 'badge-transit')}">${esc(p.status || 'Non-Executed')}</span></td>
+    </tr>`).join('');
+  return secHead('&#128188;', 'Purchase Order')
+    + `<div class="panel"><div class="panel-head"><h3>Purchase Order register <span style="font-weight:400; color:var(--muted); font-size:11px;">(from Purchase &middot; ${all.length})</span></h3></div>
+  <div class="panel-body table-scroll">
+  ${tableToolbar('customerPO', d.customerPO || [])}
+  <table><thead><tr><th>P.O Number</th><th>P.O Date</th><th>Customer Name</th><th>Customer Address</th><th>Item Description</th><th>Qty</th><th>Unit Price</th><th>Total Value</th><th>DOD</th><th>Status</th></tr></thead>
+  <tbody>${rows || '<tr><td colspan="10" style="text-align:center; color:var(--muted); padding:18px;">No customer P.O records match.</td></tr>'}</tbody></table>
+  ${showMoreBar('customerPO', all.length)}
+  </div></div>`;
+}
 function renderSales(){
   const d = DATA[currentLocation];
   ['customers','leads','salesActivities','salesQuotes','salesPOs','soAcks','dispatches','projects','tenders','valveEnquiries','pumpEnquiries'].forEach(k => { if(!Array.isArray(d[k])) d[k] = []; });
@@ -8674,7 +8703,6 @@ function renderSales(){
   ${slSection('act', '&#128337;', 'Sales Activity', 'salesActivities', {})}
   ${enquiryFormSectionHtml()}
   ${salesQuotationsSectionHtml()}
-  ${salesPocSectionHtml()}
   ${salesDispatchesSectionHtml()}
   ${slSection('proj', '&#128200;', 'Project Tracker', 'projects', {})}
   ${slSection('tend', '&#128196;', 'Tenders', 'tenders', {})}`;
