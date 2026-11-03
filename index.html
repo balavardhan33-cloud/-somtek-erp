@@ -8677,8 +8677,8 @@ function customerPoSalesSectionHtml(){
       <td>${fd(p.dod) || '-'}</td>
       <td><span class="badge ${p.status==='Executed' || p.status==='Invoiced' ? 'badge-delivered' : (p.status==='Cancelled' ? 'badge-cancelled' : 'badge-transit')}">${esc(p.status || 'Non-Executed')}</span></td>
     </tr>`).join('');
-  return secHead('&#128188;', 'Purchase Order')
-    + `<div class="panel"><div class="panel-head"><h3>Purchase Order register <span style="font-weight:400; color:var(--muted); font-size:11px;">(from Purchase &middot; ${all.length})</span></h3></div>
+  return secHead('&#128188;', 'Customer P.O')
+    + `<div class="panel"><div class="panel-head"><h3>Customer P.O register <span style="font-weight:400; color:var(--muted); font-size:11px;">(from Purchase &middot; ${all.length})</span></h3></div>
   <div class="panel-body table-scroll">
   ${tableToolbar('customerPO', d.customerPO || [])}
   <table><thead><tr><th>P.O Number</th><th>P.O Date</th><th>Customer Name</th><th>Customer Address</th><th>Item Description</th><th>Qty</th><th>Unit Price</th><th>Total Value</th><th>DOD</th><th>Status</th></tr></thead>
@@ -8703,6 +8703,7 @@ function renderSales(){
   ${slSection('act', '&#128337;', 'Sales Activity', 'salesActivities', {})}
   ${enquiryFormSectionHtml()}
   ${salesQuotationsSectionHtml()}
+  ${customerPoSalesSectionHtml()}
   ${salesDispatchesSectionHtml()}
   ${slSection('proj', '&#128200;', 'Project Tracker', 'projects', {})}
   ${slSection('tend', '&#128196;', 'Tenders', 'tenders', {})}`;
