@@ -3619,7 +3619,7 @@ function restoreTabDraft(){
   try{ if(typeof updateQuoteTotals === 'function') updateQuoteTotals(); }catch(e){}
 }
 async function switchTab(tab){
-  if(tab !== currentTab) storeTabDraft();
+  if(tab !== currentTab){ storeTabDraft(); CPO_PREFILL = null; }
   currentTab = tab;
   render();
   restoreTabDraft();
@@ -3668,7 +3668,7 @@ function getSalesDeskSections(){
     }}
   ];
 }
-function switchSalesDeskSection(id){ salesDeskSection = id; render(); }
+function switchSalesDeskSection(id){ salesDeskSection = id; CPO_PREFILL = null; render(); }
 function renderSalesDesk(){
   pendingSectionLabel = null;   /* this tab uses its own switcher, not applyTabSections */
   const sections = getSalesDeskSections();
@@ -3908,6 +3908,8 @@ const IMPORT_SCHEMAS = {
     {key:'customer', header:'Customer Name'},
     {key:'customerAddress', header:'Customer Address'},
     {key:'vendorPoNum', header:'Vendor P.O Num'},
+    {key:'quoteRef', header:'Quotation No.'},
+    {key:'salesPoc', header:'Sales POC'},
     {key:'item', header:'Item Description'},
     {key:'qty', header:'Qty'},
     {key:'unitPrice', header:'Unit Price'},
@@ -5018,7 +5020,8 @@ function autofillCpoAddress(){
 const POC_CUSTOMER_FIELDS = ['Customer','PO Details & Date','GST Number','PO Amendments & Dates','PO Value','Quote value','Discounts offered','Payment Terms','Proforma details','GST Details','P&F Details','Freight Details','Delivery Period','LD Clause details','Certificates details','Drawings & Qap','Billing Address','Delivery Address','Contact'];
 const POC_PRINCIPAL_FIELDS = ['Principal name','Quotation & Dates','Principal PO. No & Value','Material in Stock (IF YES or NO)','Revisions & Dates','Items Details','Initial quoted price','Final Quoted price','Discounts Received','Payment terms','LD Clause Applied','Delivery period','Delivery Address','Certificates required','Drawings & QAP','Contacts'];
 let poSection = 'vendor';
-function switchPoSection(sec){ poSection = sec; render(); }
+let CPO_PREFILL = null; /* values copied from a quotation by "Create P.O", shown in the Customer P.O form once */
+function switchPoSection(sec){ poSection = sec; CPO_PREFILL = null; render(); }
 function renderPO(){
   const d = DATA[currentLocation];
   const vpoAll = applyTableTools('vendorPO', d.vendorPO.slice().reverse());
@@ -5029,6 +5032,8 @@ function renderPO(){
   const pocRows = limitRows('poContractDocs', pocAll);
   const pocEdit = pocEditId ? (d.poContractDocs||[]).find(x=>x && x.id===pocEditId) : null;
   const customerNames = uniqueCustomerNames(d);
+  const cpoPre = CPO_PREFILL || {};
+  const cpoPocOptions = salesPocUsers().map(u => '<option value="' + esc(u.name || u.username) + '">').join('');
 
   /* Split into Internal V.PO and External V.PO, each with its own New Entry form
      and records table. Existing records (no poType) stay in a separate "Both" view. */
@@ -5064,12 +5069,12 @@ function renderPO(){
   <form onsubmit="return addCustomerPO(event)">
     <div class="form-grid">
       <div class="field"><label>P.O Number</label><input type="text" id="cpo-number" placeholder="Auto if blank"></div>
-      <div class="field"><label>P.O Date</label><input type="date" id="cpo-date" value="${today()}" required></div>
+      <div class="field"><label>P.O Date</label><input type="date" id="cpo-date" value="${esc(cpoPre.poDate || today())}" required></div>
       <div class="field"><label>Customer Name</label>
-        <input type="text" id="cpo-customer" list="cpo-customer-list" placeholder="Select or type a new customer" oninput="autofillCpoAddress()">
+        <input type="text" id="cpo-customer" list="cpo-customer-list" value="${esc(cpoPre.customer || '')}" placeholder="Select or type a new customer" oninput="autofillCpoAddress()">
         <datalist id="cpo-customer-list">${customerNames.map(n=>`<option value="${esc(n)}"></option>`).join('')}</datalist>
       </div>
-      <div class="field"><label>Customer Address</label><input type="text" id="cpo-address" placeholder="Auto-fills for known customers, editable"></div>
+      <div class="field"><label>Customer Address</label><input type="text" id="cpo-address" value="${esc(cpoPre.customerAddress || '')}" placeholder="Auto-fills for known customers, editable"></div>
       <div class="field"><label>Vendor P.O Num</label><input type="text" id="cpo-vendor-po-num" placeholder="Optional"></div>
       <div class="field"><label>DOD</label><input type="date" id="cpo-dod"></div>
       <div class="field"><label>Status</label>
@@ -5080,9 +5085,11 @@ function renderPO(){
           <option value="Cancelled">Cancelled</option>
         </select>
       </div>
+      <div class="field"><label>Sales POC</label><input type="text" id="cpo-salespoc" list="cpo-salespoc-list" autocomplete="off" value="${esc(cpoPre.salesPoc || '')}" placeholder="Pick a sales person"><datalist id="cpo-salespoc-list">${cpoPocOptions}</datalist></div>
+      <div class="field"><label>Quotation No.</label><input type="text" id="cpo-quoteref" value="${esc(cpoPre.quoteRef || '')}" placeholder="Optional"></div>
     </div>
     <div class="out-lines-head">Items in this P.O</div>
-    <div id="cpo-item-lines">${cpoItemLineHtml()}</div>
+    <div id="cpo-item-lines">${(cpoPre.items && cpoPre.items.length ? cpoPre.items : [{}]).map(it => cpoItemLineHtml(it)).join('')}</div>
     <div style="margin:10px 0 14px 0;"><button type="button" class="btn btn-ghost" onclick="addCpoItemLine()">+ Add another item</button></div>
     <button type="submit" class="btn">Add Customer P.O</button>
   </form>
@@ -5378,11 +5385,12 @@ async function deleteVendorPO(id){
   render();
 }
 
-function cpoItemLineHtml(){
+function cpoItemLineHtml(it){
+  it = it || {};
   return `<div class="out-line">
-    <input type="text" class="cpo-line-item" placeholder="Item description" style="flex:2 1 220px; min-width:180px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:'IBM Plex Sans',sans-serif; font-size:13px; border-radius:4px;">
-    <input type="number" class="out-line-qty cpo-line-qty" min="1" placeholder="Qty">
-    <input type="number" step="0.01" class="out-line-price cpo-line-price" placeholder="Unit Price">
+    <input type="text" class="cpo-line-item" value="${esc(it.item || '')}" placeholder="Item description" style="flex:2 1 220px; min-width:180px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:'IBM Plex Sans',sans-serif; font-size:13px; border-radius:4px;">
+    <input type="number" class="out-line-qty cpo-line-qty" min="1" placeholder="Qty" value="${esc(it.qty || '')}">
+    <input type="number" step="0.01" class="out-line-price cpo-line-price" placeholder="Unit Price" value="${esc(it.unitPrice || '')}">
     <button type="button" class="icon-btn out-line-remove" onclick="removeCpoItemLine(this)" title="Remove this item">&#10005;</button>
   </div>`;
 }
@@ -5413,8 +5421,11 @@ async function addCustomerPO(e){
     customerAddress: document.getElementById('cpo-address').value.trim(),
     vendorPoNum: document.getElementById('cpo-vendor-po-num').value.trim(),
     dod: document.getElementById('cpo-dod').value,
-    status: document.getElementById('cpo-status').value || 'Non-Executed'
+    status: document.getElementById('cpo-status').value || 'Non-Executed',
+    salesPoc: document.getElementById('cpo-salespoc').value.trim(),
+    quoteRef: document.getElementById('cpo-quoteref').value.trim()
   };
+  CPO_PREFILL = null;
   const lines = [...document.querySelectorAll('#cpo-item-lines .out-line')].map(line => ({
     item: line.querySelector('.cpo-line-item').value.trim(),
     qty: line.querySelector('.cpo-line-qty').value.trim(),
@@ -5437,6 +5448,8 @@ async function addCustomerPO(e){
       totalValue: (qty && unitPrice) ? (qty*unitPrice) : '',
       dod: header.dod,
       status: header.status,
+      salesPoc: header.salesPoc,
+      quoteRef: header.quoteRef,
       addedBy: actorName()
     });
   }
@@ -5451,8 +5464,8 @@ async function updateCustomerPOStatus(id, status){
 }
 function exportCustomerPO(){
   const d = DATA[currentLocation];
-  const headers = ['P.O Number','P.O Date','Customer Name','Customer Address','Vendor P.O Num','Item Description','Qty','Unit Price','Total Value','DOD','Status','Added By'];
-  const rows = d.customerPO.map(p=>[p.poNumber, p.poDate, p.customer, p.customerAddress, p.vendorPoNum, p.item, p.qty, p.unitPrice, (rowTotal(p.qty,p.unitPrice)||p.totalValue||''), p.dod, p.status, p.addedBy]);
+  const headers = ['P.O Number','P.O Date','Customer Name','Customer Address','Vendor P.O Num','Item Description','Qty','Unit Price','Total Value','DOD','Status','Quotation No.','Sales POC','Added By'];
+  const rows = d.customerPO.map(p=>[p.poNumber, p.poDate, p.customer, p.customerAddress, p.vendorPoNum, p.item, p.qty, p.unitPrice, (rowTotal(p.qty,p.unitPrice)||p.totalValue||''), p.dod, p.status, p.quoteRef||'', p.salesPoc||'', p.addedBy]);
   cfExportAppend('customerPO', d.customerPO, headers, rows);
   exportToExcel(currentLocation+'_CustomerPO', headers, rows);
 }
@@ -8662,29 +8675,94 @@ function salesDispatchesSectionHtml(){
 }
 /* ---- Sales tab > Customer P.O: read-only list of the customer POs from the Purchase tab.
    Vendor details (Vendor P.O Num) are left out on purpose. ---- */
-function customerPoSalesSectionHtml(){
-  const d = DATA[currentLocation];
-  const all = applyTableTools('customerPO', (d.customerPO || []).slice().reverse());
-  const rows = limitRows('customerPO', all).map(p => `<tr>
+/* ---- Customer P.O on the Sales tab: "My P.O's" (I am the Sales POC) and "All P.O's" ---- */
+function cpoIsMine(p){
+  const who = String((p && p.salesPoc) || '').trim().toLowerCase();
+  if(!who) return false;
+  return who === String(actorName() || '').trim().toLowerCase() || who === String(actorLogin() || '').trim().toLowerCase();
+}
+function cpoSalesHeadHtml(withPoc){
+  return '<tr><th>P.O Number</th><th>P.O Date</th><th>Customer Name</th><th>Customer Address</th>'
+    + (withPoc ? '<th>Sales POC</th>' : '')
+    + '<th>Quotation No.</th><th>Item Description</th><th>Qty</th><th>Unit Price</th><th>Total Value</th><th>DOD</th><th>Status</th></tr>';
+}
+function cpoSalesRowHtml(p, withPoc){
+  return `<tr>
       <td>${esc(p.poNumber || '-')}</td>
       <td>${fd(p.poDate) || '-'}</td>
       <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(p.customer || '-')}</td>
       <td style="white-space:normal; max-width:200px;">${descCellHtml('customerPO:'+p.id+':customerAddress', p.customerAddress || '', 45)}</td>
+      ${withPoc ? `<td style="font-family:'IBM Plex Sans',sans-serif;">${esc(p.salesPoc || '-')}</td>` : ''}
+      <td>${esc(p.quoteRef || '-')}</td>
       <td style="font-family:'IBM Plex Sans',sans-serif; max-width:260px; white-space:normal;">${descCellHtml('customerPO:'+p.id+':item', p.item || '', 60)}</td>
       <td>${esc(p.qty || '')}</td>
       <td>${esc(p.unitPrice || '')}</td>
       <td>${rowTotal(p.qty, p.unitPrice) || '-'}</td>
       <td>${fd(p.dod) || '-'}</td>
       <td><span class="badge ${p.status==='Executed' || p.status==='Invoiced' ? 'badge-delivered' : (p.status==='Cancelled' ? 'badge-cancelled' : 'badge-transit')}">${esc(p.status || 'Non-Executed')}</span></td>
-    </tr>`).join('');
+    </tr>`;
+}
+function customerPoSalesSectionHtml(){
+  const d = DATA[currentLocation];
+  const newestFirst = (d.customerPO || []).slice().reverse();
+  const mine = newestFirst.filter(cpoIsMine);
+  const mineRows = mine.map(p => cpoSalesRowHtml(p, false)).join('');
+  const all = applyTableTools('customerPO', newestFirst);
+  const allRows = limitRows('customerPO', all).map(p => cpoSalesRowHtml(p, true)).join('');
   return secHead('&#128188;', 'Customer P.O')
-    + `<div class="panel"><div class="panel-head"><h3>Customer P.O register <span style="font-weight:400; color:var(--muted); font-size:11px;">(from Purchase &middot; ${all.length})</span></h3></div>
+    + `<div class="subsection-title">My P.O's</div>
+  <div class="panel"><div class="panel-head"><h3>My P.O's <span style="font-weight:400; color:var(--muted); font-size:11px;">(where you are the Sales POC &middot; ${mine.length})</span></h3></div>
+  <div class="panel-body table-scroll">
+  <table><thead>${cpoSalesHeadHtml(false)}</thead>
+  <tbody>${mineRows || '<tr><td colspan="11" style="text-align:center; color:var(--muted); padding:18px;">No P.O records assigned to you yet.</td></tr>'}</tbody></table>
+  </div></div>`
+    + `<div class="subsection-title alt">All P.O's</div>
+  <div class="panel"><div class="panel-head"><h3>All P.O's <span style="font-weight:400; color:var(--muted); font-size:11px;">(from Purchase &middot; ${all.length})</span></h3></div>
   <div class="panel-body table-scroll">
   ${tableToolbar('customerPO', d.customerPO || [])}
-  <table><thead><tr><th>P.O Number</th><th>P.O Date</th><th>Customer Name</th><th>Customer Address</th><th>Item Description</th><th>Qty</th><th>Unit Price</th><th>Total Value</th><th>DOD</th><th>Status</th></tr></thead>
-  <tbody>${rows || '<tr><td colspan="10" style="text-align:center; color:var(--muted); padding:18px;">No customer P.O records match.</td></tr>'}</tbody></table>
+  <table><thead>${cpoSalesHeadHtml(true)}</thead>
+  <tbody>${allRows || '<tr><td colspan="12" style="text-align:center; color:var(--muted); padding:18px;">No customer P.O records match.</td></tr>'}</tbody></table>
   ${showMoreBar('customerPO', all.length)}
   </div></div>`;
+}
+
+/* ---- Quotation log > Create P.O: copies the quotation into Sales Desk > Purchase > Customer P.O ---- */
+function quoteItemDescription(q, it){
+  const cols = tplOf(q).groups.flatMap(g => g.cols).filter(c => !c.auto && !c.calc && !c.num);
+  return cols.map(c => {
+    const raw = (it && it[c.key] != null) ? it[c.key] : '';
+    const v = String(raw).trim();
+    return v ? (c.label + ': ' + v) : '';
+  }).filter(Boolean).join('; ');
+}
+function createPoFromQuote(id){
+  const d = DATA[currentLocation];
+  const q = (d.quotations || []).find(x => x && x.id === id);
+  if(!q) return;
+  if(!canSeeTab('salesdesk')){ alert('You do not have access to the Sales Desk tab.'); return; }
+  const customer = String(q.customer || '').trim();
+  CPO_PREFILL = {
+    customer: customer,
+    customerAddress: customerAddressLookup(d)[customer.toLowerCase()] || '',
+    poDate: today(),
+    salesPoc: String(q.salesPoc || '').trim(),
+    quoteRef: String(q.quoteNumber || '').trim(),
+    items: (q.items || []).map(it => ({
+      item: quoteItemDescription(q, it),
+      qty: String(it.qty || '').trim(),
+      unitPrice: String(it.unitPrice || '').trim()
+    })).filter(l => l.item || l.qty || l.unitPrice)
+  };
+  /* Keep whatever is typed on the current screen, but an older Sales Desk draft must not overwrite the new P.O. */
+  storeTabDraft();
+  delete TAB_DRAFTS[currentLocation + '|salesdesk'];
+  currentTab = 'salesdesk';
+  salesDeskSection = 'purchase';
+  poSection = 'customer';
+  render();
+  restoreTabDraft();
+  const el = document.getElementById('cpo-customer');
+  if(el && el.scrollIntoView) el.scrollIntoView({behavior:'smooth', block:'center'});
 }
 function renderSales(){
   const d = DATA[currentLocation];
@@ -14991,6 +15069,7 @@ function renderQuotation(){
       </td>${addedByCell(r)}
       <td><div class="action-cell">
         <button class="icon-btn" onclick="openQuotePreview('${r.id}')">View / Print</button>
+        <button class="icon-btn" onclick="createPoFromQuote('${r.id}')" style="background:var(--success); color:#fff; border-color:var(--success);">Create P.O</button>
         <button class="icon-btn" onclick="loadQuoteForEdit('${r.id}')">Edit</button>
         ${deleteBtn(`deleteQuotation('${r.id}')`)}
       </div></td>
