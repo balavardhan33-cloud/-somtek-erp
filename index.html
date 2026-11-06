@@ -1308,7 +1308,7 @@ function getTableUI(name){
   if(!tableUI[name]) tableUI[name] = {search:'', sortKey:'', sortDir:'asc', filterKey:'', filterVal:'', limit:TABLE_PAGE_SIZE};
   return tableUI[name];
 }
-function ttFields(name){ return EDIT_SCHEMAS[name] || []; }
+function ttFields(name){ return name === 'enqAll' ? ENQ_ALL_FIELDS : (EDIT_SCHEMAS[name] || []); }
 function applyTableTools(name, rows){
   const ui = getTableUI(name);
   const fields = ttFields(name);
@@ -10971,10 +10971,69 @@ function switchEnqDeskView(v){ enqDeskView = v; enqReviewId = null; render(); }
 function enqDeskOpen(id){ enqReviewId = id; render(); }
 function enqDeskBack(){ enqReviewId = null; render(); }
 
-/* "Pick / Review": assigns the enquiry to the logged-in user, moves it to In Progress and opens the review form. */
-async function enqDeskPick(id){
+/* Extra desk details asked when an enquiry is picked, and shown again in the review form. */
+const DESK_FIELDS = [
+  {key:'deskBrand', label:'Brand Name', type:'text'},
+  {key:'deskVendor', label:'Vendor Name', type:'text'},
+  {key:'deskCustQuoteNo', label:'Customer Quotation No.', type:'text'},
+  {key:'deskPriority', label:'Priority', type:'select', options:['','H','M','L']}
+];
+function enqDeskPickClose(){
+  const root = document.getElementById('enq-pick-root');
+  if(root) root.remove();
+}
+/* Opens the details form. Nothing changes until Confirm; Cancel leaves the enquiry in the queue. */
+function enqDeskAskPick(id){
   const f = enqDeskFind(id);
   if(!f || f.rec.deskStatus) return;
+  const r = f.rec;
+  const field = (lbl, inner) => `<div class="field"><label>${lbl} *</label>${inner}</div>`;
+  const val = k => esc(r[k] || '');
+  enqDeskPickClose();
+  const root = document.createElement('div');
+  root.id = 'enq-pick-root';
+  root.className = 'modal-overlay';
+  root.onclick = e => { if(e.target === root) enqDeskPickClose(); };
+  root.innerHTML = `<div class="modal-card" style="max-width:560px;">
+    <div class="modal-head"><h3>Pick ${esc(r.enqNo || 'enquiry')} &mdash; ${esc(r.customer || '')}</h3><button class="icon-btn" onclick="enqDeskPickClose()">Close</button></div>
+    <div class="modal-body">
+      <div class="form-grid">
+        ${field('Brand Name', `<input type="text" id="ep-brand" value="${val('deskBrand')}" autocomplete="off">`)}
+        ${field('Vendor Name', `<input type="text" id="ep-vendor" value="${val('deskVendor')}" autocomplete="off">`)}
+        ${field('Customer Quotation No.', `<input type="text" id="ep-custquote" value="${val('deskCustQuoteNo')}" autocomplete="off">`)}
+        ${field('Due Date', `<input type="date" id="ep-due" value="${val('followUp')}">`)}
+        ${field('Priority', `<select id="ep-priority"><option value="">Select</option>${['H','M','L'].map(p => `<option value="${p}" ${r.deskPriority === p ? 'selected' : ''}>${p}</option>`).join('')}</select>`)}
+      </div>
+      <div style="margin-top:12px; color:var(--muted); font-size:12px;">These details are required before the enquiry moves to In Progress.</div>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="icon-btn" onclick="enqDeskPickClose()">Cancel</button>
+      <button type="button" class="btn" onclick="enqDeskPickConfirm('${r.id}')">Confirm &amp; Review</button>
+    </div></div>`;
+  document.body.appendChild(root);
+}
+/* Checks the five details; only then is the enquiry picked and the review form opened. */
+async function enqDeskPickConfirm(id){
+  const g = k => (((document.getElementById(k) || {}).value) || '').trim();
+  const details = {
+    deskBrand: g('ep-brand'),
+    deskVendor: g('ep-vendor'),
+    deskCustQuoteNo: g('ep-custquote'),
+    followUp: g('ep-due'),
+    deskPriority: g('ep-priority')
+  };
+  const missing = [['Brand Name', details.deskBrand], ['Vendor Name', details.deskVendor], ['Customer Quotation No.', details.deskCustQuoteNo], ['Due Date', details.followUp], ['Priority', details.deskPriority]]
+    .filter(x => !x[1]).map(x => x[0]);
+  if(missing.length){ alert('Please fill in: ' + missing.join(', ')); return; }
+  enqDeskPickClose();
+  await enqDeskPick(id, details);
+}
+
+/* "Pick / Review": assigns the enquiry to the logged-in user, moves it to In Progress and opens the review form. */
+async function enqDeskPick(id, details){
+  const f = enqDeskFind(id);
+  if(!f || f.rec.deskStatus || !details) return;
+  Object.assign(f.rec, details);
   f.rec.deskStatus = 'In Progress';
   f.rec.deskAssignedTo = actorName();
   f.rec.deskAssignedLogin = actorLogin();
@@ -10995,6 +11054,10 @@ async function enqDeskSave(id, submit){
   const schema = EDIT_SCHEMAS[f.table] || [];
   const vals = {};
   schema.forEach(fld => {
+    const el = document.getElementById('dq-' + fld.key);
+    if(el) vals[fld.key] = (el.value || '').trim();
+  });
+  DESK_FIELDS.forEach(fld => {
     const el = document.getElementById('dq-' + fld.key);
     if(el) vals[fld.key] = (el.value || '').trim();
   });
@@ -11032,6 +11095,41 @@ async function enqDeskDelete(id){
   if(enqReviewId === id) enqReviewId = null;
   await saveLocation(currentLocation);
   render();
+}
+/* Submitted enquiry > quotation icon: opens Sales Desk > Quotation with the enquiry details filled in.
+   Same draft mechanism as "Create P.O" (QT_DRAFT is read by renderQuotation). */
+function quoteFromDeskEnquiry(id){
+  const f = enqDeskFind(id);
+  if(!f) return;
+  if(!canSeeTab('salesdesk')){ alert('You do not have access to the Sales Desk tab.'); return; }
+  const r = f.rec;
+  const d = DATA[currentLocation];
+  const str = v => String(v == null ? '' : v).trim();
+  const item = {qty: str(r.qty)};
+  if(f.table === 'valveEnquiries'){
+    Object.assign(item, {
+      valveType: str(r.valveType), valveSize: str(r.valveSize),
+      body: str(r.bodyMoc), ballDisc: str(r.discMoc), seat: str(r.seatMoc),
+      bodyEnds: str(r.endConnection), leakageClass: str(r.seatLeakageClass)
+    });
+  }
+  storeTabDraft();
+  delete TAB_DRAFTS[currentLocation + '|salesdesk'];
+  editingQuoteId = null;
+  QT_DRAFT = {
+    customer: str(r.customer),
+    quoteNumber: nextQuoteNumber(d),
+    rfqRef: str(r.enqNo),
+    rfqDate: str(r.date),
+    items: [item]
+  };
+  currentTab = 'salesdesk';
+  salesDeskSection = 'quotation';
+  enqReviewId = null;
+  render();
+  restoreTabDraft();
+  const el = document.getElementById('q-customer');
+  if(el && el.scrollIntoView) el.scrollIntoView({behavior: 'smooth', block: 'center'});
 }
 /* Regret: asks for a reason, then moves the enquiry to the Regret section. Works from the queue or the review form. */
 async function enqDeskRegret(id){
@@ -11091,6 +11189,7 @@ function enqReviewHtml(f){
     </div>
     ${can ? '' : '<div style="margin-bottom:12px; color:var(--muted); font-size:12px;">Read-only: this enquiry is not assigned to you.</div>'}
     <div class="form-grid">${fields}</div>
+    <div class="form-grid" style="margin-top:14px;">${DESK_FIELDS.map(fld => dqInputHtml(fld, r[fld.key] == null ? '' : String(r[fld.key]), !can, false)).join('')}</div>
     <div class="form-grid" style="margin-top:14px;">
       <div class="field"><label>Status</label><select id="dq-hold"${holdDis}>${holdOpts}</select></div>
       <div class="field" style="grid-column: span 2;"><label>Note (what is pending)</label><input type="text" id="dq-note" value="${esc(r.deskNote || '')}" placeholder="e.g. waiting for customer approval" autocomplete="off"${dis}></div>
@@ -11112,7 +11211,7 @@ function renderEnquiryDesk(){
   const submitted = all.filter(x => x.rec.deskStatus === 'Submitted');
   const regret = all.filter(x => x.rec.deskStatus === 'Regret');
   const btn = (id, label, n) => `<button type="button" class="acct-switch-btn ${enqDeskView===id?'active':''}" onclick="switchEnqDeskView('${id}')">${label}${n != null ? ` (${n})` : ''}</button>`;
-  const switcher = `<div class="acct-switch" style="margin-bottom:14px;">${btn('queue', '&#128229; Enquiry Queue', queue.length)}${btn('progress', '&#128260; In Progress', progress.length)}${btn('submitted', '&#9989; Submitted', submitted.length)}${btn('sheet', '&#128202; Data Sheet')}${btn('regret', '&#10060; Regret', regret.length)}</div>`;
+  const switcher = `<div class="acct-switch" style="margin-bottom:14px;">${btn('queue', '&#128229; Enquiry Queue', queue.length)}${btn('progress', '&#128260; In Progress', progress.length)}${btn('submitted', '&#9989; Submitted', submitted.length)}${btn('sheet', '&#128202; All Enquiries')}${btn('regret', '&#10060; Regret', regret.length)}</div>`;
   if(enqDeskView === 'sheet') return switcher + renderEnquirySheet();
   const head = `${tabHeader(currentLocation, 'Enquiry Desk')}${switcher}`;
   if(enqReviewId){
@@ -11156,7 +11255,7 @@ function renderEnquiryDesk(){
       <td>${enqDeskPersonHtml(r.deskAssignedTo, r.deskAssignedLogin)}</td>
       <td>${fd(r.deskSubmittedOn) || '-'}</td>
       <td style="white-space:normal; max-width:240px;">${esc(r.deskNote || '')}</td>
-      <td><div class="action-cell"><button type="button" class="icon-btn" onclick="enqDeskOpen('${r.id}')">${isAdmin() ? 'Edit' : 'View'}</button>${deleteBtn(`enqDeskDelete('${r.id}')`)}</div></td>
+      <td><div class="action-cell"><button type="button" class="icon-btn" title="Create quotation from this enquiry" onclick="quoteFromDeskEnquiry('${r.id}')">&#128221;</button> <button type="button" class="icon-btn" onclick="enqDeskOpen('${r.id}')">${isAdmin() ? 'Edit' : 'View'}</button>${deleteBtn(`enqDeskDelete('${r.id}')`)}</div></td>
     </tr>`;
     }).join('');
     return head + `<div class="panel"><div class="panel-head"><h3>Submitted enquiries <span style="font-weight:400; color:var(--muted); font-size:11px;">(${submitted.length})</span></h3></div>`
@@ -11170,20 +11269,77 @@ function renderEnquiryDesk(){
       <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.application || '')}</td>
       <td>${fd(r.followUp) || ''}</td><td>${esc(r.qty || '')}</td>
       <td>${enqDeskPersonHtml(r.addedBy, r.addedByLogin || r.salesPerson || '')}</td>
-      <td><div class="action-cell"><button type="button" class="icon-btn" onclick="enqDeskPick('${r.id}')">Pick / Review</button> <button type="button" class="icon-btn" onclick="enqDeskRegret('${r.id}')">Regret</button>${isAdmin() ? `<button type="button" class="icon-btn" onclick="enqDeskOpen('${r.id}')">Edit</button>` : ''}${deleteBtn(`enqDeskDelete('${r.id}')`)}</div></td>
+      <td><div class="action-cell"><button type="button" class="icon-btn" onclick="enqDeskAskPick('${r.id}')">Pick / Review</button> <button type="button" class="icon-btn" onclick="enqDeskRegret('${r.id}')">Regret</button>${isAdmin() ? `<button type="button" class="icon-btn" onclick="enqDeskOpen('${r.id}')">Edit</button>` : ''}${deleteBtn(`enqDeskDelete('${r.id}')`)}</div></td>
     </tr>`).join('');
   return head + `<div class="panel"><div class="panel-head"><h3>Enquiry queue <span style="font-weight:400; color:var(--muted); font-size:11px;">(entered by sales &middot; ${queue.length} waiting)</span></h3></div>`
     + enqDeskTable(['E.Num','Type','Date','Customer','Region','Application','Due Date','Qty','Entered By',''], rows, 'No enquiries waiting in the queue.') + `</div>`;
 }
 function renderEnquiry(){ return renderEnquiryDesk(); }
 
+/* ---- All Enquiries: one list of every enquiry (Sales Enquiry Form + Data Sheet) with sort / filter / search ---- */
+const ENQ_ALL_FIELDS = [
+  {key:'source', label:'Source'},
+  {key:'enqNo', label:'E.Num'},
+  {key:'date', label:'Date', type:'date'},
+  {key:'customer', label:'Customer'},
+  {key:'region', label:'Region'},
+  {key:'enteredBy', label:'Entered By'},
+  {key:'product', label:'Application / Product'},
+  {key:'status', label:'Status'},
+  {key:'handledBy', label:'Handled By'},
+  {key:'priority', label:'Priority'},
+  {key:'brand', label:'Brand'},
+  {key:'vendor', label:'Vendor'},
+  {key:'custQuoteNo', label:'Cust. Quotation No.'},
+  {key:'dueDate', label:'Due Date', type:'date'},
+  {key:'qty', label:'Qty', type:'number'}
+];
+function enqAllRows(){
+  const d = DATA[currentLocation];
+  const rows = [];
+  (d.enquiry || []).forEach(r => rows.push({
+    id: r.id, source: 'Data Sheet', enqNo: r.enum || '', date: r.date || '', customer: r.customer || '',
+    region: r.region || '', enteredBy: r.salesPerson || r.addedBy || '', product: r.product || '',
+    status: r.action || 'Pending', handledBy: r.assignedTo || '', priority: r.priority || '',
+    brand: r.brand || '', vendor: r.vendor || '', custQuoteNo: r.custQuote || '', dueDate: r.dueDate || '',
+    qty: '', addedBy: r.addedBy || ''
+  }));
+  enqDeskAll().forEach(({rec: r}) => rows.push({
+    id: r.id, source: 'Sales Enquiry', enqNo: r.enqNo || '', date: r.date || '', customer: r.customer || '',
+    region: r.region || '', enteredBy: r.addedBy || '', product: r.application || '',
+    status: r.deskStatus === 'In Progress' ? (r.deskHold || 'In Progress') : (r.deskStatus || 'Queue'),
+    handledBy: r.deskAssignedTo || '', priority: r.deskPriority || '', brand: r.deskBrand || '',
+    vendor: r.deskVendor || '', custQuoteNo: r.deskCustQuoteNo || '', dueDate: r.followUp || '',
+    qty: r.qty || '', addedBy: r.addedBy || ''
+  }));
+  return rows;
+}
+function allEnquiriesPanelHtml(){
+  const base = enqAllRows();
+  const list = applyTableTools('enqAll', base);
+  const rows = limitRows('enqAll', list);
+  const cell = (f, r) => {
+    const v = r[f.key] == null ? '' : String(r[f.key]);
+    if(v === '') return '-';
+    return f.type === 'date' ? (fd(v) || '-') : esc(v);
+  };
+  return `<div class="panel"><div class="panel-head"><h3>All enquiries <span style="font-weight:400; color:var(--muted); font-size:11px;">(${list.length} of ${base.length})</span></h3></div>
+  <div class="panel-body table-scroll">
+  ${tableToolbar('enqAll', base)}
+  <table><thead><tr>${ENQ_ALL_FIELDS.map(f => `<th>${esc(f.label)}</th>`).join('')}</tr></thead>
+  <tbody>${rows.length === 0
+    ? `<tr><td colspan="${ENQ_ALL_FIELDS.length}" style="text-align:center; color:var(--muted); padding:18px;">No enquiries match.</td></tr>`
+    : rows.map(r => `<tr>${ENQ_ALL_FIELDS.map(f => `<td>${cell(f, r)}</td>`).join('')}</tr>`).join('')}</tbody></table>
+  ${showMoreBar('enqAll', list.length)}
+  </div></div>`;
+}
 function renderEnquirySheet(){
   const d = DATA[currentLocation];
   const sectionList = d.enquiry || [];
   const enqAll = sortEnquiriesByPriority(applyTableTools('enquiry', sectionList.slice().reverse()));
   const enqRows = limitRows('enquiry', enqAll);
   return `
-  ${tabHeader(currentLocation, 'Enquiry Data Sheet')}
+  ${tabHeader(currentLocation, 'All Enquiries')}
   ${secHead('&#10133;', 'New Entry')}
   <div class="panel"><div class="panel-head"><h3>New enquiry</h3></div>
   <div class="panel-body">
@@ -11209,36 +11365,9 @@ function renderEnquirySheet(){
     </div>
   </form>
   </div></div>
-  ${secHead('&#128203;', 'Records')}
-  <div class="panel"><div class="panel-head"><h3>All enquiries &mdash; ${locationLabel(currentLocation, 14)}${getTableUI('enquiry').sortKey ? '' : ` <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(High &rarr; Medium &rarr; Low priority)</span>`}</h3><div class="panel-head-actions">${importBtn('enquiry')}${exportBtn('exportEnquiry')}</div></div>
-  <div class="panel-body table-scroll">
-  ${tableToolbar('enquiry', d.enquiry)}
-  <table><thead><tr>
-    <th>Date</th><th>E.Num</th><th>Customer</th><th>Region</th><th>Sales Person</th><th>Product Description</th>
-    <th>Response</th><th>Quoting</th><th>Due Date</th><th>Brand</th><th>Vendor</th><th>Submitted</th>
-    <th>Cust. Quotation No.</th><th>Cust. Response</th><th>Action</th><th>Priority</th><th>Assigned To</th>${cfHeaders('enquiry')}<th>Added By</th><th></th>
-  </tr></thead><tbody>
-  ${enqRows.length===0 ? noMatchRow(19, sectionList.length) :
-    enqRows.map(r=>`<tr>
-      <td>${fd(r.date)}</td><td>${esc(r.enum)}</td>
-      <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.customer)}</td><td>${esc(r.region)}</td>
-      <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.salesPerson)}</td>
-      <td style="font-family:'IBM Plex Sans',sans-serif;">${descCellHtml('enquiry:'+r.id+':product', r.product)}</td>
-      <td>${enquiryBadge(r.response)}</td>
-      <td>${enquiryBadge(r.quoting)}</td>
-      <td>${fd(r.dueDate)}</td><td>${esc(r.brand)}</td><td>${esc(r.vendor)}</td>
-      <td>${enquiryBadge(r.submitted)}</td>
-      <td>${esc(r.custQuote)}</td>
-      <td>${enquiryBadge(r.custResponse)}</td>
-      <td>${enquiryBadge(r.action || 'Pending')}</td>
-      <td>${enquiryBadge(r.priority)}</td>
-      <td>${esc(r.assignedTo)}</td>
-      ${cfCells('enquiry', r)}${addedByCell(r)}
-      <td>${actionCell(`<button type="button" class="icon-btn" onclick="quoteFromEnquiry('${r.id}')" title="Create a quotation pre-filled from this enquiry">&#128221;</button>` + (r.assignedTo? '' : pickBtn(r.id, 'pickEnquiry')) + editBtn('enquiry', r.id), deleteBtn(`deleteEnquiry('${r.id}')`))}</td>
-    </tr>`).join('')}
-  </tbody></table>
-  ${showMoreBar('enquiry', enqAll.length)}
-  </div></div>`;
+  ${secHead('&#128203;', 'All Enquiries')}
+  ${allEnquiriesPanelHtml()}
+`;
 }
 async function addEnquiry(e){
   e.preventDefault();
