@@ -160,6 +160,26 @@ h1,h2,h3,.stencil{font-family:'Oswald', sans-serif; text-transform:uppercase; le
 .sev7en-name span{color:var(--accent);}
 .sev7en-tag{margin-top:3px; font-size:11px; letter-spacing:0.06em; color:var(--muted); text-transform:uppercase;}
 .field{margin-bottom:16px;}
+/* Enquiry data sheet: question on the left, answer on the right */
+.ds-sheet{border:1px solid var(--border); border-radius:4px;}
+.ds-sec{font-family:'Oswald',sans-serif; font-size:12.5px; text-transform:uppercase; letter-spacing:0.08em; color:#fff; background:#1f4491; padding:8px 14px;}
+.ds-rows{columns:2 440px; column-gap:0; column-rule:1px solid var(--border);}
+.ds-row{display:grid; grid-template-columns:34px minmax(0,1fr) minmax(150px,46%); align-items:center; gap:8px; padding:5px 14px; border-bottom:1px solid var(--border); break-inside:avoid;}
+.ds-no{color:var(--muted); font-size:12px; text-align:right;}
+.ds-q{font-size:13px; color:var(--text); font-family:'IBM Plex Sans',sans-serif; text-transform:none; letter-spacing:0; margin:0;}
+.field.ds-a{margin:0;}
+.ds-table-wrap{overflow-x:auto;}
+.ds-table{width:100%; border-collapse:collapse;}
+.ds-table th{font-family:'Oswald',sans-serif; font-size:11.5px; text-transform:uppercase; letter-spacing:0.06em; text-align:left; padding:8px 14px; background:var(--panel-2); color:var(--text); border-bottom:1px solid var(--border);}
+.ds-table td{padding:5px 14px; border-bottom:1px solid var(--border); vertical-align:middle;}
+.ds-table td.ds-no{width:34px; padding-right:0;}
+.ds-table td.ds-q{white-space:nowrap;}
+.ds-multi th, .ds-multi td{min-width:190px;}
+.ds-multi th.ds-q, .ds-multi td.ds-q{position:sticky; left:0; z-index:1; min-width:270px; white-space:normal; background:var(--panel); border-right:1px solid var(--border); font-size:13px;}
+.ds-multi th.ds-q{background:var(--panel-2);}
+.ds-multi td.ds-q .ds-no{display:inline-block; width:24px; margin-right:6px;}
+.ds-multi tr.ds-sec-row td{font-family:'Oswald',sans-serif; font-size:12.5px; text-transform:uppercase; letter-spacing:0.08em; color:#fff; background:#1f4491; padding:8px 14px;}
+.ds-multi tr.ds-sub-row td{font-family:'Oswald',sans-serif; font-size:11.5px; text-transform:uppercase; letter-spacing:0.06em; color:var(--accent-2); background:var(--panel-2); padding:7px 14px;}
 .field label{display:block; font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--muted); margin-bottom:6px; font-family:'Oswald',sans-serif;}
 .field input, .field select, .field textarea{
   width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text);
@@ -2639,6 +2659,81 @@ async function boot(){
   else if(session){ subscribeUsers(); }
 }
 
+/* ---------------- CUSTOM OPTION ON DROP-DOWNS ----------------
+   Every data-entry drop-down gets a last option "Custom...". Picking it asks for the value,
+   adds it to that drop-down and selects it, so the rest of the app reads it like any other choice.
+   Not added to drop-downs that drive the app itself: anything that acts the moment it changes
+   (status changers, filters, switchers, recalculations), statuses / stages / priorities, roles,
+   employee pickers, leave types, department, paid-by, P.O type and plain Yes/No flags
+   (Yes/No in the valve data sheet is allowed). */
+const CS_VALUE = '__custom__';
+const CS_DENY = /(status|stage|action|role|priority|hold|poreceived|reverse|deadstock|half-day|cleanup|rs-loc|rs-freq|-emp$|acc-type|valvecategory|lv-type|lr-type|dept|paid|potype|-f-type$)/i;
+function csEligible(sel){
+  if(!sel || sel.tagName !== 'SELECT' || sel.multiple || sel.disabled) return false;
+  if(sel.hasAttribute('onchange') || sel.hasAttribute('data-no-custom')) return false;
+  if(sel.classList.contains('status-select') || sel.classList.contains('tt-select')) return false;
+  if(sel.closest('#quote-preview, .table-tools')) return false;
+  const names = ((sel.id || '') + ' ' + (sel.getAttribute('class') || '') + ' ' + (sel.getAttribute('data-cf') || '')).split(/\s+/).filter(Boolean);
+  if(names.some(n => CS_DENY.test(n))) return false;
+  if(!/^(sv|dqv)-/.test(sel.id || '')){
+    const vals = [...sel.options].map(o => o.value).filter(v => v !== '' && v !== CS_VALUE);
+    if(vals.length && vals.every(v => /^(yes|no)$/i.test(v))) return false;
+  }
+  return true;
+}
+function csEnsure(sel){
+  if(!csEligible(sel) || [...sel.options].some(o => o.value === CS_VALUE)) return;
+  const o = document.createElement('option');
+  o.value = CS_VALUE;
+  o.textContent = 'Custom...';
+  sel.appendChild(o);
+}
+function csScan(){ document.querySelectorAll('select').forEach(csEnsure); }
+/* Sets a field's value; a drop-down that does not list the value gets it added (a custom entry). */
+function csSetValue(el, v){
+  if(el && el.tagName === 'SELECT' && v != null && v !== '' && v !== CS_VALUE && ![...el.options].some(o => o.value === v) && csEligible(el)){
+    const o = document.createElement('option');
+    o.value = v;
+    o.textContent = v;
+    el.insertBefore(o, [...el.options].find(x => x.value === CS_VALUE) || null);
+  }
+  el.value = v;
+}
+/* Option list that also contains the saved value when it is a custom one. */
+function csWith(list, v){
+  list = list || [];
+  return (v == null || v === '' || list.some(o => String(o) === String(v))) ? list : [v, ...list];
+}
+(function(){
+  let timer = null;
+  const start = () => {
+    csScan();
+    new MutationObserver(() => {
+      if(timer) return;
+      timer = setTimeout(() => { timer = null; csScan(); }, 60);
+    }).observe(document.body, {childList: true, subtree: true});
+  };
+  if(document.body) start(); else document.addEventListener('DOMContentLoaded', start);
+  document.addEventListener('focusin', e => {
+    if(e.target && e.target.tagName === 'SELECT'){ csEnsure(e.target); e.target.dataset.csPrev = e.target.value; }
+  }, true);
+  document.addEventListener('change', e => {
+    const sel = e.target;
+    if(!sel || sel.tagName !== 'SELECT') return;
+    if(sel.value !== CS_VALUE){ sel.dataset.csPrev = sel.value; return; }
+    e.stopImmediatePropagation();
+    const prev = sel.dataset.csPrev != null ? sel.dataset.csPrev : '';
+    const typed = String(prompt('Enter the custom value:', '') || '').trim();
+    if(!typed || typed === CS_VALUE){
+      sel.value = prev;
+      if(sel.value !== prev) sel.selectedIndex = 0;
+      return;
+    }
+    csSetValue(sel, typed);
+    sel.dataset.csPrev = typed;
+    sel.dispatchEvent(new Event('change', {bubbles: true}));
+  }, true);
+})();
 function loadingValveHtml(){
   return `<svg class="bv-loader" width="150" height="150" viewBox="0 0 120 120" fill="none" stroke="#cfe0ff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Loading">
     <defs><clipPath id="bv-loader-clip"><rect class="bv-reach" x="14" y="62" width="92" height="24"/></clipPath></defs>
@@ -2970,7 +3065,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'SEV7EN v11.89';
+const APP_VERSION_LABEL = 'SEV7EN v11.94';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -3688,7 +3783,7 @@ function restoreDraftRows(box, savedRows){
       const el = els[j];
       if(!el) return;
       if('c' in fv){ el.checked = fv.c; }
-      else { el.value = fv.v; }
+      else { csSetValue(el, fv.v); }
     });
   });
 }
@@ -3716,7 +3811,7 @@ function restoreTabDraft(){
         el.dispatchEvent(new Event('change', { bubbles: true }));   /* shows/hides BOM etc. */
       }
     }else if(el.value !== f.value){
-      el.value = f.value;
+      csSetValue(el, f.value);
     }
   });
   try{ if(typeof updateInLinesTotal === 'function') updateInLinesTotal(); }catch(e){}
@@ -8466,7 +8561,7 @@ function slSection(sid, icon, label, table, opts){
   const head = cols.map(f => `<th>${esc(f.label)}</th>`).join('') + '<th></th>';
   const body = rows.length === 0
     ? `<tr><td colspan="${cols.length + 1}" style="text-align:center; color:var(--muted); padding:18px;">No records yet.</td></tr>`
-    : rows.map(r => `<tr>${cols.map(f => `<td>${slCell(f, r[f.key])}</td>`).join('')}<td>${actionCell(editBtn(table, r.id), deleteBtn(`slDelete('${table}','${r.id}')`))}</td></tr>`).join('');
+    : rows.map(r => `<tr>${cols.map(f => `<td>${slCell(f, r[f.key])}</td>`).join('')}<td>${actionCell((opts.rowActions ? opts.rowActions(r) : '') + editBtn(table, r.id), deleteBtn(`slDelete('${table}','${r.id}')`))}</td></tr>`).join('');
   const form = opts.noForm ? '' : slFormHtml(table, sid, label, opts);
   return secHead(icon, label) + form + `<div class="panel"><div class="panel-head"><h3>${esc(label)} register</h3><div class="panel-head-actions"><span style="color:var(--muted); font-size:12px;">${rows.length} record${rows.length===1?'':'s'}</span></div></div>
   <div class="panel-body table-scroll"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div></div>`;
@@ -8698,21 +8793,285 @@ function enqStampNumbers(d){
     if(r && !String(r.enqNo || '').trim()){ max++; r.enqNo = prefix + String(max).padStart(3, '0'); }
   });
 }
+let valveEnqCategory = '';      /* '' until the user picks Shut-off Valve or Control Valve */
+let VALVE_ENQ_DRAFT = null;     /* keeps typed answers when the category is switched */
+function valveEnqInputHtml(f, id, val, required){
+  const req = required ? ' required' : '';
+  const lbl = `<label>${esc(f.label)}${required ? ' *' : ''}</label>`;
+  if(f.type === 'select'){
+    const opts = f.options || [];
+    const list = (val === '' || opts.includes(val)) ? opts : [val, ...opts];
+    return `<div class="field">${lbl}<select id="${id}"${req}>${list.map(o => `<option value="${esc(o)}" ${o === val ? 'selected' : ''}>${o === '' ? 'Select' : esc(o)}</option>`).join('')}</select></div>`;
+  }
+  if(f.suggest){
+    return `<div class="field">${lbl}<input type="text" id="${id}" list="${id}-dl" value="${esc(val)}" autocomplete="off" placeholder="Select or type"${req}><datalist id="${id}-dl">${f.suggest.map(o => `<option value="${esc(o)}"></option>`).join('')}</datalist></div>`;
+  }
+  const t = f.type === 'date' ? 'date' : (f.type === 'number' ? 'number' : 'text');
+  return `<div class="field">${lbl}<input type="${t}" id="${id}" value="${esc(val)}"${t === 'number' ? ' step="any"' : ''}${req}></div>`;
+}
+/* ---- Valve enquiry data sheet: View / Print (same overlay as the quotation preview) ---- */
+let previewValveSheetId = null;
+function valveSheetDocHtml(rec){
+  const cat = VALVE_CATS.includes(rec.valveCategory) ? rec.valveCategory : '';
+  const items = valveEnqItems(rec);
+  const fields = valveEnqItemFields(cat);
+  const CAP = ['At Minimum Capacity', 'At Normal Capacity', 'At Maximum Capacity'];
+  const per = items.length <= 4 ? 4 : 6;                       /* valves per table */
+  const td = "border:1px solid #555; padding:3px 6px; vertical-align:top; font-family:'IBM Plex Sans',Arial,sans-serif; font-size:10.5px; text-transform:none; letter-spacing:0; color:inherit;";
+  const show = (f, v) => { v = v == null ? '' : String(v); return f.type === 'date' ? (fd(v) || '') : esc(v); };
+  const head = valveEnqHeadFields(cat).map(f =>
+    `<td style="${td} width:16%; background:#eef1f6; font-weight:600;">${esc(f.label.replace(' (login name)', ''))}</td><td style="${td} width:17%;">${show(f, rec[f.key])}</td>`);
+  let headRows = '';
+  for(let i = 0; i < head.length; i += 3) headRows += `<tr>${head.slice(i, i + 3).join('')}</tr>`;
+  let tables = '';
+  for(let start = 0; start < items.length; start += per){
+    const chunk = items.slice(start, start + per);
+    const secNo = {};
+    let rows = '', lastSec = null;
+    fields.forEach(f => {
+      if(f.sec !== lastSec){
+        lastSec = f.sec;
+        const sub = CAP.includes(f.sec);
+        if(sub) secNo[f.sec] = 0;
+        if(sub || !secNo[f.sec]) rows += `<tr><td colspan="${chunk.length + 1}" style="${td} font-weight:700; ${sub ? 'background:#eef1f6; color:#1f4491;' : 'background:#1f4491; color:#fff; letter-spacing:0.04em;'} -webkit-print-color-adjust:exact; print-color-adjust:exact;">${esc(sub ? f.sec : f.sec.toUpperCase())}</td></tr>`;
+      }
+      secNo[f.sec] = (secNo[f.sec] || 0) + 1;
+      rows += `<tr style="break-inside:avoid;"><td style="${td} width:${chunk.length > 2 ? 30 : 42}%;">${secNo[f.sec]}. ${esc(f.label)}</td>${chunk.map(it => `<td style="${td}">${show(f, it[f.key])}</td>`).join('')}</tr>`;
+    });
+    tables += `<table style="width:100%; border-collapse:collapse; margin-top:12px; ${start ? 'break-before:page;' : ''}">
+      <thead style="display:table-header-group;"><tr><th style="${td} background:#dfe5f0; text-align:left;">Question</th>${chunk.map((it, i) => `<th style="${td} background:#dfe5f0; text-align:left;">Valve ${start + i + 1}${it.tagNo ? ' &mdash; ' + esc(it.tagNo) : ''}</th>`).join('')}</tr></thead>
+      <tbody>${rows}</tbody></table>`;
+  }
+  return `<div class="quote-sheet" style="background:#fff; color:#111; margin:0 auto; padding:26px 28px; font-family:'IBM Plex Sans',Arial,sans-serif; font-size:11px; line-height:1.35;">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; border-bottom:2px solid #1f4491; padding-bottom:10px;">
+      <img src="${quoteLogoUri(currentLocation)}" alt="" style="height:46px; max-width:220px; object-fit:contain;">
+      <div style="text-align:right;"><div style="font-size:16px; font-weight:700; letter-spacing:0.04em;">${esc((cat || 'Valve').toUpperCase())} ENQUIRY DATA SHEET</div>
+      <div style="margin-top:2px; color:#444;">${esc(rec.enqNo || '')} &middot; ${items.length} valve${items.length === 1 ? '' : 's'}</div></div>
+    </div>
+    <table style="width:100%; border-collapse:collapse; margin-top:12px;"><tbody>${headRows}</tbody></table>
+    ${tables}
+  </div>`;
+}
+function openValveSheetPreview(id){
+  const d = DATA[currentLocation];
+  const r = (d.valveEnquiries || []).find(x => x && x.id === id);
+  if(!r) return;
+  closeQuotePreview();
+  previewValveSheetId = id;
+  const overlay = document.createElement('div');
+  overlay.id = 'quote-preview';
+  overlay.innerHTML = `
+    <div class="quote-actions">
+      <button type="button" class="btn" onclick="printValveSheet()">&#128424; Print / Save as PDF</button>
+      <button type="button" class="btn quote-close-btn" onclick="closeQuotePreview()">&#10005; Close</button>
+    </div>
+    ${valveSheetDocHtml(r)}`;
+  document.body.appendChild(overlay);
+  const pageStyle = document.createElement('style');
+  pageStyle.id = 'quote-page-style';
+  pageStyle.textContent = '@page{ size: A4 ' + (valveEnqItems(r).length > 4 ? 'landscape' : 'portrait') + '; margin: 10mm; }';
+  document.head.appendChild(pageStyle);
+  document.body.classList.add('quote-open');
+}
+function printValveSheet(){
+  const d = DATA[currentLocation];
+  const r = previewValveSheetId ? (d.valveEnquiries || []).find(x => x && x.id === previewValveSheetId) : null;
+  const oldTitle = document.title;
+  document.title = r ? ('Enquiry Data Sheet - ' + (r.enqNo || '') + (r.customer ? ' - ' + r.customer : '')) : 'Enquiry Data Sheet';
+  const restore = () => { document.title = oldTitle; window.removeEventListener('afterprint', restore); };
+  window.addEventListener('afterprint', restore);
+  window.print();
+  setTimeout(restore, 3000);
+}
+function valveSheetViewBtn(id){
+  return `<button type="button" class="icon-btn" onclick="openValveSheetPreview('${esc(id)}')">View / Print</button>`;
+}
+let valveEnqEditId = null;      /* id of the enquiry being edited in the sheet, or null for a new one */
+function valveEnqBareInput(f, id, val, required, disabled){
+  /* the same input valveEnqInputHtml builds, without its label and wrapper */
+  let h = valveEnqInputHtml(f, id, val, required)
+    .replace(/^<div class="field"><label>[\s\S]*?<\/label>/, '').replace(/<\/div>$/, '');
+  if(disabled) h = h.replace(/<(input|select) /, '<$1 disabled ');
+  return h;
+}
+/* The data sheet as a table: one row per question, one column per valve. Input ids: <pfx>-<key>-<column>. */
+function valveSheetTableHtml(pfx, cat, items, opts){
+  opts = opts || {};
+  const fields = valveEnqItemFields(cat);
+  const n = Math.max(1, items.length);
+  const CAP = ['At Minimum Capacity', 'At Normal Capacity', 'At Maximum Capacity'];
+  const secNo = {};
+  let rows = '', lastSec = null;
+  fields.forEach(f => {
+    if(f.sec !== lastSec){
+      lastSec = f.sec;
+      const sub = CAP.includes(f.sec);
+      if(sub) secNo[f.sec] = 0;
+      if(sub || !secNo[f.sec]) rows += `<tr class="${sub ? 'ds-sub-row' : 'ds-sec-row'}"><td colspan="${n + 1}">${esc(f.sec)}</td></tr>`;
+    }
+    secNo[f.sec] = (secNo[f.sec] || 0) + 1;
+    let cells = '';
+    for(let i = 0; i < n; i++){
+      const it = items[i] || {};
+      const val = it[f.key] == null ? '' : String(it[f.key]);
+      cells += `<td><div class="field ds-a">${valveEnqBareInput(f, `${pfx}-${f.key}-${i}`, val, false, opts.disabled)}</div></td>`;
+    }
+    rows += `<tr><td class="ds-q"><span class="ds-no">${secNo[f.sec]}.</span> ${esc(f.label)}</td>${cells}</tr>`;
+  });
+  let head = '';
+  for(let i = 0; i < n; i++){
+    head += `<th>Valve ${i + 1}${opts.editable && n > 1 ? ` <button type="button" class="icon-btn" style="margin-left:6px;" title="Remove this valve" onclick="valveEnqRemoveValve(${i})">&#10005;</button>` : ''}</th>`;
+  }
+  return `<div class="ds-table-wrap"><table class="ds-table ds-multi" id="${pfx}-sheet" data-cat="${esc(cat || '')}" data-n="${n}">
+    <thead><tr><th class="ds-q">Question</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+/* Reads every valve column back from a rendered sheet. Returns null if that sheet is not on screen. */
+function valveSheetRead(pfx){
+  const t = document.getElementById(pfx + '-sheet');
+  if(!t) return null;
+  const fields = valveEnqItemFields(t.dataset.cat || ''), n = parseInt(t.dataset.n, 10) || 1, items = [];
+  for(let i = 0; i < n; i++){
+    const it = {};
+    fields.forEach(f => { const el = document.getElementById(`${pfx}-${f.key}-${i}`); if(el) it[f.key] = (el.value || '').trim(); });
+    items.push(it);
+  }
+  return items;
+}
+function valveEnqItemBlank(it){ return !Object.keys(it || {}).some(k => String(it[k] == null ? '' : it[k]).trim() !== ''); }
+/* Everything typed so far (Enquiry Details + all valve columns), so re-drawing the sheet loses nothing. */
+function valveEnqCapture(){
+  const prev = VALVE_ENQ_DRAFT || {head: {}, items: [{}]};
+  const read = valveSheetRead('sv');
+  if(!read) return prev;
+  const head = {};
+  valveEnqHeadFields('').forEach(f => { const el = document.getElementById('sf-valve-' + f.key); if(el) head[f.key] = el.value; });
+  return {head: head, items: read.map((it, i) => Object.assign({}, (prev.items || [])[i] || {}, it))};
+}
+function switchValveEnqCategory(cat){
+  VALVE_ENQ_DRAFT = valveEnqCapture();
+  valveEnqCategory = VALVE_CATS.includes(cat) ? cat : '';
+  render();
+}
+function valveEnqAddValve(copyLast){
+  const dr = valveEnqCapture();
+  const last = dr.items[dr.items.length - 1] || {};
+  dr.items.push(copyLast ? Object.assign({}, last, {tagNo: ''}) : {});
+  VALVE_ENQ_DRAFT = dr;
+  render();
+}
+function valveEnqRemoveValve(i){
+  const dr = valveEnqCapture();
+  if(dr.items.length <= 1) return;
+  if(!valveEnqItemBlank(dr.items[i]) && !confirm('Remove Valve ' + (i + 1) + ' and its answers?')) return;
+  dr.items.splice(i, 1);
+  VALVE_ENQ_DRAFT = dr;
+  render();
+}
+/* Register > Edit: loads the enquiry (all its valves) back into the sheet. */
+function valveEnqOpenEdit(id){
+  const d = DATA[currentLocation];
+  const rec = (d.valveEnquiries || []).find(x => x && x.id === id);
+  if(!rec || !slVisible(rec)) return false;
+  const head = {};
+  valveEnqHeadFields('').forEach(f => { head[f.key] = rec[f.key] == null ? '' : String(rec[f.key]); });
+  VALVE_ENQ_DRAFT = {head: head, items: valveEnqItems(rec).map(it => Object.assign({}, it))};
+  valveEnqEditId = id;
+  valveEnqCategory = VALVE_CATS.includes(rec.valveCategory) ? rec.valveCategory : '';
+  enquirySection = 'valve';
+  render();
+  const el = document.getElementById('valve-enq-form');
+  if(el && el.scrollIntoView) el.scrollIntoView({behavior: 'smooth', block: 'start'});
+  return true;
+}
+function valveEnqCancelEdit(){ valveEnqEditId = null; VALVE_ENQ_DRAFT = null; render(); }
+function valveEnqFormHtml(nextNo){
+  const d = DATA[currentLocation];
+  const editing = valveEnqEditId ? (d.valveEnquiries || []).find(x => x && x.id === valveEnqEditId) : null;
+  if(valveEnqEditId && !editing) valveEnqEditId = null;
+  if(!valveEnqCategory && !editing){
+    return `<div class="panel"><div class="panel-body"><p style="margin:0; font-size:13px; color:var(--muted);">Select a <b>Valve category</b> above (Shut-off Valve or Control Valve) to open its enquiry data sheet.</p></div></div>`;
+  }
+  const dr = VALVE_ENQ_DRAFT || {head: {}, items: [{}]};
+  const required = {customer: true, date: true};
+  const headRows = valveEnqHeadFields(valveEnqCategory).map((f, i) => {
+    const id = 'sf-valve-' + f.key;
+    const v = dr.head[f.key];
+    let input;
+    if(f.key === 'enqNo') input = `<input type="text" id="${id}" value="${esc(editing ? (editing.enqNo || '') : nextNo)}" readonly style="background:var(--panel-2); color:var(--accent-2); font-weight:600; cursor:not-allowed;">`;
+    else if(f.key === 'salesPerson') input = `<input type="text" id="${id}" value="${esc(v != null && v !== '' ? v : actorLogin())}"${isAdmin() ? '' : ' readonly style="opacity:.75;"'}>`;
+    else input = valveEnqBareInput(f, id, v != null ? String(v) : (f.key === 'date' ? today() : ''), !!required[f.key]);
+    return `<div class="ds-row"><span class="ds-no">${i + 1}.</span><label class="ds-q" for="${id}">${esc(f.label)}${required[f.key] ? ' *' : ''}</label><div class="field ds-a">${input}</div></div>`;
+  }).join('');
+  const n = Math.max(1, dr.items.length);
+  const title = editing ? `Edit enquiry ${esc(editing.enqNo || '')} &mdash; ${esc(valveEnqCategory || 'Valve')} data sheet` : `${esc(valveEnqCategory)} enquiry data sheet`;
+  return `<div class="panel" id="valve-enq-form"><div class="panel-head"><h3>${title}</h3>${editing ? `<div class="panel-head-actions">${valveSheetViewBtn(editing.id)}<button type="button" class="export-btn" style="background:var(--muted);" onclick="valveEnqCancelEdit()">Cancel Edit</button></div>` : ''}</div>
+  <div class="panel-body">
+  <form onsubmit="return valveEnqAdd(event)">
+    <div class="ds-sheet"><div class="ds-sec">${VALVE_HEAD_SEC}</div><div class="ds-rows">${headRows}</div></div>
+    <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:14px 0 8px 0;">
+      <span style="font-size:13px; color:var(--muted); margin-right:auto;">${n} valve${n === 1 ? '' : 's'} in this enquiry &mdash; each column is one valve.</span>
+      <button type="button" class="btn btn-ghost" onclick="valveEnqAddValve(false)">+ Add valve</button>
+      <button type="button" class="btn btn-ghost" onclick="valveEnqAddValve(true)">+ Copy last valve</button>
+    </div>
+    <div class="ds-sheet">${valveSheetTableHtml('sv', valveEnqCategory, dr.items, {editable: true})}</div>
+    <div style="margin-top:14px;"><button type="submit" class="btn">${editing ? 'Save changes' : 'Save entry'}</button></div>
+  </form>
+  </div></div>`;
+}
+async function valveEnqAdd(e){
+  e.preventDefault();
+  const d = DATA[currentLocation];
+  d.valveEnquiries = d.valveEnquiries || [];
+  const dr = valveEnqCapture();
+  let items = dr.items.filter(it => !valveEnqItemBlank(it));
+  if(!items.length) items = [dr.items[0] || {}];
+  const head = {};
+  Object.keys(dr.head).forEach(k => { head[k] = String(dr.head[k] == null ? '' : dr.head[k]).trim(); });
+  let rec = valveEnqEditId ? d.valveEnquiries.find(x => x && x.id === valveEnqEditId) : null;
+  if(rec && !slVisible(rec)) return false;
+  if(rec){
+    delete head.enqNo;
+    Object.assign(rec, head);
+  } else {
+    rec = Object.assign({id: uid()}, head);
+    if(!rec.salesPerson) rec.salesPerson = actorName();
+    rec.addedBy = actorName();
+    rec.addedByLogin = actorLogin();
+    d.valveEnquiries.push(rec);
+  }
+  if(valveEnqCategory) rec.valveCategory = valveEnqCategory;
+  rec.items = items;
+  valveEnqSync(rec);
+  valveEnqEditId = null;
+  VALVE_ENQ_DRAFT = null;
+  await saveLocation(currentLocation);
+  render();
+  return false;
+}
+const VALVE_ENQ_LIST_COLS = ['enqNo','date','customer','region','followUp','valveCategory','valveCount','tagNo','valveType','valveSize','application','qty','salesPerson'];
 function enquiryFormSectionHtml(){
   const d = DATA[currentLocation];
   ['valveEnquiries','pumpEnquiries'].forEach(k => { if(!Array.isArray(d[k])) d[k] = []; });
   enqStampNumbers(d);
   const cols = t => (EDIT_SCHEMAS[t] || []).map(f => f.key);
   const isPump = enquirySection === 'pump';
-  const inner = isPump
-    ? slSection('pump', '&#9881;', 'Pump', 'pumpEnquiries', {formKeys: cols('pumpEnquiries'), cols: cols('pumpEnquiries')})
-    : slSection('valve', '&#9881;', 'Valve', 'valveEnquiries', {formKeys: cols('valveEnquiries'), cols: cols('valveEnquiries')});
-  let body = inner.replace(/<div class="sec-head">[\s\S]*?<\/div>/, '');
-  /* Show the auto-generated number inside the Enquiry No. input and lock it. */
   const nextNo = enqNextNumber(d);
-  body = body.replace(/<input([^>]*\bid="[^"]*enqNo[^"]*"[^>]*)>/, (m, attrs) =>
-    `<input${attrs.replace(/\svalue="[^"]*"/, '')} value="${esc(nextNo)}" readonly style="background:var(--panel-2); color:var(--accent-2); font-weight:600; cursor:not-allowed;">`);
-  const picker = `<div class="field" style="max-width:260px; margin-bottom:14px;"><label>Enquiry for *</label><select onchange="switchEnquirySection(this.value)" style="border:2px solid #1f4491; font-weight:600; color:#1f4491;"><option value="valve" ${isPump?'':'selected'}>Valve</option><option value="pump" ${isPump?'selected':''}>Pump</option></select></div>`;
+  const stripHead = h => h.replace(/<div class="sec-head">[\s\S]*?<\/div>/, '');
+  let body;
+  if(isPump){
+    body = stripHead(slSection('pump', '&#9881;', 'Pump', 'pumpEnquiries', {formKeys: cols('pumpEnquiries'), cols: cols('pumpEnquiries')}));
+    /* Show the auto-generated number inside the Enquiry No. input and lock it. */
+    body = body.replace(/<input([^>]*\bid="[^"]*enqNo[^"]*"[^>]*)>/, (m, attrs) =>
+      `<input${attrs.replace(/\svalue="[^"]*"/, '')} value="${esc(nextNo)}" readonly style="background:var(--panel-2); color:var(--accent-2); font-weight:600; cursor:not-allowed;">`);
+  } else {
+    body = valveEnqFormHtml(nextNo)
+      + stripHead(slSection('valve', '&#9881;', 'Valve', 'valveEnquiries', {noForm: true, cols: VALVE_ENQ_LIST_COLS, rowActions: r => valveSheetViewBtn(r.id)}));
+  }
+  const pickStyle = 'border:2px solid #1f4491; font-weight:600; color:#1f4491;';
+  const picker = `<div style="display:flex; gap:14px; flex-wrap:wrap; margin-bottom:14px;">
+    <div class="field" style="width:260px; max-width:100%;"><label>Enquiry for *</label><select onchange="switchEnquirySection(this.value)" style="${pickStyle}"><option value="valve" ${isPump?'':'selected'}>Valve</option><option value="pump" ${isPump?'selected':''}>Pump</option></select></div>
+    ${isPump ? '' : `<div class="field" style="width:260px; max-width:100%;"><label>Valve category *</label><select onchange="switchValveEnqCategory(this.value)" style="${pickStyle}"><option value="">Select</option>${VALVE_CATS.map(c => `<option value="${esc(c)}" ${valveEnqCategory === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>`}
+  </div>`;
   return secHead('&#127919;', 'Enquiry Form')
     + picker
     + body;
@@ -10994,7 +11353,7 @@ function pillColorClass(val){
   return map[val] || '';
 }
 function formSelect(fieldId, options, defaultVal, includeBlank){
-  const opts = includeBlank ? ['', ...options] : options;
+  const opts = csWith(includeBlank ? ['', ...options] : options, defaultVal);
   return `<select id="${fieldId}">
     ${opts.map(o=>`<option value="${esc(o)}" ${defaultVal===o?'selected':''}>${o===''?'Select':esc(o)}</option>`).join('')}
   </select>`;
@@ -11199,6 +11558,14 @@ async function enqDeskSave(id, submit){
   }
   const r = f.rec;
   Object.assign(r, vals);
+  if(f.table === 'valveEnquiries'){
+    const read = valveSheetRead('dqv');
+    if(read){
+      const old = valveEnqItems(r);
+      r.items = read.map((it, i) => Object.assign({}, old[i] || {}, it));
+      valveEnqSync(r);
+    }
+  }
   r.deskNote = note;
   if(submit){
     r.deskStatus = 'Submitted';
@@ -11251,7 +11618,11 @@ function quoteFromDeskEnquiry(id){
     quoteNumber: nextQuoteNumber(d),
     rfqRef: str(r.enqNo),
     rfqDate: str(r.date),
-    items: [item]
+    items: f.table === 'valveEnquiries' ? valveEnqItems(r).map(v => ({
+      qty: str(v.qty), valveType: str(v.valveType), valveSize: str(v.valveSize),
+      body: str(v.bodyMoc), ballDisc: str(v.discMoc), seat: str(v.seatMoc),
+      bodyEnds: str(v.endConnection), leakageClass: str(v.seatLeakageClass)
+    })) : [item]
   };
   currentTab = 'salesdesk';
   salesDeskSection = 'quotation';
@@ -11303,15 +11674,18 @@ function enqReviewHtml(f){
   const r = f.rec;
   const can = enqDeskCanEdit(r);
   const required = {customer: true, date: true};
-  const fields = (EDIT_SCHEMAS[f.table] || []).map(fld =>
-    dqInputHtml(fld, r[fld.key] == null ? '' : String(r[fld.key]), !can, !!required[fld.key])).join('');
+  const isValveEnq = f.table === 'valveEnquiries';
+  const reviewSchema = isValveEnq ? valveEnqFields(r.valveCategory).filter(x => x.sec === VALVE_HEAD_SEC) : (EDIT_SCHEMAS[f.table] || []);
+  const valveSheet = isValveEnq ? `<div class="ds-sheet" style="margin-top:14px;">${valveSheetTableHtml('dqv', r.valveCategory, valveEnqItems(r), {disabled: !can})}</div>` : '';
+  const fields = reviewSchema.map((fld, fi) => schemaSecHead(reviewSchema, fi)
+    + dqInputHtml(fld, r[fld.key] == null ? '' : String(r[fld.key]), !can, !!required[fld.key])).join('');
   const holdOpts = ENQ_DESK_HOLDS.map(o =>
     `<option value="${o}" ${(r.deskHold || '') === o ? 'selected' : ''}>${o || 'In progress (no hold)'}</option>`).join('');
   const dis = can ? '' : ' disabled';
   const holdDis = (can && r.deskStatus === 'In Progress') ? '' : ' disabled';
   return `${secHead('&#128269;', 'Review ' + (r.enqNo || 'enquiry'))}
   <div class="panel"><div class="panel-head"><h3>${esc(enqDeskTypeLabel(f.table))} enquiry &mdash; ${esc(r.customer || '')}</h3>
-    <div class="panel-head-actions"><button type="button" class="icon-btn" onclick="enqDeskBack()">&larr; Back</button></div></div>
+    <div class="panel-head-actions">${isValveEnq ? valveSheetViewBtn(r.id) : ''}<button type="button" class="icon-btn" onclick="enqDeskBack()">&larr; Back</button></div></div>
   <div class="panel-body">
     <div style="margin-bottom:12px; color:var(--muted); font-size:12px;">
       Entered by ${esc(r.addedBy || '-')}
@@ -11319,6 +11693,7 @@ function enqReviewHtml(f){
     </div>
     ${can ? '' : '<div style="margin-bottom:12px; color:var(--muted); font-size:12px;">Read-only: this enquiry is not assigned to you.</div>'}
     <div class="form-grid">${fields}</div>
+    ${valveSheet}
     <div class="form-grid" style="margin-top:14px;">${DESK_FIELDS.map(fld => dqInputHtml(fld, r[fld.key] == null ? '' : String(r[fld.key]), !can, false)).join('')}</div>
     <div class="form-grid" style="margin-top:14px;">
       <div class="field"><label>Status</label><select id="dq-hold"${holdDis}>${holdOpts}</select></div>
@@ -11905,7 +12280,7 @@ function pfItemLineHtml(it){
     <input type="text" class="pf-line-desc" placeholder="Description of goods" value="${esc(it.description||'')}" style="flex:3 1 240px; min-width:200px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:'IBM Plex Sans',sans-serif; font-size:13px; border-radius:4px;">
     <input type="text" class="pf-line-hsn" placeholder="HSN/SAC" value="${esc(it.hsnSac||'')}" style="flex:1 1 90px; min-width:80px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:'IBM Plex Mono',monospace; font-size:12.5px; border-radius:4px;">
     <input type="number" class="out-line-qty pf-line-qty" step="any" min="0" placeholder="Qty" value="${esc(it.qty||'')}" oninput="pfRecalc()">
-    <select class="pf-line-uom" style="background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 8px; font-family:'IBM Plex Sans',sans-serif; font-size:12.5px; border-radius:4px;">${SA_UOMS.map(u=>`<option value="${u}" ${it.uom===u?'selected':''}>${u}</option>`).join('')}</select>
+    <select class="pf-line-uom" style="background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 8px; font-family:'IBM Plex Sans',sans-serif; font-size:12.5px; border-radius:4px;">${csWith(SA_UOMS, it.uom).map(u=>`<option value="${esc(u)}" ${it.uom===u?'selected':''}>${esc(u)}</option>`).join('')}</select>
     <input type="number" class="pf-line-rate" step="0.01" min="0" placeholder="Rate" value="${esc(it.rate||'')}" oninput="pfRecalc()" style="flex:0 1 110px; min-width:90px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:'IBM Plex Mono',monospace; font-size:12.5px; border-radius:4px;">
     <input type="number" class="pf-line-amount" step="0.01" placeholder="Amount" readonly tabindex="-1" style="flex:0 1 120px; min-width:100px; background:var(--bg); border:1px solid var(--border); color:var(--muted); padding:9px 10px; font-family:'IBM Plex Mono',monospace; font-size:12.5px; border-radius:4px;">
     <button type="button" class="icon-btn out-line-remove" onclick="removePfItemLine(this)" title="Remove this item">&#10005;</button>
@@ -12290,7 +12665,7 @@ function paItemLineHtml(it){
     <input type="text" class="pa-line-desc" placeholder="Description of item / commodity" value="${esc(it.description||'')}" style="flex:3 1 240px; min-width:200px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:'IBM Plex Sans',sans-serif; font-size:13px; border-radius:4px;">
     <input type="text" class="pa-line-hsn" placeholder="HSN/SAC" value="${esc(it.hsnSac||'')}" style="flex:1 1 90px; min-width:80px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:'IBM Plex Mono',monospace; font-size:12.5px; border-radius:4px;">
     <input type="number" class="out-line-qty pa-line-qty" step="any" min="0" placeholder="Qty" value="${esc(it.qty||'')}" oninput="paRecalc()">
-    <select class="pa-line-uom" style="background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 8px; font-family:'IBM Plex Sans',sans-serif; font-size:12.5px; border-radius:4px;">${SA_UOMS.map(u=>`<option value="${u}" ${it.uom===u?'selected':''}>${u}</option>`).join('')}</select>
+    <select class="pa-line-uom" style="background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 8px; font-family:'IBM Plex Sans',sans-serif; font-size:12.5px; border-radius:4px;">${csWith(SA_UOMS, it.uom).map(u=>`<option value="${esc(u)}" ${it.uom===u?'selected':''}>${esc(u)}</option>`).join('')}</select>
     <input type="number" class="pa-line-rate" step="0.01" min="0" placeholder="Unit Price" value="${esc(it.rate||'')}" oninput="paRecalc()" style="flex:0 1 110px; min-width:90px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:'IBM Plex Mono',monospace; font-size:12.5px; border-radius:4px;">
     <input type="number" class="pa-line-amount" step="0.01" placeholder="Amount" readonly tabindex="-1" style="flex:0 1 120px; min-width:100px; background:var(--bg); border:1px solid var(--border); color:var(--muted); padding:9px 10px; font-family:'IBM Plex Mono',monospace; font-size:12.5px; border-radius:4px;">
     <button type="button" class="icon-btn out-line-remove" onclick="removePaItemLine(this)" title="Remove this item">&#10005;</button>
@@ -12593,7 +12968,7 @@ function saItemLineHtml(it){
     <input type="text" class="sa-line-desc" placeholder="Description of goods" value="${esc(it.description||'')}" style="flex:3 1 240px; min-width:200px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:'IBM Plex Sans',sans-serif; font-size:13px; border-radius:4px;">
     <input type="text" class="sa-line-hsn" placeholder="HSN/SAC" value="${esc(it.hsnSac||'')}" style="flex:1 1 90px; min-width:80px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:'IBM Plex Mono',monospace; font-size:12.5px; border-radius:4px;">
     <input type="number" class="out-line-qty sa-line-qty" step="any" min="0" placeholder="Qty" value="${esc(it.qty||'')}" oninput="saRecalc()">
-    <select class="sa-line-uom" style="background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 8px; font-family:'IBM Plex Sans',sans-serif; font-size:12.5px; border-radius:4px;">${SA_UOMS.map(u=>`<option value="${u}" ${it.uom===u?'selected':''}>${u}</option>`).join('')}</select>
+    <select class="sa-line-uom" style="background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 8px; font-family:'IBM Plex Sans',sans-serif; font-size:12.5px; border-radius:4px;">${csWith(SA_UOMS, it.uom).map(u=>`<option value="${esc(u)}" ${it.uom===u?'selected':''}>${esc(u)}</option>`).join('')}</select>
     <input type="number" class="sa-line-rate" step="0.01" min="0" placeholder="Rate" value="${esc(it.rate||'')}" oninput="saRecalc()" style="flex:0 1 110px; min-width:90px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:'IBM Plex Mono',monospace; font-size:12.5px; border-radius:4px;">
     <input type="number" class="sa-line-amount" step="0.01" placeholder="Amount" readonly tabindex="-1" style="flex:0 1 120px; min-width:100px; background:var(--bg); border:1px solid var(--border); color:var(--muted); padding:9px 10px; font-family:'IBM Plex Mono',monospace; font-size:12.5px; border-radius:4px;">
     <button type="button" class="icon-btn out-line-remove" onclick="removeSaItemLine(this)" title="Remove this item">&#10005;</button>
@@ -14194,38 +14569,143 @@ function renderReports(){
 }
 
 /* ---------------- EDIT RECORD MODAL (available to all users) ---------------- */
-const EDIT_SCHEMAS = {
-  valveEnquiries: [
-    {key:'enqNo', label:'Enquiry No.', type:'text'},
+/* Valve enquiry data sheets (Sales tab > Enquiry Form > Valve).
+   only:'S' = Shut-off valve sheet only, only:'C' = Control valve sheet only, none = both.
+   suggest = pick-or-type list. Old enquiries (no category) show every field. */
+const VALVE_CATS = ['Shut-off Valve', 'Control Valve'];
+const VALVE_ENQ_SCHEMA = (() => {
+  const YN = ['', 'Yes', 'No'], HAZ = ['', 'Safe Area', 'Explosion Proof'];
+  const out = [];
+  const add = (sec, only, list) => list.forEach(f => out.push(Object.assign({type:'text', sec:sec}, only ? {only:only} : {}, f)));
+  add('Enquiry Details', '', [
+    {key:'enqNo', label:'Enquiry No.'},
     {key:'date', label:'Date', type:'date'},
-    {key:'customer', label:'Customer', type:'text'},
-    {key:'region', label:'Region', type:'text'},
+    {key:'customer', label:'Customer'},
+    {key:'region', label:'Region'},
     {key:'followUp', label:'Due date', type:'date'},
-    {key:'application', label:'Application', type:'text'},
+    {key:'salesPerson', label:'Sales Person (login name)'},
+    {key:'valveCategory', label:'Valve Category', type:'select', options:['', ...VALVE_CATS]},
+    {key:'valveCount', label:'No. of Valves', derived:true}
+  ]);
+  add('Section 1 - General Information', '', [
+    {key:'tagNo', label:'Valve Tag No.'},
     {key:'valveType', label:'Valve Type', type:'select', options:['', ...VALVE_TYPES]},
-    {key:'valveSize', label:'Valve Size', type:'select', options:['', ...VALVE_SIZES]},
-    {key:'bodyMoc', label:'Body MOC', type:'text'},
-    {key:'discMoc', label:'Disc MOC', type:'text'},
-    {key:'seatMoc', label:'Seat MOC', type:'text'},
-    {key:'endConnection', label:'End Connection', type:'text'},
-    {key:'media', label:'Media', type:'text'},
-    {key:'mediaType', label:'Media Type', type:'text'},
-    {key:'operatingTemp', label:'Operating Temperature', type:'text'},
-    {key:'seatLeakageClass', label:'Seat Leakage Class', type:'text'},
-    {key:'operationPressure', label:'Operation Pressure', type:'text'},
-    {key:'operationType', label:'Operation Type', type:'text'},
-    {key:'actuatorType', label:'Actuator Type', type:'text'},
-    {key:'positionerRequired', label:'Positioner Required', type:'select', options:['','Yes','No']},
-    {key:'airFailPosition', label:'Air Fail Position', type:'select', options:['','Fail Open','Fail Close','Fail Last']},
-    {key:'airSupplyAvailable', label:'Air Supply Available', type:'select', options:['','Yes','No']},
-    {key:'mor', label:'MOR', type:'text'},
-    {key:'afrRequired', label:'AFR Required', type:'select', options:['','Yes','No']},
-    {key:'limitSwitch', label:'Limit Switches', type:'select', options:['','Proximity Sensor','Micro Switch','Custom']},
-    {key:'limitSwitchCustom', label:'Limit Switch (custom)', type:'text'},
-    {key:'solenoidValve', label:'Solenoid Valve', type:'select', options:['','Yes','No']},
-    {key:'qty', label:'Qty', type:'number'},
-    {key:'salesPerson', label:'Sales Person (login name)', type:'text'}
-  ],
+    {key:'application', label:'Application / Service'},
+    {key:'pipelineSize', label:'Pipeline Size (mm)'},
+    {key:'pipelineMoc', label:'Pipeline MOC'},
+    {key:'valveSize', label:'Valve Size (mm)'},
+    {key:'qty', label:'Quantity', type:'number'},
+    {key:'earlierPoRef', label:'Earlier PO Reference'}
+  ]);
+  add('Section 2 - Process Conditions', '', [
+    {key:'media', label:'Media / Fluid Name'},
+    {key:'mediaType', label:'Media Type / Phase'},
+    {key:'concentration', label:'Concentration (%)'},
+    {key:'specificGravity', label:'Specific Gravity / Density'},
+    {key:'viscosity', label:'Viscosity (cP)'},
+    {key:'solidContent', label:'Solid Content (%)'},
+    {key:'flowDirection', label:'Direction of Flow', type:'select', options:['', 'Bidirectional', 'Unidirectional']},
+    {key:'mountingPosition', label:'Mounting Position', type:'select', options:['', 'Horizontal', 'Vertical']},
+    {key:'cyclesPerDay', label:'Operating Cycles per Day'}
+  ]);
+  add('Section 2 - Process Conditions', 'S', [
+    {key:'operatingTemp', label:'Working / Operating Temperature (Deg. C)'},
+    {key:'operationPressure', label:'Working / Operating Pressure (Kg/cm²)'}
+  ]);
+  [['Min', 'At Minimum Capacity'], ['Nor', 'At Normal Capacity'], ['Max', 'At Maximum Capacity']].forEach(c =>
+    add(c[1], 'C', [
+      {key:'cap' + c[0] + 'Flow', label:'Flow (m³/hr)'},
+      {key:'cap' + c[0] + 'InletP', label:'Inlet Pressure (Kg/cm²)'},
+      {key:'cap' + c[0] + 'OutletP', label:'Outlet Pressure (Kg/cm²)'},
+      {key:'cap' + c[0] + 'Temp', label:'Temperature (Deg. C)'},
+      {key:'cap' + c[0] + 'DiffP', label:'OR Differential Pressure (Kg/cm²)'}
+    ]));
+  add('Section 3 - Valve Construction', '', [
+    {key:'bodyMoc', label:'Body MOC'},
+    {key:'discMoc', label:'Disc / Ball / Plug / Gate MOC', labelC:'Disc / Ball / Plug / Cage MOC'},
+    {key:'seatMoc', label:'Seat MOC'},
+    {key:'stemMoc', label:'Stem MOC'},
+    {key:'endConnection', label:'End Connection'},
+    {key:'pressureRating', label:'Pressure Rating'},
+    {key:'seatLeakageClass', label:'Leakage Class'},
+    {key:'specialDesign', label:'Any Special Design Requirements'}
+  ]);
+  add('Section 4 - Actuation Requirements', '', [
+    {key:'operationType', label:'Type of Operation', suggest:['Manual', 'Pneumatic', 'Electric', 'Hydraulic']},
+    {key:'actuatorType', label:'Actuator Type (if Pneumatic)', suggest:['Single Acting', 'Double Acting']},
+    {key:'airFailPosition', label:'Air Fail Position', suggest:['FC', 'FO', 'FL']},
+    {key:'airSupplyAvailable', label:'Air Supply Available (Kg/cm²)'},
+    {key:'elecActuatorType', label:'Electrical Actuator Type', type:'select', options:['', 'On/Off', 'Modulating']},
+    {key:'supplyVoltage', label:'Supply Voltage', suggest:['230 VAC', '110 VAC', '415 VAC', '24 VDC']},
+    {key:'frequency', label:'Frequency', type:'select', options:['', '50 Hz', '60 Hz']},
+    {key:'enclosureProtection', label:'Enclosure Protection', type:'select', options:['', 'IP65', 'IP66', 'IP67', 'IP68']}
+  ]);
+  add('Section 5 - Accessories', '', [
+    {key:'mor', label:'Manual Override', suggest:['Yes', 'No']},
+    {key:'afrRequired', label:'Air Filter Regulator', type:'select', options:YN},
+    {key:'solenoidValve', label:'Solenoid Valve', type:'select', options:YN},
+    {key:'sovVoltage', label:'SOV Operating Voltage', suggest:['24 VDC', '110 VAC', '230 VAC']},
+    {key:'elecProtection', label:'Electrical Protection', type:'select', options:['', 'IP65', 'IP66', 'IP67']},
+    {key:'hazArea', label:'Hazardous Area Classification', type:'select', options:HAZ},
+    {key:'limitSwitchReq', label:'Limit Switch', type:'select', options:YN},
+    {key:'limitSwitch', label:'Limit Switch Type', suggest:['Mechanical', 'Proximity']},
+    {key:'numSwitches', label:'Number of Switches', suggest:['2', '4', 'As Required']},
+    {key:'limitSwitchVoltage', label:'Limit Switch Voltage', suggest:['24 VDC', '110 VAC']},
+    {key:'limitSwitchHazArea', label:'Limit Switch Hazardous Area Classification', type:'select', options:HAZ}
+  ]);
+  add('Section 5 - Accessories', 'C', [
+    {key:'positionerRequired', label:'Positioner', type:'select', options:YN},
+    {key:'positionerType', label:'Type of Positioner', type:'select', options:['', 'Smart', 'Electro-Pneumatic', 'Mechanical']},
+    {key:'positionerHazArea', label:'Positioner Hazardous Area Classification', type:'select', options:HAZ},
+    {key:'communication', label:'Communication', suggest:['HART', 'Profibus', 'Foundation Fieldbus']},
+    {key:'ptr', label:'Position Transmitter (PTR)', type:'select', options:YN}
+  ]);
+  add('Section 5 - Accessories', '', [
+    {key:'otherAccessories', label:'Any Other Special Accessories'}
+  ]);
+  add('Section 6 - Special Requirements', '', [
+    {key:'specialReq', label:'Any Special Requirements?'},
+    {key:'paintingReq', label:'Any Special Painting / Coating Requirements?'},
+    {key:'documentationReq', label:'Any Special Documentation Requirements?'}
+  ]);
+  return out;
+})();
+/* Fields that belong to one valve category (blank category = old enquiry = everything). */
+function valveEnqFields(cat){
+  const code = cat === 'Control Valve' ? 'C' : (cat === 'Shut-off Valve' ? 'S' : '');
+  return (EDIT_SCHEMAS.valveEnquiries || []).filter(f => !f.derived && (!f.only || !code || f.only === code))
+    .map(f => (code === 'C' && f.labelC) ? Object.assign({}, f, {label: f.labelC}) : f);
+}
+/* One enquiry can hold several valves. Each valve is one entry in rec.items (all data sheet answers);
+   the enquiry itself keeps the Enquiry Details. The first valve is also copied onto the record so
+   older screens (lists, quotation, All Enquiries) keep working. */
+const VALVE_HEAD_SEC = 'Enquiry Details';
+function valveEnqHeadFields(cat){ return valveEnqFields(cat).filter(f => f.sec === VALVE_HEAD_SEC && f.key !== 'valveCategory'); }
+function valveEnqItemFields(cat){ return valveEnqFields(cat).filter(f => f.sec !== VALVE_HEAD_SEC); }
+function valveEnqItems(rec){
+  if(rec && Array.isArray(rec.items) && rec.items.length) return rec.items;
+  const it = {};
+  valveEnqItemFields('').forEach(f => { if(rec && rec[f.key] != null && rec[f.key] !== '') it[f.key] = rec[f.key]; });
+  return [it];
+}
+function valveEnqSync(rec){
+  const items = rec.items;
+  if(!Array.isArray(items) || !items.length) return;
+  valveEnqItemFields('').forEach(f => { rec[f.key] = items[0][f.key] == null ? '' : items[0][f.key]; });
+  if(items.length > 1){
+    const total = items.reduce((t, it) => t + (parseFloat(it.qty) || 0), 0);
+    if(total) rec.qty = String(total);
+  }
+  rec.valveCount = String(items.length);
+}
+/* Section heading shown inside a form grid wherever the section changes. */
+function schemaSecHead(list, i){
+  const f = list[i];
+  if(!f || !f.sec || (i > 0 && list[i - 1].sec === f.sec)) return '';
+  return `<div class="out-lines-head" style="grid-column:1/-1; margin:8px 0 0 0; padding-top:12px; border-top:1px solid var(--border); color:var(--accent-2); font-size:12px;">${esc(f.sec)}</div>`;
+}
+const EDIT_SCHEMAS = {
+  valveEnquiries: VALVE_ENQ_SCHEMA,
   pumpEnquiries: [
     {key:'enqNo', label:'Enquiry No.', type:'text'},
     {key:'date', label:'Date', type:'date'},
@@ -14741,6 +15221,7 @@ function findEditRecord(table, id){
 }
 
 function openEditModal(table, id){
+  if(table === 'valveEnquiries' && valveEnqOpenEdit(id)) return;
   if(table === 'users' && !isAdmin()) return;
   if((table === 'purchaseAccounts' || table === 'salesAccounts') && !canSeeTab('accounts')) return;
   const record = findEditRecord(table, id);
@@ -14770,7 +15251,7 @@ function editItemLineHtml(it){
     <input type="text" class="em-line-desc" placeholder="Description of goods" value="${esc(it.description||'')}" oninput="editItemsRecalc()" style="flex:3 1 220px; min-width:180px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:'IBM Plex Sans',sans-serif; font-size:13px; border-radius:4px;">
     <input type="text" class="em-line-hsn" placeholder="HSN/SAC" value="${esc(it.hsnSac||'')}" style="flex:1 1 90px; min-width:80px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:'IBM Plex Mono',monospace; font-size:12.5px; border-radius:4px;">
     <input type="number" class="out-line-qty em-line-qty" step="any" min="0" placeholder="Qty" value="${esc(it.qty||'')}" oninput="editItemsRecalc()">
-    <select class="em-line-uom" style="background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 8px; font-family:'IBM Plex Sans',sans-serif; font-size:12.5px; border-radius:4px;">${SA_UOMS.map(u=>`<option value="${u}" ${it.uom===u?'selected':''}>${u}</option>`).join('')}</select>
+    <select class="em-line-uom" style="background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 8px; font-family:'IBM Plex Sans',sans-serif; font-size:12.5px; border-radius:4px;">${csWith(SA_UOMS, it.uom).map(u=>`<option value="${esc(u)}" ${it.uom===u?'selected':''}>${esc(u)}</option>`).join('')}</select>
     <input type="number" class="em-line-rate" step="0.01" min="0" placeholder="Rate" value="${esc(it.rate||'')}" oninput="editItemsRecalc()" style="flex:0 1 110px; min-width:90px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:'IBM Plex Mono',monospace; font-size:12.5px; border-radius:4px;">
     <input type="number" class="em-line-amount" step="0.01" placeholder="Amount" readonly tabindex="-1" value="${esc(it.amount||'')}" style="flex:0 1 120px; min-width:100px; background:var(--bg); border:1px solid var(--border); color:var(--muted); padding:9px 10px; font-family:'IBM Plex Mono',monospace; font-size:12.5px; border-radius:4px;">
     <button type="button" class="icon-btn out-line-remove" onclick="removeEditItemLine(this)" title="Remove this item">&#10005;</button>
@@ -14826,7 +15307,7 @@ function editItemsRecalc(){
 }
 
 function renderEditModal(record){
-  const schema0 = EDIT_SCHEMAS[editModalState.table];
+  const schema0 = editModalState.table === 'valveEnquiries' ? valveEnqFields(record.valveCategory) : EDIT_SCHEMAS[editModalState.table];
   const isSalesAcct = editModalState.table === 'salesAccounts' || editModalState.table === 'proformaInvoices';
   /* For sales entries the item details are edited line by line below,
      so the merged flat fields are hidden from the modal. */
@@ -14836,11 +15317,11 @@ function renderEditModal(record){
     <div class="out-lines-head" style="margin-top:14px;">Description of Goods &mdash; item lines</div>
     <div id="edit-item-lines">${(saItems(record).map(it=>editItemLineHtml(it)).join('')) || editItemLineHtml()}</div>
     <div style="margin:10px 0 4px 0;"><button type="button" class="btn btn-ghost" onclick="addEditItemLine()">+ Add another item</button></div>` : '';
-  const fieldsHtml = schema.map(f=>{
+  const fieldsHtml = schema.map((f, fi)=> schemaSecHead(schema, fi) + (()=>{
     const val = record[f.key]==null ? '' : record[f.key];
     if(f.type==='select'){
       return `<div class="field"><label>${esc(f.label)}</label><select id="edit-f-${f.key}">
-        ${f.options.map(o=>`<option value="${esc(o)}" ${val===o?'selected':''}>${o===''?'Select':esc(o)}</option>`).join('')}
+        ${csWith(f.options, val).map(o=>`<option value="${esc(o)}" ${val===o?'selected':''}>${o===''?'Select':esc(o)}</option>`).join('')}
       </select></div>`;
     }
     if(f.type==='image'){
@@ -14855,7 +15336,7 @@ function renderEditModal(record){
       </div>`;
     }
     return `<div class="field"><label>${esc(f.label)}</label><input type="${f.type}" id="edit-f-${f.key}" value="${esc(val)}"></div>`;
-  }).join('');
+  })()).join('');
 
   const modalHtml = `
   <div id="edit-modal-root" class="modal-overlay">
