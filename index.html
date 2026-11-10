@@ -2953,7 +2953,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'SEV7EN v11.86';
+const APP_VERSION_LABEL = 'SEV7EN v11.88';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -3299,11 +3299,20 @@ function loginMotionHtml(){
   const LX = 90, RX = 1150, W = 360;               /* left / right column, same width */
   const card = (x, y, w, h) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="14" fill="${C}" fill-opacity="0.05"/>`;
   const title = (x, y, t) => `<text x="${x}" y="${y}" fill="${L}" ${FONT} font-size="13" letter-spacing="2" opacity="0.6">${t}</text>`;
+  const ICONS = {
+    mail:  '<rect x="3" y="5" width="18" height="14" rx="2"/><polyline points="3,7 12,13 21,7"/>',
+    doc:   '<path d="M6 3h8l4 4v14H6z"/><path d="M9 12h6M9 16h6"/>',
+    box:   '<path d="M3 8l9-5 9 5v8l-9 5-9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/>',
+    truck: '<path d="M2 7h11v9H2zM13 10h4l3 3v3h-7z"/><circle cx="6" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>'
+  };
+  const icon = (x, y, kind) => `<g transform="translate(${x} ${y}) scale(1.25)" fill="none" stroke="${L}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" opacity="0.7">${ICONS[kind]}</g>`;
+  const INF = '&#8734;';
   const tile = (x, label, value) => card(x, 70, 168, 100)
     + `<text x="${x + 18}" y="104" fill="${L}" ${FONT} font-size="12" letter-spacing="1.5" opacity="0.55">${label}</text>`
-    + `<text x="${x + 18}" y="146" fill="${L}" ${FONT} font-size="30" font-weight="600" opacity="0.8">${value}</text>`;
-  const tiles = tile(LX, 'ENQUIRIES', '42') + tile(LX + 192, 'QUOTATIONS', '118')
-              + tile(RX, 'ORDER VALUE', '₹ 4.2L') + tile(RX + 192, 'DISPATCHED', '120');
+    + icon(x + 18, 118, value)
+    + `<text x="${x + 62}" y="150" fill="${L}" ${FONT} font-size="40" font-weight="600" opacity="0.8">${INF}</text>`;
+  const tiles = tile(LX, 'ENQUIRIES', 'mail') + tile(LX + 192, 'QUOTATIONS', 'doc')
+              + tile(RX, 'ORDER VALUE', 'box') + tile(RX + 192, 'DISPATCHED', 'truck');
   /* Bar chart card */
   const barH = [70, 105, 88, 140, 118, 150, 172];
   const bars = card(LX, 194, W, 300) + title(LX + 24, 232, 'MONTHLY SALES')
@@ -3317,14 +3326,14 @@ function loginMotionHtml(){
     + `<polyline class="lm-line" pathLength="100" points="${pts.map(p => p.join(',')).join(' ')}" fill="none" stroke="${L}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity="0.75"/>`
     + pts.map((p, i) => `<circle class="lm-node" cx="${p[0]}" cy="${p[1]}" r="4" fill="${L}" style="animation-delay:${(i * 0.4).toFixed(1)}s"/>`).join('');
   /* Donut card with legend */
-  const legend = [['Won', '68%', 0.7], ['Pending', '22%', 0.4], ['Lost', '10%', 0.2]];
+  const legend = [['Won', 0.7], ['Pending', 0.4], ['Lost', 0.2]];
   const donut = card(RX, 194, W, 300) + title(RX + 24, 232, 'CONVERSION')
     + `<circle cx="${RX + 112}" cy="368" r="76" fill="none" stroke="${C}" stroke-width="20" opacity="0.16"/>`
     + `<circle class="lm-donut" cx="${RX + 112}" cy="368" r="76" pathLength="100" fill="none" stroke="${C}" stroke-width="20" stroke-linecap="round" opacity="0.65" transform="rotate(-90 ${RX + 112} 368)"/>`
-    + `<text x="${RX + 112}" y="379" text-anchor="middle" fill="${L}" ${FONT} font-size="30" font-weight="600" opacity="0.8">68%</text>`
-    + legend.map((g, i) => { const y = 334 + i * 34; return `<circle cx="${RX + 232}" cy="${y - 5}" r="5" fill="${C}" opacity="${g[2]}"/>`
+    + `<text x="${RX + 112}" y="386" text-anchor="middle" fill="${L}" ${FONT} font-size="52" font-weight="600" opacity="0.8">${INF}</text>`
+    + legend.map((g, i) => { const y = 334 + i * 34; return `<circle cx="${RX + 232}" cy="${y - 5}" r="5" fill="${C}" opacity="${g[1]}"/>`
       + `<text x="${RX + 246}" y="${y}" fill="${L}" ${FONT} font-size="14" opacity="0.6">${g[0]}</text>`
-      + `<text x="${RX + W - 24}" y="${y}" text-anchor="end" fill="${L}" ${FONT} font-size="14" font-weight="600" opacity="0.75">${g[1]}</text>`; }).join('');
+      + `<text x="${RX + W - 24}" y="${y + 3}" text-anchor="end" fill="${L}" ${FONT} font-size="20" font-weight="600" opacity="0.75">${INF}</text>`; }).join('');
   /* Order pipeline card */
   const stages = [['Enquiry', 216], ['Quotation', 172], ['P.O', 138], ['Dispatch', 104], ['Invoice', 82]];
   const rows = card(RX, 518, W, 300) + title(RX + 24, 556, 'ORDER PIPELINE')
