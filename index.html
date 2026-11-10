@@ -98,6 +98,12 @@ h1,h2,h3,.stencil{font-family:'Oswald', sans-serif; text-transform:uppercase; le
 @keyframes lmRow{0%,100%{transform:scaleX(.08);} 40%,85%{transform:scaleX(1);}}
 .lm-donut{stroke-dasharray:0 100; animation:lmDonut 7s ease-in-out infinite;}
 @keyframes lmDonut{0%,100%{stroke-dasharray:0 100;} 45%,85%{stroke-dasharray:68 100;}}
+.bv-loader .bv-reach{transform-origin:14px 74px; animation:bvReach 2.6s cubic-bezier(.5,0,.3,1) infinite;}
+.bv-loader .bv-stream{stroke-dasharray:9 6; animation:bvRun .5s linear infinite;}
+.bv-loader .bv-wet{animation:bvOut 2.6s linear infinite;}
+@keyframes bvReach{0%{transform:scaleX(0);} 45%,100%{transform:scaleX(1);}}
+@keyframes bvRun{to{stroke-dashoffset:-15;}}
+@keyframes bvOut{0%,86%{opacity:1;} 100%{opacity:0;}}
 .lm-float{opacity:0; animation:lmFloat 9s ease-in-out infinite;}
 @keyframes lmFloat{0%{transform:translateY(24px); opacity:0;} 25%{opacity:.55;} 75%{opacity:.55;} 100%{transform:translateY(-24px); opacity:0;}}
 .lm-sweep{animation:lmSweep 12s linear infinite;}
@@ -2633,8 +2639,19 @@ async function boot(){
   else if(session){ subscribeUsers(); }
 }
 
+function loadingValveHtml(){
+  return `<svg class="bv-loader" width="150" height="150" viewBox="0 0 120 120" fill="none" stroke="#cfe0ff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Loading">
+    <defs><clipPath id="bv-loader-clip"><rect class="bv-reach" x="14" y="62" width="92" height="24"/></clipPath></defs>
+    <g class="bv-wet" clip-path="url(#bv-loader-clip)"><path class="bv-stream" d="M10 74h104" stroke="#5d8cf0" stroke-width="7" stroke-linecap="butt"/></g>
+    <rect x="6" y="56" width="8" height="36" rx="2"/><rect x="106" y="56" width="8" height="36" rx="2"/>
+    <path d="M14 63h22M14 85h22M84 63h22M84 85h22"/>
+    <circle cx="60" cy="74" r="27"/>
+    <path d="M43 68h34M43 80h34" stroke-width="2.5"/>
+    <path d="M60 47v-13"/><path d="M38 32h44" stroke-width="7"/>
+  </svg>`;
+}
 function loadingScreen(msg){
-  return `<div class="login-wrap"><div style="color:var(--muted); font-family:'Oswald',sans-serif; letter-spacing:0.08em;">${esc(msg)}</div></div>`;
+  return `<div class="login-wrap"><div style="text-align:center; position:relative; z-index:2;">${loadingValveHtml()}<div style="margin-top:10px; color:var(--muted); font-family:'Oswald',sans-serif; letter-spacing:0.08em;">${esc(msg)}</div></div></div>`;
 }
 
 function errorBanner(){
@@ -2953,7 +2970,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'SEV7EN v11.88';
+const APP_VERSION_LABEL = 'SEV7EN v11.89';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
