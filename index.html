@@ -2947,7 +2947,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'SEV7EN v11.79';
+const APP_VERSION_LABEL = 'SEV7EN v11.80';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -11029,7 +11029,31 @@ function enqDeskIsMine(r){
 }
 /* Only the person the enquiry is assigned to (or an admin) can edit it while it is In Progress. */
 function enqDeskCanEdit(r){
-  return !!r && (isAdmin() || (r.deskStatus === 'In Progress' && enqDeskIsMine(r)));
+  if(!r) return false;
+  if(isAdmin()) return true;
+  if(r.deskStatus === 'In Progress') return enqDeskIsMine(r);
+  return canSeeTab('salesdesk');
+}
+/* All Enquiries list: Edit opens the right editor for the row, Delete is admin only. */
+function enqAllEdit(id){
+  const f = enqDeskFind(id);
+  if(!f) return;
+  const st = f.rec.deskStatus;
+  enqDeskView = st === 'In Progress' ? 'progress' : (st === 'Submitted' ? 'submitted' : (st === 'Regret' ? 'regret' : 'queue'));
+  enqReviewId = id;
+  render();
+}
+async function enqAllDelete(id, isSheet){
+  if(!isAdmin()) return;
+  if(!isSheet) return enqDeskDelete(id);
+  if(!confirm('Delete this enquiry? This cannot be undone.')) return;
+  await deleteEnquiry(id);
+}
+function enqAllActions(r){
+  const sheet = r.source === 'Data Sheet';
+  const edit = sheet ? editBtn('enquiry', r.id)
+    : `<button type="button" class="icon-btn" onclick="enqAllEdit('${esc(r.id)}')">${enqDeskCanEdit((enqDeskFind(r.id)||{}).rec) ? 'Edit' : 'View'}</button>`;
+  return actionCell(edit, deleteBtn(`enqAllDelete('${esc(r.id)}', ${sheet})`));
 }
 function enqDeskTypeLabel(t){ return t === 'pumpEnquiries' ? 'Pump' : 'Valve'; }
 function enqDeskPersonHtml(name, login){
@@ -11119,6 +11143,7 @@ async function enqDeskPick(id, details){
 async function enqDeskSave(id, submit){
   const f = enqDeskFind(id);
   if(!f || !enqDeskCanEdit(f.rec)){ alert('This enquiry is not assigned to you.'); return; }
+  if(submit && !isAdmin() && f.rec.deskStatus !== 'In Progress') submit = false;
   const schema = EDIT_SCHEMAS[f.table] || [];
   const vals = {};
   schema.forEach(fld => {
@@ -11262,7 +11287,8 @@ function enqReviewHtml(f){
       <div class="field"><label>Status</label><select id="dq-hold"${holdDis}>${holdOpts}</select></div>
       <div class="field" style="grid-column: span 2;"><label>Note (what is pending)</label><input type="text" id="dq-note" value="${esc(r.deskNote || '')}" placeholder="e.g. waiting for customer approval" autocomplete="off"${dis}></div>
     </div>
-    ${can ? `<div style="margin-top:14px; display:flex; gap:8px; flex-wrap:wrap;">
+    ${can && !isAdmin() && r.deskStatus !== 'In Progress' ? `<div style="margin-top:14px;"><button type="button" class="btn" onclick="enqDeskSave('${r.id}', false)">Save changes</button></div>`
+    : can ? `<div style="margin-top:14px; display:flex; gap:8px; flex-wrap:wrap;">
       <button type="button" class="btn" onclick="enqDeskSave('${r.id}', false)">Save progress</button>
       <button type="button" class="btn" onclick="enqDeskSave('${r.id}', true)">Submit</button>
       <button type="button" class="icon-btn" onclick="enqDeskRegret('${r.id}')">Regret</button></div>` : ''}
@@ -11308,7 +11334,7 @@ function renderEnquiryDesk(){
       <td>${enqDeskPersonHtml(r.deskRegretBy, '')}</td>
       <td>${fd(r.deskRegretOn) || '-'}</td>
       <td style="white-space:normal; max-width:320px;">${esc(r.deskRegretReason || '')}</td>
-      <td><div class="action-cell"><button type="button" class="icon-btn" onclick="enqDeskOpen('${r.id}')">${isAdmin() ? 'Edit' : 'View'}</button>${deleteBtn(`enqDeskDelete('${r.id}')`)}</div></td>
+      <td><div class="action-cell"><button type="button" class="icon-btn" onclick="enqDeskOpen('${r.id}')">${enqDeskCanEdit(r) ? 'Edit' : 'View'}</button>${deleteBtn(`enqDeskDelete('${r.id}')`)}</div></td>
     </tr>`).join('');
     return head + `<div class="panel"><div class="panel-head"><h3>Regret enquiries <span style="font-weight:400; color:var(--muted); font-size:11px;">(${regret.length})</span></h3></div>`
       + enqDeskTable(['E.Num','Type','Customer','Entered By','Regret By','Regret On','Reason',''], rows, 'No enquiries marked as regret.') + `</div>`;
@@ -11323,7 +11349,7 @@ function renderEnquiryDesk(){
       <td>${enqDeskPersonHtml(r.deskAssignedTo, r.deskAssignedLogin)}</td>
       <td>${fd(r.deskSubmittedOn) || '-'}</td>
       <td style="white-space:normal; max-width:240px;">${esc(r.deskNote || '')}</td>
-      <td><div class="action-cell"><button type="button" class="icon-btn" title="Create quotation from this enquiry" onclick="quoteFromDeskEnquiry('${r.id}')">&#128221;</button> <button type="button" class="icon-btn" onclick="enqDeskOpen('${r.id}')">${isAdmin() ? 'Edit' : 'View'}</button>${deleteBtn(`enqDeskDelete('${r.id}')`)}</div></td>
+      <td><div class="action-cell"><button type="button" class="icon-btn" title="Create quotation from this enquiry" onclick="quoteFromDeskEnquiry('${r.id}')">&#128221;</button> <button type="button" class="icon-btn" onclick="enqDeskOpen('${r.id}')">${enqDeskCanEdit(r) ? 'Edit' : 'View'}</button>${deleteBtn(`enqDeskDelete('${r.id}')`)}</div></td>
     </tr>`;
     }).join('');
     return head + `<div class="panel"><div class="panel-head"><h3>Submitted enquiries <span style="font-weight:400; color:var(--muted); font-size:11px;">(${submitted.length})</span></h3></div>`
@@ -11337,7 +11363,7 @@ function renderEnquiryDesk(){
       <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.application || '')}</td>
       <td>${fd(r.followUp) || ''}</td><td>${esc(r.qty || '')}</td>
       <td>${enqDeskPersonHtml(r.addedBy, r.addedByLogin || r.salesPerson || '')}</td>
-      <td><div class="action-cell"><button type="button" class="icon-btn" onclick="enqDeskAskPick('${r.id}')">Pick / Review</button> <button type="button" class="icon-btn" onclick="enqDeskRegret('${r.id}')">Regret</button>${isAdmin() ? `<button type="button" class="icon-btn" onclick="enqDeskOpen('${r.id}')">Edit</button>` : ''}${deleteBtn(`enqDeskDelete('${r.id}')`)}</div></td>
+      <td><div class="action-cell"><button type="button" class="icon-btn" onclick="enqDeskAskPick('${r.id}')">Pick / Review</button> <button type="button" class="icon-btn" onclick="enqDeskRegret('${r.id}')">Regret</button><button type="button" class="icon-btn" onclick="enqDeskOpen('${r.id}')">Edit</button>${deleteBtn(`enqDeskDelete('${r.id}')`)}</div></td>
     </tr>`).join('');
   return head + `<div class="panel"><div class="panel-head"><h3>Enquiry queue <span style="font-weight:400; color:var(--muted); font-size:11px;">(entered by sales &middot; ${queue.length} waiting)</span></h3></div>`
     + enqDeskTable(['E.Num','Type','Date','Customer','Region','Application','Due Date','Qty','Entered By',''], rows, 'No enquiries waiting in the queue.') + `</div>`;
@@ -11394,10 +11420,10 @@ function allEnquiriesPanelHtml(){
   return `<div class="panel"><div class="panel-head"><h3>All enquiries <span style="font-weight:400; color:var(--muted); font-size:11px;">(${list.length} of ${base.length})</span></h3></div>
   <div class="panel-body table-scroll">
   ${tableToolbar('enqAll', base)}
-  <table><thead><tr>${ENQ_ALL_FIELDS.map(f => `<th>${esc(f.label)}</th>`).join('')}</tr></thead>
+  <table><thead><tr>${ENQ_ALL_FIELDS.map(f => `<th>${esc(f.label)}</th>`).join('')}<th></th></tr></thead>
   <tbody>${rows.length === 0
-    ? `<tr><td colspan="${ENQ_ALL_FIELDS.length}" style="text-align:center; color:var(--muted); padding:18px;">No enquiries match.</td></tr>`
-    : rows.map(r => `<tr>${ENQ_ALL_FIELDS.map(f => `<td>${cell(f, r)}</td>`).join('')}</tr>`).join('')}</tbody></table>
+    ? `<tr><td colspan="${ENQ_ALL_FIELDS.length + 1}" style="text-align:center; color:var(--muted); padding:18px;">No enquiries match.</td></tr>`
+    : rows.map(r => `<tr>${ENQ_ALL_FIELDS.map(f => `<td>${cell(f, r)}</td>`).join('')}<td>${enqAllActions(r)}</td></tr>`).join('')}</tbody></table>
   ${showMoreBar('enqAll', list.length)}
   </div></div>`;
 }
