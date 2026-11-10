@@ -79,7 +79,7 @@ h1,h2,h3,.stencil{font-family:'Oswald', sans-serif; text-transform:uppercase; le
   width:600px; height:600px; bottom:-200px; right:-200px; background:rgba(31,68,145,0.30);
 }
 .login-card{
-  width:480px; max-width:100%; background:var(--panel); box-shadow:0 20px 60px rgba(28,34,48,0.18);
+  width:480px; max-width:100%; background:var(--panel); box-shadow:0 24px 70px rgba(0,0,0,0.45), 0 0 120px rgba(127,166,255,0.16);
   padding:52px 56px; position:relative; z-index:2; display:flex; flex-direction:column; justify-content:center;
   overflow:hidden; border-top:6px solid var(--accent); border-radius:6px;
   animation:loginCardIn 0.6s cubic-bezier(.2,.8,.3,1);
@@ -88,10 +88,16 @@ h1,h2,h3,.stencil{font-family:'Oswald', sans-serif; text-transform:uppercase; le
   from{ opacity:0; transform:translateY(22px); }
   to{ opacity:1; transform:translateY(0); }
 }
-.login-motion{position:absolute; inset:0; z-index:1; pointer-events:none; overflow:hidden;}
-.login-motion svg{width:100%; height:100%; display:block;}
+.login-motion{position:absolute; inset:0; z-index:1; pointer-events:none; overflow:hidden; opacity:.38;}
+.login-motion svg{width:100%; height:100%; display:block; overflow:visible;}
 .lm-line{stroke-dasharray:100; stroke-dashoffset:100; animation:lmDraw 7s ease-in-out infinite;}
 @keyframes lmDraw{0%{stroke-dashoffset:100;} 55%,82%{stroke-dashoffset:0;} 100%{stroke-dashoffset:-100;}}
+.lm-bar{transform-box:fill-box; transform-origin:50% 100%; animation:lmBar 6s ease-in-out infinite;}
+@keyframes lmBar{0%,100%{transform:scaleY(.12);} 40%,82%{transform:scaleY(1);}}
+.lm-row{transform-box:fill-box; transform-origin:0 50%; animation:lmRow 7s ease-in-out infinite;}
+@keyframes lmRow{0%,100%{transform:scaleX(.08);} 40%,85%{transform:scaleX(1);}}
+.lm-donut{stroke-dasharray:0 100; animation:lmDonut 7s ease-in-out infinite;}
+@keyframes lmDonut{0%,100%{stroke-dasharray:0 100;} 45%,85%{stroke-dasharray:68 100;}}
 .lm-float{opacity:0; animation:lmFloat 9s ease-in-out infinite;}
 @keyframes lmFloat{0%{transform:translateY(24px); opacity:0;} 25%{opacity:.55;} 75%{opacity:.55;} 100%{transform:translateY(-24px); opacity:0;}}
 .lm-sweep{animation:lmSweep 12s linear infinite;}
@@ -106,7 +112,7 @@ h1,h2,h3,.stencil{font-family:'Oswald', sans-serif; text-transform:uppercase; le
 @keyframes lmShine{0%{stroke-dashoffset:8;} 100%{stroke-dashoffset:-100;}}
 .lm-node{transform-box:fill-box; transform-origin:50% 50%; animation:lmPulse 2.8s ease-in-out infinite;}
 @keyframes lmPulse{0%,100%{transform:scale(1); opacity:.6;} 50%{transform:scale(1.9); opacity:1;}}
-@media (prefers-reduced-motion: reduce){ .login-motion *{animation:none !important;} }
+
 .login-hero-caption{
   position:absolute; bottom:28px; left:0; right:0; text-align:center; z-index:3; color:rgba(255,255,255,0.65); font-family:'Oswald',sans-serif;
   text-transform:uppercase; letter-spacing:0.14em; font-size:12.5px; opacity:0.85;
@@ -2947,7 +2953,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'SEV7EN v11.80';
+const APP_VERSION_LABEL = 'SEV7EN v11.86';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -3287,53 +3293,58 @@ async function submitChangePassword(){
         : ''));
 }
 
-/* Animated background for the login screens: bar and line charts, a donut, data-entry rows and floating figures. Decorative only. */
+/* Animated background for the login screens: two aligned dashboard columns, each with KPI tiles and two chart cards. Decorative only. */
 function loginMotionHtml(){
-  /* Gear outline: a ring of teeth (drawn, not an image). */
-  const gear = (cx, cy, R, teeth, dur, dir) => {
-    const n = teeth * 4, pts = [];
-    for(let i = 0; i < n; i++){
-      const a = (i / n) * 2 * Math.PI;
-      const rr = (i % 4 === 0 || i % 4 === 1) ? R : R * 0.8;
-      pts.push(`${(cx + rr * Math.cos(a)).toFixed(1)},${(cy + rr * Math.sin(a)).toFixed(1)}`);
-    }
-    return `<g class="lm-gear ${dir < 0 ? 'lm-gear-rev' : ''}" style="transform-origin:${cx}px ${cy}px; animation-duration:${dur}s;">
-      <path d="M${pts.join(' L')} Z" fill="rgba(127,166,255,0.14)" stroke="#bcd6ff" stroke-width="3.5" stroke-linejoin="round" opacity="0.9"/>
-      <circle cx="${cx}" cy="${cy}" r="${(R * 0.38).toFixed(1)}" fill="none" stroke="#bcd6ff" stroke-width="2.5" opacity="0.7"/>
-      ${[0, 1, 2].map(k => { const a = k * 2 * Math.PI / 3; return `<line x1="${(cx + R * 0.38 * Math.cos(a)).toFixed(1)}" y1="${(cy + R * 0.38 * Math.sin(a)).toFixed(1)}" x2="${(cx + R * 0.78 * Math.cos(a)).toFixed(1)}" y2="${(cy + R * 0.78 * Math.sin(a)).toFixed(1)}" stroke="#bcd6ff" stroke-width="3" stroke-linecap="round" opacity="0.7"/>`; }).join('')}
-    </g>`;
-  };
-  /* Lines that run in and join at the gears; each has a bright shine travelling along it. */
-  const paths = [
-    {d:'M-10,200 L140,300 L300,450', delay:0}, {d:'M-10,720 L120,600 L300,450', delay:1.2},
-    {d:'M1610,120 L1500,170 L1290,260', delay:0.6}, {d:'M1290,260 L1250,460 L1430,700', delay:1.8},
-    {d:'M1430,700 L1610,830', delay:2.4}, {d:'M300,450 L170,760', delay:3}
-  ].map(p => `
-    <polyline class="lm-join" pathLength="100" points="${p.d.replace(/[ML]/g, '').replace(/^/, '')}" style="display:none"/>`).join('');
-  const lines = [
-    {d:[[-10,200],[140,300],[300,450]], delay:0}, {d:[[-10,720],[120,600],[300,450]], delay:1.2},
-    {d:[[1610,120],[1500,170],[1290,260]], delay:0.6}, {d:[[1290,260],[1250,460],[1430,700]], delay:1.8},
-    {d:[[1430,700],[1610,830]], delay:2.4}, {d:[[300,450],[170,760]], delay:3}
-  ].map(l => {
-    const pts = l.d.map(q => q.join(',')).join(' ');
-    return `<polyline class="lm-join" pathLength="100" points="${pts}" fill="none" stroke="#5d8cf0" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.6" style="animation-delay:${l.delay}s"/>
-      <polyline class="lm-shine" pathLength="100" points="${pts}" fill="none" stroke="#e4f0ff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" style="animation-delay:${l.delay}s"/>`;
-  }).join('');
-  const floats = [
-    {x:120, y:150, t:'+18.4%'}, {x:330, y:320, t:'42 ENQ'}, {x:1180, y:90, t:'PO ₹ 4.2L'},
-    {x:1400, y:300, t:'Qty 120'}, {x:260, y:120, t:'Quote Q-118'}, {x:1290, y:470, t:'Conv. 36%'}
-  ].map((f, i) => `<text class="lm-float" x="${f.x}" y="${f.y}" fill="#cfe0ff" font-family="'IBM Plex Sans',sans-serif" font-size="22" style="animation-delay:${(i * 1.4).toFixed(1)}s">${f.t}</text>`).join('');
+  const C = '#7fa6ff', L = '#cfe0ff', FONT = `font-family="'IBM Plex Sans',sans-serif"`;
+  const LX = 90, RX = 1150, W = 360;               /* left / right column, same width */
+  const card = (x, y, w, h) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="14" fill="${C}" fill-opacity="0.05"/>`;
+  const title = (x, y, t) => `<text x="${x}" y="${y}" fill="${L}" ${FONT} font-size="13" letter-spacing="2" opacity="0.6">${t}</text>`;
+  const tile = (x, label, value) => card(x, 70, 168, 100)
+    + `<text x="${x + 18}" y="104" fill="${L}" ${FONT} font-size="12" letter-spacing="1.5" opacity="0.55">${label}</text>`
+    + `<text x="${x + 18}" y="146" fill="${L}" ${FONT} font-size="30" font-weight="600" opacity="0.8">${value}</text>`;
+  const tiles = tile(LX, 'ENQUIRIES', '42') + tile(LX + 192, 'QUOTATIONS', '118')
+              + tile(RX, 'ORDER VALUE', '₹ 4.2L') + tile(RX + 192, 'DISPATCHED', '120');
+  /* Bar chart card */
+  const barH = [70, 105, 88, 140, 118, 150, 172];
+  const bars = card(LX, 194, W, 300) + title(LX + 24, 232, 'MONTHLY SALES')
+    + [300, 353, 406].map(y => `<line x1="${LX + 24}" y1="${y}" x2="${LX + W - 24}" y2="${y}" stroke="${C}" stroke-width="1" opacity="0.14"/>`).join('')
+    + `<line x1="${LX + 24}" y1="460" x2="${LX + W - 24}" y2="460" stroke="${C}" stroke-width="1.5" opacity="0.45"/>`
+    + barH.map((h, i) => `<rect class="lm-bar" x="${LX + 32 + i * 44}" y="${460 - h}" width="28" height="${h}" rx="3" fill="${C}" opacity="${i === barH.length - 1 ? 0.65 : 0.36}" style="animation-delay:${(i * 0.16).toFixed(2)}s"/>`).join('');
+  /* Line chart card */
+  const pts = [[122,762],[171,734],[220,746],[270,692],[319,702],[369,646],[418,612]];
+  const line = card(LX, 518, W, 300) + title(LX + 24, 556, 'ENQUIRY TREND')
+    + [620, 668, 716, 764].map(y => `<line x1="${LX + 24}" y1="${y}" x2="${LX + W - 24}" y2="${y}" stroke="${C}" stroke-width="1" opacity="0.14"/>`).join('')
+    + `<polyline class="lm-line" pathLength="100" points="${pts.map(p => p.join(',')).join(' ')}" fill="none" stroke="${L}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity="0.75"/>`
+    + pts.map((p, i) => `<circle class="lm-node" cx="${p[0]}" cy="${p[1]}" r="4" fill="${L}" style="animation-delay:${(i * 0.4).toFixed(1)}s"/>`).join('');
+  /* Donut card with legend */
+  const legend = [['Won', '68%', 0.7], ['Pending', '22%', 0.4], ['Lost', '10%', 0.2]];
+  const donut = card(RX, 194, W, 300) + title(RX + 24, 232, 'CONVERSION')
+    + `<circle cx="${RX + 112}" cy="368" r="76" fill="none" stroke="${C}" stroke-width="20" opacity="0.16"/>`
+    + `<circle class="lm-donut" cx="${RX + 112}" cy="368" r="76" pathLength="100" fill="none" stroke="${C}" stroke-width="20" stroke-linecap="round" opacity="0.65" transform="rotate(-90 ${RX + 112} 368)"/>`
+    + `<text x="${RX + 112}" y="379" text-anchor="middle" fill="${L}" ${FONT} font-size="30" font-weight="600" opacity="0.8">68%</text>`
+    + legend.map((g, i) => { const y = 334 + i * 34; return `<circle cx="${RX + 232}" cy="${y - 5}" r="5" fill="${C}" opacity="${g[2]}"/>`
+      + `<text x="${RX + 246}" y="${y}" fill="${L}" ${FONT} font-size="14" opacity="0.6">${g[0]}</text>`
+      + `<text x="${RX + W - 24}" y="${y}" text-anchor="end" fill="${L}" ${FONT} font-size="14" font-weight="600" opacity="0.75">${g[1]}</text>`; }).join('');
+  /* Order pipeline card */
+  const stages = [['Enquiry', 216], ['Quotation', 172], ['P.O', 138], ['Dispatch', 104], ['Invoice', 82]];
+  const rows = card(RX, 518, W, 300) + title(RX + 24, 556, 'ORDER PIPELINE')
+    + stages.map((g, i) => { const y = 600 + i * 40; return `<text x="${RX + 24}" y="${y + 11}" fill="${L}" ${FONT} font-size="14" opacity="0.6">${g[0]}</text>`
+      + `<rect x="${RX + 120}" y="${y}" width="216" height="12" rx="6" fill="${C}" opacity="0.13"/>`
+      + `<rect class="lm-row" x="${RX + 120}" y="${y}" width="${g[1]}" height="12" rx="6" fill="${C}" opacity="0.5" style="animation-delay:${(i * 0.22).toFixed(2)}s"/>`; }).join('');
   return `<div class="login-motion" aria-hidden="true">
-    <svg viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+    <svg viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
       <defs>
         <linearGradient id="lm-sweep-grad" x1="0" x2="1" y1="0" y2="0">
           <stop offset="0" stop-color="#9cc0ff" stop-opacity="0"/>
-          <stop offset="0.5" stop-color="#9cc0ff" stop-opacity="0.16"/>
+          <stop offset="0.5" stop-color="#9cc0ff" stop-opacity="0.12"/>
           <stop offset="1" stop-color="#9cc0ff" stop-opacity="0"/>
         </linearGradient>
       </defs>
-      ${lines}
-      ${floats}
+      ${tiles}
+      ${bars}
+      ${line}
+      ${donut}
+      ${rows}
       <rect class="lm-sweep" x="0" y="0" width="260" height="900" fill="url(#lm-sweep-grad)"/>
     </svg>
   </div>`;
