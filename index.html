@@ -2494,6 +2494,7 @@ async function loadAll(){
   await loadAudit();
   for(const loc of LOCATIONS){ await loadLocation(loc); }
   await loadHrShared();
+  await loadBackupMeta();
 }
 
 /* ---- sync: periodically pull updates from other users into the screen ----
@@ -3065,7 +3066,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'SEV7EN v11.97';
+const APP_VERSION_LABEL = 'SEV7EN v11.98';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -3182,23 +3183,89 @@ function toggleSettingsMenu(ev){
 }
 
 /* ---------------- FULL BACKUP / RESTORE (admin) ---------------- */
-function exportFullBackup(){
+/* When each company was last backed up: {SOMTEK:{at, by}, EVISSAT:{at, by}}. Kept in the cloud so every
+   admin sees the same dates, with a copy in this browser in case the cloud write fails. */
+const BACKUP_META_DOC = 'backup_meta';
+const BACKUP_REMIND_DAYS = 7;
+let BACKUP_META = {};
+async function loadBackupMeta(){
+  let m = null;
+  try{ m = await fsGet(BACKUP_META_DOC); }catch(e){ m = null; }
+  if(!m || typeof m !== 'object'){
+    try{ m = JSON.parse(localStorage.getItem('sev7en_backup_meta') || 'null'); }catch(e){ m = null; }
+  }
+  BACKUP_META = (m && typeof m === 'object') ? m : {};
+}
+async function markBackupDone(locs){
+  const at = new Date().toISOString(), by = session ? session.username : '';
+  locs.forEach(loc => { BACKUP_META[loc] = {at: at, by: by}; });
+  try{ localStorage.setItem('sev7en_backup_meta', JSON.stringify(BACKUP_META)); }catch(e){}
+  try{ await fsSet(BACKUP_META_DOC, BACKUP_META); }catch(e){}
+  try{ logAudit('AUDIT', 'Full backup downloaded: ' + locs.join(' + ')); }catch(e){}
+}
+/* Whole days since a company was last backed up; null = never. */
+function backupAgeDays(loc){
+  const m = BACKUP_META && BACKUP_META[loc];
+  const t = m && m.at ? Date.parse(m.at) : NaN;
+  return isNaN(t) ? null : Math.max(0, Math.floor((Date.now() - t) / 86400000));
+}
+function backupAgeText(loc){
+  const n = backupAgeDays(loc);
+  if(n === null) return 'never backed up';
+  return n === 0 ? 'backed up today' : ('last backed up ' + n + ' day' + (n === 1 ? '' : 's') + ' ago');
+}
+function downloadBackupFile(payload, name){
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
+}
+async function exportFullBackup(){
   try{
-    const payload = {
+    downloadBackupFile({
       app: 'SEV7EN',
       version: APP_VERSION_LABEL,
       location: currentLocation,
       exportedAt: new Date().toISOString(),
       exportedBy: session ? session.username : '',
       data: DATA[currentLocation]
-    };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'sev7en_backup_' + currentLocation.replace(/[^a-z0-9]+/gi,'_') + '_' + today() + '.json';
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
+    }, 'sev7en_backup_' + currentLocation.replace(/[^a-z0-9]+/gi,'_') + '_' + today() + '.json');
+    await markBackupDone([currentLocation]);
+    render();
   }catch(e){ alert('Backup failed: ' + e.message); }
+}
+/* One file holding every company. Restore Backup reads it too and takes the part for the company you are in. */
+async function exportAllBackups(){
+  if(!isAdmin()) return;
+  try{
+    const all = {};
+    LOCATIONS.forEach(loc => { all[loc] = DATA[loc]; });
+    if(LOCATIONS.some(loc => !all[loc] || !Array.isArray(all[loc].inventory))){
+      alert('Backup not taken: the data of one company has not finished loading. Refresh the page and try again.'); return;
+    }
+    downloadBackupFile({
+      app: 'SEV7EN',
+      version: APP_VERSION_LABEL,
+      locations: LOCATIONS.slice(),
+      exportedAt: new Date().toISOString(),
+      exportedBy: session ? session.username : '',
+      all: all
+    }, 'sev7en_backup_ALL_' + today() + '.json');
+    await markBackupDone(LOCATIONS.slice());
+    render();
+  }catch(e){ alert('Backup failed: ' + e.message); }
+}
+/* Dashboard reminder (admins only) when any company has no backup in the last BACKUP_REMIND_DAYS days. */
+function backupReminderHtml(){
+  if(!isAdmin()) return '';
+  const due = LOCATIONS.filter(loc => { const n = backupAgeDays(loc); return n === null || n > BACKUP_REMIND_DAYS; });
+  if(!due.length) return '';
+  return `<div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:0 0 14px 0; padding:12px 16px; border:1px solid #d9a441; border-left:4px solid #d9a441; background:rgba(217,164,65,0.10); border-radius:4px;">
+    <div style="flex:1; min-width:220px; font-size:13px;"><b>&#128190; Backup due.</b> ${due.map(loc => esc(loc) + ': ' + backupAgeText(loc)).join(' &middot; ')}. Take a backup at least once every ${BACKUP_REMIND_DAYS} days.</div>
+    <button type="button" class="btn" onclick="exportAllBackups()">Back up all companies now</button>
+  </div>`;
 }
 function importFullBackup(){
   if(!isAdmin()) return;
@@ -3210,7 +3277,12 @@ function importFullBackup(){
     try{
       const text = await file.text();
       const payload = JSON.parse(text);
-      const data = payload && payload.data;
+      const isAll = !!(payload && payload.all && typeof payload.all === 'object');
+      if(isAll && !payload.all[currentLocation]){
+        alert('This backup file has no data for ' + currentLocation + '.'); return;
+      }
+      const data = isAll ? payload.all[currentLocation] : (payload && payload.data);
+      if(isAll) payload.location = currentLocation + ' (from an all-companies backup)';
       if(!data || typeof data !== 'object' || !Array.isArray(data.inventory)){
         alert('This does not look like a SEV7EN backup file.'); return;
       }
@@ -5128,6 +5200,7 @@ function renderDashboard(){
   return `
   ${tabHeader(currentLocation, 'Overview', true)}
   ${noticeBannerHtml()}
+  ${backupReminderHtml()}
   ${birthdayBannerHtml()}
   <div class="wgrid">${grid}</div>
   ${can('inventory') ? renderInventoryBISection() : ''}`;
@@ -16947,10 +17020,12 @@ function auditLogPanel(){
   <p style="margin:0 0 12px 0; font-size:12.5px; color:var(--muted);">
     <b>Full Backup</b> downloads one JSON file with ALL data of ${esc(currentLocation)} (inventory, inward, outward, accounts, quotations, HR, everything). Keep it safely on your PC or Google Drive.
     <b>Restore Backup</b> replaces the current ${esc(currentLocation)} data with a backup file &mdash; use only if data was accidentally deleted or corrupted.
-    Recommended: take a backup every week for each location, and always before a big import or restore.
+    Recommended: take a backup every week, and always before a big import or restore.
   </p>
+  <p style="margin:0 0 12px 0; font-size:12.5px;">${LOCATIONS.map(loc => `<b>${esc(loc)}</b>: ${backupAgeText(loc)}${BACKUP_META[loc] && BACKUP_META[loc].by ? ' by ' + esc(BACKUP_META[loc].by) : ''}`).join(' &nbsp;&middot;&nbsp; ')}</p>
   <div style="display:flex; gap:10px; flex-wrap:wrap;">
-    <button type="button" class="btn" onclick="exportFullBackup()">&#128190; Full Backup (JSON)</button>
+    <button type="button" class="btn" onclick="exportAllBackups()">&#128190; Back up all companies (one file)</button>
+    <button type="button" class="btn" onclick="exportFullBackup()" style="background:transparent; color:var(--accent-2); border:1px solid var(--accent-2);">&#128190; Full Backup of ${esc(currentLocation)} only</button>
     <button type="button" class="btn" onclick="importFullBackup()" style="background:transparent; color:var(--accent-2); border:1px solid var(--accent-2);">&#8635; Restore Backup</button>
   </div>
   </div></div>
