@@ -1697,21 +1697,82 @@ async function initFirebase(){
   firebaseReady = true;
 }
 
+/* ---- large-document support (v12.00) ---------------------------------
+   Firestore refuses any document above ~1 MB. When a document grows past
+   FS_SPLIT_BYTES it is stored in parts: <docId>__A0, __A1 ... (or __B0 ...)
+   and the main document only holds a small pointer 'SEV7EN_PARTS|slot|n|stamp'.
+   Each save writes the INACTIVE slot first and flips the pointer last, so a
+   failed save never damages the copy that is currently live. */
+const FS_SPLIT_BYTES = 900000;
+const FS_PART_CHARS = 250000;
+const FS_PARTS_TAG = 'SEV7EN_PARTS|';
+async function fsReadRaw(docId, label){
+  const res = await fsFetch(FS_REST_BASE + docId, { method:'GET' }, label || ('Reading '+docId));
+  if(res.status === 404) return { missing:true, raw:null };
+  if(!res.ok){
+    let detail = '';
+    try{ const j = await res.json(); detail = (j.error && j.error.message) || ''; }catch(e2){}
+    throw new Error('HTTP '+res.status+(detail ? ': '+detail : ''));
+  }
+  const json = await res.json();
+  const raw = json.fields && json.fields.data && json.fields.data.stringValue;
+  return { missing:false, raw: raw || null };
+}
+async function fsWriteRaw(docId, str, label){
+  const body = { fields: { data: { stringValue: str } } };
+  const res = await fsFetch(FS_REST_BASE + docId, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  }, label || ('Saving '+docId));
+  if(!res.ok){
+    let detail = '';
+    try{ const j = await res.json(); detail = (j.error && j.error.message) || ''; }catch(e2){}
+    throw new Error('HTTP '+res.status+(detail ? ': '+detail : ''));
+  }
+}
+function fsParsePointer(raw){
+  if(typeof raw !== 'string' || raw.indexOf(FS_PARTS_TAG) !== 0) return null;
+  const p = raw.split('|');
+  const n = parseInt(p[2], 10);
+  if((p[1] !== 'A' && p[1] !== 'B') || !(n > 0) || !p[3]) throw new Error('bad parts pointer');
+  return { slot: p[1], n: n, stamp: p[3] };
+}
+async function fsReadParts(docId, ptr){
+  const jobs = [];
+  for(let i = 0; i < ptr.n; i++) jobs.push(fsReadRaw(docId + '__' + ptr.slot + i, 'Reading '+docId));
+  const parts = await Promise.all(jobs);
+  let out = '';
+  const head = ptr.stamp + '|';
+  for(let i = 0; i < parts.length; i++){
+    const r = parts[i].raw;
+    if(!r || r.indexOf(head) !== 0) return null;   /* part missing or from another save */
+    out += r.slice(head.length);
+  }
+  return out;
+}
+function fsByteLength(str){
+  try{ return new TextEncoder().encode(str).length; }catch(e){ return str.length * 3; }
+}
+
 async function fsGet(docId){
   if(!firebaseReady) return null;
   try{
-    const res = await fsFetch(FS_REST_BASE + docId, { method:'GET' }, 'Reading '+docId);
-    if(res.status === 404){ firebaseLoadError = null; fsGetLastStatus = 'missing'; return null; }
-    if(!res.ok){
-      let detail = '';
-      try{ const j = await res.json(); detail = (j.error && j.error.message) || ''; }catch(e2){}
-      throw new Error('HTTP '+res.status+(detail ? ': '+detail : ''));
+    let text = null;
+    for(let attempt = 1; attempt <= 3; attempt++){
+      const main = await fsReadRaw(docId);
+      if(main.missing){ firebaseLoadError = null; fsGetLastStatus = 'missing'; return null; }
+      const ptr = fsParsePointer(main.raw);
+      if(!ptr){ text = main.raw; break; }
+      text = await fsReadParts(docId, ptr);
+      if(text !== null) break;
+      /* someone saved while we were reading - read the pointer again */
+      if(attempt === 3) throw new Error('document parts changed while reading, please retry');
+      await new Promise(r => setTimeout(r, 400 * attempt));
     }
-    const json = await res.json();
-    const raw = json.fields && json.fields.data && json.fields.data.stringValue;
     firebaseLoadError = null;
     fsGetLastStatus = 'ok';
-    return raw ? JSON.parse(raw) : null;
+    return text ? JSON.parse(text) : null;
   }catch(e){
     console.error('fsGet failed', docId, e);
     firebaseLoadError = 'DB error (read '+docId+'): '+e.message;
@@ -1724,16 +1785,24 @@ let fsGetLastStatus = 'ok';
 async function fsSet(docId, data){
   if(!firebaseReady) return false;
   try{
-    const body = { fields: { data: { stringValue: JSON.stringify(data) } } };
-    const res = await fsFetch(FS_REST_BASE + docId, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    }, 'Saving '+docId);
-    if(!res.ok){
-      let detail = '';
-      try{ const j = await res.json(); detail = (j.error && j.error.message) || ''; }catch(e2){}
-      throw new Error('HTTP '+res.status+(detail ? ': '+detail : ''));
+    const text = JSON.stringify(data);
+    if(fsByteLength(text) <= FS_SPLIT_BYTES){
+      await fsWriteRaw(docId, text);
+    }else{
+      /* find which slot is live now, write the other one, then flip */
+      let live = null;
+      const cur = await fsReadRaw(docId, 'Saving '+docId);
+      if(!cur.missing){ try{ live = fsParsePointer(cur.raw); }catch(e3){ live = null; } }
+      const slot = (live && live.slot === 'A') ? 'B' : 'A';
+      const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      const jobs = [];
+      let n = 0;
+      for(let pos = 0; pos < text.length; pos += FS_PART_CHARS){
+        jobs.push(fsWriteRaw(docId + '__' + slot + n, stamp + '|' + text.slice(pos, pos + FS_PART_CHARS), 'Saving '+docId));
+        n++;
+      }
+      await Promise.all(jobs);
+      await fsWriteRaw(docId, FS_PARTS_TAG + slot + '|' + n + '|' + stamp);
     }
     firebaseLoadError = null;
     return true;
@@ -3096,7 +3165,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'SEV7EN v11.99';
+const APP_VERSION_LABEL = 'SEV7EN v12.00';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
