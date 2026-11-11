@@ -3165,7 +3165,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'SEV7EN v12.00';
+const APP_VERSION_LABEL = 'SEV7EN v12.02';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -5301,6 +5301,7 @@ function renderDashboard(){
   ${noticeBannerHtml()}
   ${backupReminderHtml()}
   ${birthdayBannerHtml()}
+  ${dailyBriefHtml()}
   <div class="wgrid">${grid}</div>
   ${can('inventory') ? renderInventoryBISection() : ''}`;
 }
@@ -14339,6 +14340,7 @@ function rptAllCols(on){
   render();
 }
 function rptPreset(p){
+  RPT_LAST_PRESET = p;
   const now = new Date();
   if(p === 'all'){ RPT.from = ''; RPT.to = ''; }
   else if(p === 'tm'){ RPT.from = rptIso(new Date(now.getFullYear(), now.getMonth(), 1)); RPT.to = rptIso(new Date(now.getFullYear(), now.getMonth() + 1, 0)); }
@@ -14462,7 +14464,7 @@ function rptLabelIdx(R){
 
 /* ----- export ----- */
 function exportReport(){
-  const R = RPT.result;
+  const R = rptActiveResult();
   if(!R){ alert('Run the report first.'); return; }
   if(!canSeeTab(R.tab)){ alert('You do not have access to that module.'); return; }
   const li = rptLabelIdx(R);
@@ -14539,6 +14541,7 @@ function reportSheetHtml(R){
       </div>
     </div>
     <div class="rpt-crit">${esc(R.criteria)}</div>
+    ${rptChartHtml(R)}
     <table>
       <thead><tr>${R.headers.map((h, i) => '<th' + (isNum(i) ? ' style="text-align:right;"' : '') + '>' + esc(h) + '</th>').join('')}</tr></thead>
       <tbody>${body}${totRow}</tbody>
@@ -14550,7 +14553,7 @@ function reportSheetHtml(R){
   </div>`;
 }
 function printReport(){
-  const R = RPT.result;
+  const R = rptActiveResult();
   if(!R){ alert('Run the report first.'); return; }
   if(!canSeeTab(R.tab)){ alert('You do not have access to that module.'); return; }
   closeQuotePreview();
@@ -14570,7 +14573,7 @@ function printReport(){
   document.body.classList.add('quote-open');
 }
 function doPrintReport(){
-  const R = RPT.result;
+  const R = rptActiveResult();
   const oldTitle = document.title;
   document.title = (R ? (R.locLabel + ' - ' + R.label) : 'Report').replace(/[\\\/:*?"<>|]/g, '-');
   const restore = () => { document.title = oldTitle; window.removeEventListener('afterprint', restore); };
@@ -14593,7 +14596,7 @@ function reportResultHtml(R){
     g.rows.forEach(r => {
       if(shown >= RPT_SCREEN_LIMIT){ truncated = true; return; }
       shown++;
-      body += '<tr>' + r.map((v, i) => `<td${isNum(i) ? ' class="rpt-num"' : ''}>${esc(v == null ? '' : v)}</td>`).join('') + '</tr>';
+      body += rptRowHtml(R, r);
     });
     if(g.name && R.numIdx.length){
       let sub = '';
@@ -14617,6 +14620,7 @@ function reportResultHtml(R){
       <div class="panel-head-actions">
         <button type="button" class="export-btn" onclick="exportReport()">&#8681; Export Excel</button>
         <button type="button" class="export-btn" onclick="printReport()" style="background:var(--accent-2);">&#128424; Print / PDF</button>
+        <button type="button" class="export-btn" onclick="rptShareWA()" style="background:#25d366;">&#128172; WhatsApp</button>
       </div>
     </div>
     <div class="panel-body">
@@ -14628,6 +14632,7 @@ function reportResultHtml(R){
       </div>
       <div style="font-size:11.5px;color:var(--muted);margin-bottom:12px;">${esc(R.criteria)}</div>
       ${truncated ? `<div style="font-size:11.5px;color:var(--accent);margin-bottom:10px;">Showing the first ${RPT_SCREEN_LIMIT} rows on screen. Export or print to get all ${R.count}.</div>` : ''}
+      ${rptChartHtml(R)}
       <table>
         <thead><tr>${R.headers.map((h, i) => `<th${isNum(i) ? ' style="text-align:right;"' : ''}>${esc(h)}</th>`).join('')}</tr></thead>
         <tbody>${body}${tot}</tbody>
@@ -14636,9 +14641,1013 @@ function reportResultHtml(R){
   </div>`;
 }
 
+/* ---------------- REPORTS v12.01: My Reports + Management Reports ----------------
+   Three views share the Reports tab:
+     mine    - every user: records they added or are the Sales POC / sales person /
+               assignee / employee on, across modules they can already see.
+     mgmt    - admins only: ready-made summaries (sales, receivables, payables,
+               stock, quotation conversion, user activity, leave).
+     builder - the existing ad-hoc Report Builder.
+   Results reuse the builder's result shape, so Export Excel and Print / PDF work
+   unchanged (rptActiveResult() picks the result for the current view). */
+let RPT_VIEW = '';
+let MYR = { from:'', to:'', loc:'', result:null };
+let CRR = { key:'salesMonthly', from:'', to:'', loc:'', result:null };
+
+function rptView(){
+  if(RPT_VIEW === 'mgmt' && !isAdmin()) RPT_VIEW = 'mine';
+  if(!RPT_VIEW) RPT_VIEW = isAdmin() ? 'mgmt' : 'mine';
+  return RPT_VIEW;
+}
+function rptSetView(v){ RPT_VIEW = v; render(); }
+function rptActiveResult(){
+  const v = rptView();
+  if(v === 'mine') return MYR.result;
+  if(v === 'mgmt') return isAdmin() ? CRR.result : null;
+  return RPT.result;
+}
+function rptViewBar(){
+  const v = rptView();
+  const b = (id, label) => '<button type="button" class="rpt-preset" onclick="rptSetView(\'' + id + '\')"'
+    + (v === id ? ' style="background:var(--accent);border-color:var(--accent);color:#fff;"' : '') + '>' + label + '</button>';
+  return '<div class="rpt-presets" style="margin:0 0 14px 0;">'
+    + b('mine', '&#128100; My Reports')
+    + (isAdmin() ? b('mgmt', '&#128200; Management Reports') : '')
+    + b('builder', '&#128295; Report Builder')
+    + '</div>';
+}
+
+/* ----- shared helpers ----- */
+function rptRange(p){
+  const now = new Date();
+  if(p === 'tm') return { from: rptIso(new Date(now.getFullYear(), now.getMonth(), 1)), to: rptIso(new Date(now.getFullYear(), now.getMonth() + 1, 0)) };
+  if(p === 'lm') return { from: rptIso(new Date(now.getFullYear(), now.getMonth() - 1, 1)), to: rptIso(new Date(now.getFullYear(), now.getMonth(), 0)) };
+  if(p === 'd30'){ const d = new Date(now); d.setDate(d.getDate() - 29); return { from: rptIso(d), to: rptIso(now) }; }
+  if(p === 'fy'){ const y = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1; return { from: y + '-04-01', to: (y + 1) + '-03-31' }; }
+  return { from:'', to:'' };
+}
+function rptInRange(v, from, to){
+  if(!from && !to) return true;
+  const d = rptDateVal(v);
+  if(!d) return false;
+  if(from && d < from) return false;
+  if(to && d > to) return false;
+  return true;
+}
+function rptPeriodText(from, to){
+  if(!from && !to) return 'Period: all records';
+  return 'Period: ' + (from ? fd(from) : 'beginning') + ' to ' + (to ? fd(to) : 'latest');
+}
+function rptLocList(loc){ return loc === 'BOTH' ? LOCATIONS.slice() : [loc || currentLocation]; }
+async function rptEnsureLoaded(locs){
+  for(const loc of locs){
+    if(!DATA[loc]){
+      render(loadingScreen('Loading ' + loc + ' data...'));
+      await loadLocation(loc);
+    }
+  }
+}
+function rptList(loc, key){ return (DATA[loc] && Array.isArray(DATA[loc][key])) ? DATA[loc][key] : []; }
+function r2(n){ return Math.round((parseFloat(n) || 0) * 100) / 100; }
+function rptPct(a, b){ return b ? (Math.round(a / b * 1000) / 10) + '%' : '-'; }
+function rptLocOptions(cur){
+  const opt = (v, lbl) => '<option value="' + esc(v) + '"' + (String(cur) === String(v) ? ' selected' : '') + '>' + esc(lbl) + '</option>';
+  return opt('', 'Current (' + currentLocation + ')') + LOCATIONS.map(l => opt(l, l)).join('') + opt('BOTH', 'Both companies');
+}
+function rptPresetButtons(fn){
+  return '<div class="rpt-presets" style="margin-top:12px;">'
+    + [['tm','This month'],['lm','Last month'],['d30','Last 30 days'],['fy','This financial year'],['all','All time']]
+      .map(p => '<button type="button" class="rpt-preset" onclick="' + fn + '(\'' + p[0] + '\')">' + p[1] + '</button>').join('')
+    + '</div>';
+}
+/* value of one record for summaries; '' when the module has no money column */
+function rptRecValue(key, r){
+  if(key === 'salesAccounts' || key === 'proformaInvoices') return rptNum(r.invoiceValue);
+  if(key === 'purchaseAccounts') return rptNum(r.grossTotal);
+  if(key === 'quotations') return rptNum(r.totalPrice);
+  if(key === 'customerPO' || key === 'vendorPO' || key === 'outward') return rptNum(r.qty) * rptNum(r.unitPrice);
+  if(key === 'inward') return rptNum(r.qty) * rptNum(r.price);
+  return null;
+}
+function rptBuildResult(o){
+  const rows = o.rows || [];
+  return {
+    srcKey: o.key, tab: o.tab || 'reports', label: o.label,
+    headers: o.headers, groups: o.groups || [{name:'', rows: rows}], numIdx: o.numIdx || [],
+    multiLoc: o.locs.length > 1, count: o.count != null ? o.count : rows.length,
+    locLabel: o.locs.length > 1 ? LOCATIONS.join(' + ') : o.locs[0],
+    criteria: o.criteria, generatedAt: new Date().toLocaleString('en-IN'),
+    by: session ? session.name : '', view: o.view
+  };
+}
+
+/* ================= MY REPORTS ================= */
+const MY_OWNER_KEYS = ['addedBy', 'salesPoc', 'salesPerson', 'assignedTo', 'employee'];
+function myIds(){
+  const out = [];
+  if(session && session.name) out.push(String(session.name).trim().toLowerCase());
+  if(session && session.username) out.push(String(session.username).trim().toLowerCase());
+  return out.filter(Boolean);
+}
+function myOwns(r, ids){
+  return MY_OWNER_KEYS.some(k => r[k] != null && ids.includes(String(r[k]).trim().toLowerCase()));
+}
+function myRole(r, ids){
+  const out = [];
+  if(r.addedBy != null && ids.includes(String(r.addedBy).trim().toLowerCase())) out.push('Added by me');
+  if(['salesPoc','salesPerson'].some(k => r[k] != null && ids.includes(String(r[k]).trim().toLowerCase()))) out.push('Sales POC');
+  if(r.assignedTo != null && ids.includes(String(r.assignedTo).trim().toLowerCase())) out.push('Assigned to me');
+  if(r.employee != null && ids.includes(String(r.employee).trim().toLowerCase())) out.push('Employee');
+  return out.join(', ');
+}
+function mySet(k, v){ MYR[k] = v; MYR.result = null; render(); }
+async function mySetLoc(v){ MYR.loc = v; MYR.result = null; await rptEnsureLoaded(rptLocList(v)); render(); }
+function myPreset(p){ const r = rptRange(p); MYR.from = r.from; MYR.to = r.to; MYR.result = null; render(); }
+
+function mySummary(){
+  const ids = myIds();
+  const locs = rptLocList(MYR.loc);
+  return rptAllowedSources().map(s => {
+    let all = 0, inP = 0, val = 0, hasVal = false;
+    locs.forEach(loc => rptList(loc, s.key).forEach(r => {
+      if(!myOwns(r, ids)) return;
+      all++;
+      if(rptInRange(r[s.dateKey], MYR.from, MYR.to)){
+        inP++;
+        const v = rptRecValue(s.key, r);
+        if(v != null){ hasVal = true; val += v; }
+      }
+    }));
+    return { s: s, all: all, inP: inP, val: hasVal ? val : null };
+  }).filter(x => x.all > 0);
+}
+
+async function myRun(key){
+  const s = rptSource(key);
+  if(!s){ alert('You do not have access to that module.'); return; }
+  const locs = rptLocList(MYR.loc);
+  await rptEnsureLoaded(locs);
+  const ids = myIds();
+  const fields = rptFields(s.key);
+  const multi = locs.length > 1;
+  const headers = (multi ? ['Location'] : []).concat(['My role']).concat(fields.map(f => f.label));
+  const off = multi ? 2 : 1;
+  const numIdx = [];
+  fields.forEach((f, i) => { if(f.type === 'number') numIdx.push(i + off); });
+  const recs = [];
+  locs.forEach(loc => rptList(loc, s.key).forEach(r => {
+    if(myOwns(r, ids) && rptInRange(r[s.dateKey], MYR.from, MYR.to)) recs.push({loc: loc, r: r});
+  }));
+  recs.sort((a, b) => String(rptDateVal(b.r[s.dateKey])).localeCompare(String(rptDateVal(a.r[s.dateKey]))));
+  const rows = recs.map(x => (multi ? [x.loc] : []).concat([myRole(x.r, ids)]).concat(fields.map(f => x.r[f.key] == null ? '' : x.r[f.key])));
+  MYR.result = rptBuildResult({
+    key: s.key, tab: s.tab, label: 'My ' + s.label, headers: headers, rows: rows, numIdx: numIdx, locs: locs,
+    criteria: 'Records for ' + (session ? session.name : '') + '   |   ' + rptPeriodText(MYR.from, MYR.to),
+    view: 'mine'
+  });
+  render();
+}
+
+function renderMyReports(head){
+  const sum = mySummary();
+  let tbl;
+  if(!sum.length){
+    tbl = '<div class="rpt-empty">No records found under your name in ' + esc(rptLocList(MYR.loc).join(' + ')) + '.<br>Records count as yours when you added them or you are the Sales POC, sales person, assignee or employee on them.</div>';
+  } else {
+    let body = '';
+    let tAll = 0, tP = 0, tV = 0;
+    sum.forEach(x => {
+      tAll += x.all; tP += x.inP; if(x.val != null) tV += x.val;
+      body += '<tr><td style="font-family:\'IBM Plex Sans\',sans-serif;">' + esc(x.s.label) + '</td>'
+        + '<td class="rpt-num">' + x.inP + '</td>'
+        + '<td class="rpt-num">' + x.all + '</td>'
+        + '<td class="rpt-num">' + (x.val == null ? '-' : rptMoney(x.val)) + '</td>'
+        + '<td><button type="button" class="icon-btn" onclick="myRun(\'' + x.s.key + '\')">&#9654; View</button></td></tr>';
+    });
+    body += '<tr class="rpt-total"><td>TOTAL</td><td class="rpt-num">' + tP + '</td><td class="rpt-num">' + tAll + '</td><td class="rpt-num">' + rptMoney(tV) + '</td><td></td></tr>';
+    tbl = '<table><thead><tr><th>Module</th><th style="text-align:right;">In period</th><th style="text-align:right;">All time</th><th style="text-align:right;">Value in period</th><th></th></tr></thead><tbody>' + body + '</tbody></table>';
+  }
+  return head
+    + '<div class="panel"><div class="panel-head"><h3>My Work Summary &mdash; ' + esc(session ? session.name : '') + '</h3></div>'
+    + '<div class="panel-body">'
+    + '<div class="form-grid">'
+    + '<div class="field"><label>Location</label><select onchange="mySetLoc(this.value)">' + rptLocOptions(MYR.loc) + '</select></div>'
+    + '<div class="field"><label>From date</label><input type="date" value="' + esc(MYR.from) + '" onchange="mySet(\'from\', this.value)"></div>'
+    + '<div class="field"><label>To date</label><input type="date" value="' + esc(MYR.to) + '" onchange="mySet(\'to\', this.value)"></div>'
+    + '</div>'
+    + rptPresetButtons('myPreset')
+    + '<div style="font-size:11.5px;color:var(--muted);margin:10px 0;">' + esc(rptPeriodText(MYR.from, MYR.to)) + '</div>'
+    + tbl
+    + '</div></div>'
+    + (MYR.result ? reportResultHtml(MYR.result) : '');
+}
+
+/* ================= MANAGEMENT REPORTS (admin) ================= */
+const MGMT_REPORTS = [
+  {key:'salesMonthly',    label:'Sales by Month',             dated:true,  note:'Invoices, GST, received and outstanding per month'},
+  {key:'topCustomers',    label:'Top Customers',              dated:true,  note:'Sales value per customer, highest first'},
+  {key:'receivables',     label:'Receivables Ageing',         dated:false, note:'Outstanding per customer by days overdue (as of today)'},
+  {key:'payables',        label:'Payables Ageing',            dated:false, note:'Outstanding per supplier by days overdue (as of today)'},
+  {key:'stock',           label:'Stock Valuation',            dated:false, note:'Qty x cost per item, low / out-of-stock flags'},
+  {key:'quoteConversion', label:'Quotation to P.O Conversion',dated:true,  note:'Quotes vs Customer P.Os per Sales POC'},
+  {key:'userActivity',    label:'User Activity',              dated:true,  note:'Records added per user per module'},
+  {key:'leaveSummary',    label:'Leave Summary',              dated:true,  note:'Leave days per employee by status'}
+];
+function crSet(k, v){ CRR[k] = v; CRR.result = null; CRR.parent = null; render(); }
+function crPick(k){ CRR.key = k; CRR.result = null; CRR.parent = null; render(); }
+function crPreset(p){ const r = rptRange(p); CRR.from = r.from; CRR.to = r.to; CRR.result = null; render(); }
+
+/* days past due for a record with date + creditDays; null = not due yet */
+function crDaysOverdue(dateV, creditDays){
+  const t = dparse(dateV);
+  if(isNaN(t)) return 0;
+  const due = new Date(t);
+  const cd = parseInt(creditDays);
+  if(!isNaN(cd)) due.setDate(due.getDate() + cd);
+  const now = new Date(); now.setHours(0, 0, 0, 0);
+  due.setHours(0, 0, 0, 0);
+  const diff = Math.floor((now.getTime() - due.getTime()) / 86400000);
+  return diff > 0 ? diff : null;
+}
+function crBucket(days){
+  if(days == null) return 0;      /* Not due */
+  if(days <= 30) return 1;
+  if(days <= 60) return 2;
+  if(days <= 90) return 3;
+  return 4;
+}
+function crPurchaseBalance(r){
+  const g = parseFloat(r.grossTotal);
+  if(!isNaN(g)) return Math.max(0, g - rptNum(r.amountPaid));
+  return rptNum(r.balanceOutstanding);
+}
+
+function crBuild(key, locs, from, to){
+  const all = k => { const out = []; locs.forEach(loc => rptList(loc, k).forEach(r => out.push(r))); return out; };
+
+  if(key === 'salesMonthly'){
+    const map = new Map();
+    all('salesAccounts').filter(r => rptInRange(r.date, from, to)).forEach(r => {
+      const d = rptDateVal(r.date); const m = d ? d.slice(0, 7) : '(no date)';
+      if(!map.has(m)) map.set(m, [0, 0, 0, 0, 0, 0]);
+      const a = map.get(m);
+      const inv = rptNum(r.invoiceValue);
+      a[0]++; a[1] += rptNum(r.taxable); a[2] += rptNum(r.cgst) + rptNum(r.sgst) + rptNum(r.igst);
+      a[3] += inv; a[4] += rptNum(r.amountReceived); a[5] += rptNum(salesBalance(r));
+    });
+    const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const rows = Array.from(map.keys()).sort().map(m => {
+      const a = map.get(m);
+      const lbl = /^\d{4}-\d{2}$/.test(m) ? MON[parseInt(m.slice(5)) - 1] + ' ' + m.slice(0, 4) : m;
+      return [lbl, a[0], r2(a[1]), r2(a[2]), r2(a[3]), r2(a[4]), r2(a[5])];
+    });
+    return { headers:['Month','Invoices','Taxable Value','GST','Invoice Value','Received','Outstanding'], rows: rows, numIdx:[1,2,3,4,5,6] };
+  }
+
+  if(key === 'topCustomers'){
+    const map = new Map();
+    let grand = 0;
+    all('salesAccounts').filter(r => rptInRange(r.date, from, to)).forEach(r => {
+      const c = String(r.customer || '').trim() || '(blank)';
+      if(!map.has(c)) map.set(c, [0, 0, 0, 0]);
+      const a = map.get(c); const inv = rptNum(r.invoiceValue);
+      a[0]++; a[1] += inv; a[2] += rptNum(r.amountReceived); a[3] += rptNum(salesBalance(r));
+      grand += inv;
+    });
+    const rows = Array.from(map.entries()).sort((x, y) => y[1][1] - x[1][1])
+      .map((e, i) => [i + 1, e[0], e[1][0], r2(e[1][1]), rptPct(e[1][1], grand), r2(e[1][2]), r2(e[1][3])]);
+    return { headers:['Rank','Customer','Invoices','Invoice Value','Share','Received','Outstanding'], rows: rows, numIdx:[2,3,5,6] };
+  }
+
+  if(key === 'receivables' || key === 'payables'){
+    const isRec = key === 'receivables';
+    const map = new Map();
+    const list = isRec ? all('salesAccounts') : all('purchaseAccounts');
+    list.forEach(r => {
+      const bal = isRec ? rptNum(salesBalance(r)) : crPurchaseBalance(r);
+      if(bal <= 0) return;
+      const c = String((isRec ? r.customer : r.supplier) || '').trim() || '(blank)';
+      if(!map.has(c)) map.set(c, [0, 0, 0, 0, 0, 0, 0]);
+      const a = map.get(c);
+      a[0]++; a[1 + crBucket(crDaysOverdue(r.date, r.creditDays))] += bal; a[6] += bal;
+    });
+    const rows = Array.from(map.entries()).sort((x, y) => y[1][6] - x[1][6])
+      .map(e => [e[0], e[1][0], r2(e[1][1]), r2(e[1][2]), r2(e[1][3]), r2(e[1][4]), r2(e[1][5]), r2(e[1][6])]);
+    return { headers:[isRec ? 'Customer' : 'Supplier', 'Open bills', 'Not due', '1-30 days', '31-60 days', '61-90 days', '90+ days', 'Total Outstanding'], rows: rows, numIdx:[1,2,3,4,5,6,7] };
+  }
+
+  if(key === 'stock'){
+    const rows = all('inventory').map(r => {
+      const q = rptNum(r.qty), mn = rptNum(r.minQty), c = rptNum(r.cost);
+      let st = 'OK';
+      if(String(r.deadStock || '').toLowerCase() === 'yes') st = 'Dead stock';
+      else if(q <= 0) st = 'Out of stock';
+      else if(mn > 0 && q < mn) st = 'Low';
+      return [r.name || '', r.category || '', q, mn || '', r2(c), r2(q * c), st];
+    }).sort((a, b) => b[5] - a[5]);
+    return { headers:['Item','Category','Qty','Min Qty','Unit Cost','Stock Value','Status'], rows: rows, numIdx:[2,5] };
+  }
+
+  if(key === 'quoteConversion'){
+    const map = new Map();
+    locs.forEach(loc => {
+      const pos = rptList(loc, 'customerPO');
+      rptList(loc, 'quotations').filter(q => rptInRange(q.quoteDate, from, to)).forEach(q => {
+        const p = String(q.salesPoc || q.addedBy || '').trim() || '(blank)';
+        if(!map.has(p)) map.set(p, [0, 0, 0, 0]);
+        const a = map.get(p);
+        a[0]++; a[1] += rptNum(q.totalPrice);
+        const qn = String(q.quoteNumber || '').trim().toLowerCase();
+        const lines = qn ? pos.filter(x => String(x.quoteRef || '').trim().toLowerCase() === qn) : [];
+        if(lines.length){
+          a[2]++;
+          lines.forEach(x => { a[3] += rptNum(x.totalValue) || (rptNum(x.qty) * rptNum(x.unitPrice)); });
+        }
+      });
+    });
+    const rows = Array.from(map.entries()).sort((x, y) => y[1][1] - x[1][1])
+      .map(e => [e[0], e[1][0], r2(e[1][1]), e[1][2], rptPct(e[1][2], e[1][0]), r2(e[1][3]), rptPct(e[1][3], e[1][1])]);
+    return { headers:['Sales POC','Quotations','Quoted Value','Converted to P.O','Conversion % (count)','P.O Value','Conversion % (value)'], rows: rows, numIdx:[1,2,3,5] };
+  }
+
+  if(key === 'userActivity'){
+    const map = new Map();
+    REPORT_SOURCES.forEach(s => {
+      all(s.key).filter(r => rptInRange(r[s.dateKey], from, to)).forEach(r => {
+        const u = String(r.addedBy || '').trim() || '(unknown)';
+        if(!map.has(u)) map.set(u, new Map());
+        const m = map.get(u);
+        m.set(s.label, (m.get(s.label) || 0) + 1);
+      });
+    });
+    const groups = Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0])).map(e => ({
+      name: e[0],
+      rows: Array.from(e[1].entries()).sort((a, b) => b[1] - a[1]).map(x => [e[0], x[0], x[1]])
+    }));
+    const count = groups.reduce((n, g) => n + g.rows.length, 0);
+    return { headers:['User','Module','Records added'], groups: groups, count: count, numIdx:[2] };
+  }
+
+  if(key === 'leaveSummary'){
+    const map = new Map();
+    all('leaves').filter(r => rptInRange(r.from, from, to)).forEach(r => {
+      const e = String(r.employee || '').trim() || '(blank)';
+      if(!map.has(e)) map.set(e, [0, 0, 0, 0]);
+      const a = map.get(e); const d = rptNum(r.days);
+      const st = String(r.status || 'Pending');
+      a[0]++;
+      if(st === 'Approved') a[1] += d; else if(st === 'Pending') a[2] += d; else a[3] += d;
+    });
+    const rows = Array.from(map.entries()).sort((a, b) => b[1][1] - a[1][1])
+      .map(e => [e[0], e[1][0], e[1][1], e[1][2], e[1][3]]);
+    return { headers:['Employee','Requests','Approved days','Pending days','Rejected / Cancelled days'], rows: rows, numIdx:[1,2,3,4] };
+  }
+  return { headers:[], rows:[], numIdx:[] };
+}
+
+async function crRun(){
+  if(!isAdmin()){ alert('Management reports are for administrators only.'); return; }
+  const def = MGMT_REPORTS.find(x => x.key === CRR.key);
+  if(!def){ alert('Choose a report.'); return; }
+  const locs = rptLocList(CRR.loc);
+  await rptEnsureLoaded(locs);
+  const from = def.dated ? CRR.from : '', to = def.dated ? CRR.to : '';
+  const out = crBuildAll(def.key, locs, from, to);
+  CRR.result = rptBuildResult({
+    key: def.key, tab: 'reports', label: def.label, headers: out.headers, rows: out.rows, groups: out.groups,
+    count: out.count, numIdx: out.numIdx, locs: locs, view: 'mgmt',
+    criteria: def.note + '   |   ' + (def.dated ? rptPeriodText(from, to) : 'As of ' + fd(rptIso(new Date())))
+  });
+  CRR.result.chart = out.chart || null; CRR.result.drill = out.drill || ''; CRR.result.drillIdx = out.drillIdx;
+  CRR.result.share = out.share || null; CRR.parent = null;
+  if(out.noteExtra) CRR.result.criteria += '   |   ' + out.noteExtra;
+  logAudit('DATA CHANGE', 'Management report run: ' + def.label);
+  render();
+}
+
+function renderMgmtReports(head){
+  const def = MGMT_REPORTS.find(x => x.key === CRR.key) || MGMT_REPORTS[0];
+  const cards = MGMT_REPORTS.map(r => {
+    const on = r.key === def.key;
+    return '<button type="button" onclick="crPick(\'' + r.key + '\')" style="text-align:left;cursor:pointer;padding:10px 12px;border-radius:6px;'
+      + 'background:var(--panel-2);color:var(--text);border:1px solid ' + (on ? 'var(--accent)' : 'var(--border)') + ';'
+      + (on ? 'box-shadow:0 0 0 1px var(--accent) inset;' : '') + '">'
+      + '<div style="font-weight:600;font-size:13px;' + (on ? 'color:var(--accent);' : '') + '">' + esc(r.label) + '</div>'
+      + '<div style="font-size:11px;color:var(--muted);margin-top:3px;">' + esc(r.note) + '</div></button>';
+  }).join('');
+  const dateBlock = def.dated
+    ? '<div class="field"><label>From date</label><input type="date" value="' + esc(CRR.from) + '" onchange="crSet(\'from\', this.value)"></div>'
+      + '<div class="field"><label>To date</label><input type="date" value="' + esc(CRR.to) + '" onchange="crSet(\'to\', this.value)"></div>'
+    : '<div class="field"><label>Period</label><input type="text" value="As of today" readonly style="background:var(--panel-2);"></div>';
+  const resBtns = CRR.result
+    ? '<button type="button" class="export-btn" onclick="exportReport()">&#8681; Export Excel</button>'
+      + '<button type="button" class="export-btn" onclick="printReport()" style="background:var(--accent-2);">&#128424; Print / PDF</button>'
+    : '';
+  return head
+    + '<div class="panel"><div class="panel-head"><h3>Management Reports</h3></div><div class="panel-body">'
+    + '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;margin-bottom:14px;">' + cards + '</div>'
+    + '<div class="form-grid">'
+    + '<div class="field"><label>Location</label><select onchange="crSet(\'loc\', this.value)">' + rptLocOptions(CRR.loc) + '</select></div>'
+    + dateBlock
+    + '</div>'
+    + (def.dated ? rptPresetButtons('crPreset') : '')
+    + '<div class="rpt-actions"><button type="button" class="btn" onclick="crRun()">&#9654; Run ' + esc(def.label) + '</button>' + resBtns + (CRR.parent ? '<button type="button" class="icon-btn" onclick="crBack()">&#8592; Back to ' + esc(CRR.parent.label) + '</button>' : '') + '</div>'
+    + (def.key === 'salesTargets' ? crTargetsPanel() : '')
+    + '</div></div>'
+    + (CRR.result ? reportResultHtml(CRR.result) : '');
+}
+
+
+/* ---------------- REPORTS v12.02 ----------------
+   New management reports (order backlog, GST, margin, sales funnel, targets),
+   charts, drill-down, saved reports, WhatsApp share and the dashboard daily brief. */
+let RPT_LAST_PRESET = '';
+const RPT_COLORS = ['#5b8def','#48bb78','#e6a23c','#a48fdb','#e6577a','#38b2ac','#ed8936','#718096','#9f7aea'];
+
+MGMT_REPORTS.push(
+  {key:'backlogCustomer', label:'Order Backlog - Customers', dated:false, note:'Customer P.O lines not yet fully dispatched'},
+  {key:'backlogVendor',   label:'Order Backlog - Vendors',   dated:false, note:'Vendor P.O lines not yet fully received'},
+  {key:'gstSummary',      label:'GST Summary (HSN / Rate)',  dated:true,  note:'Output tax per month by rate and HSN'},
+  {key:'gstNet',          label:'GST Net Payable',           dated:true,  note:'Output tax minus input tax credit per month'},
+  {key:'marginItem',      label:'Profit Margin - Items',     dated:true,  note:'Outward sale price vs inventory cost per item'},
+  {key:'marginCustomer',  label:'Profit Margin - Customers', dated:true,  note:'Outward sale price vs inventory cost per customer'},
+  {key:'salesFunnel',     label:'Sales Funnel',              dated:true,  note:'Leads, enquiries, quotes, P.Os, invoices per sales person'},
+  {key:'salesTargets',    label:'Sales Targets',             dated:true,  note:'Monthly target vs P.O value booked per Sales POC'}
+);
+
+function inrTxt(n){ return '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN'); }
+function rptLc(v){ return String(v == null ? '' : v).trim().toLowerCase(); }
+function rptMonthLabel(m){
+  const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return /^\d{4}-\d{2}$/.test(m) ? MON[parseInt(m.slice(5)) - 1] + ' ' + m.slice(0, 4) : m;
+}
+/* one display name per person, so "ravi" and "Ravi K" count as the same user */
+function rptPerson(v){
+  const t = String(v == null ? '' : v).trim();
+  if(!t) return '(blank)';
+  const lc = t.toLowerCase();
+  const u = (Array.isArray(USERS) ? USERS : []).find(x => rptLc(x.name) === lc || rptLc(x.username) === lc);
+  return u ? String(u.name || u.username) : t;
+}
+function rptDaysLate(due){
+  const d = rptDateVal(due);
+  if(!d) return '';
+  const diff = Math.floor((new Date(rptIso(new Date())).getTime() - new Date(d).getTime()) / 86400000);
+  return diff > 0 ? diff : 0;
+}
+
+/* ----- backlog lines (shared with the daily brief) ----- */
+function rptBacklogLines(loc, vendor){
+  const poKey = vendor ? 'vendorPO' : 'customerPO';
+  const mvKey = vendor ? 'inward' : 'outward';
+  const mvPo  = vendor ? 'poNumber' : 'customerPO';
+  const moves = rptList(loc, mvKey);
+  const out = [];
+  rptList(loc, poKey).forEach(p => {
+    const st = String(p.status || 'Non-Executed');
+    if(st === 'Executed' || st === 'Cancelled') return;
+    const ordered = rptNum(p.qty);
+    const pn = rptLc(p.poNumber), it = rptLc(p.item);
+    let done = 0;
+    if(pn){
+      moves.forEach(m => {
+        if(rptLc(m[mvPo]) !== pn) return;
+        const mi = rptLc(m.item);
+        if(!mi || !it || mi === it) done += rptNum(m.qty);
+      });
+    }
+    const pending = Math.max(0, ordered - done);
+    if(ordered > 0 && pending <= 0) return;
+    const price = rptNum(p.unitPrice);
+    const due = vendor ? (p.oaDodDate || '') : (p.dod || '');
+    out.push({
+      party: String((vendor ? p.vendor : p.customer) || '').trim() || '(blank)',
+      poNumber: p.poNumber || '', poDate: p.poDate || '', item: p.item || '',
+      ordered: ordered, done: done, pending: pending, value: pending * price,
+      due: due, late: rptDaysLate(due), status: st, loc: loc
+    });
+  });
+  return out;
+}
+
+/* ----- charts ----- */
+function rptChartHtml(R){
+  const c = R && R.chart;
+  if(!c) return '';
+  let data = c.data;
+  if(!data){
+    const rows = rptAllRows(R);
+    data = rows.map(r => [String(r[c.labelIdx]), rptNum(r[c.valIdx])]);
+  }
+  data = data.filter(d => d[1] !== 0);
+  if(!data.length) return '';
+  if(c.sort !== false) data = data.slice().sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
+  const MAXN = 12;
+  if(c.type === 'donut'){
+    let parts = data.slice(0, 8);
+    const rest = data.slice(8).reduce((a, d) => a + d[1], 0);
+    if(rest > 0) parts.push(['Others', rest]);
+    const total = parts.reduce((a, d) => a + d[1], 0) || 1;
+    let ang = -Math.PI / 2, segs = '', legend = '';
+    parts.forEach((d, i) => {
+      const frac = d[1] / total;
+      const a2 = ang + frac * Math.PI * 2;
+      const col = RPT_COLORS[i % RPT_COLORS.length];
+      if(frac >= 0.9999){
+        segs += '<circle cx="90" cy="90" r="64" fill="none" stroke="' + col + '" stroke-width="34"/>';
+      } else {
+        const x1 = 90 + 64 * Math.cos(ang), y1 = 90 + 64 * Math.sin(ang);
+        const x2 = 90 + 64 * Math.cos(a2), y2 = 90 + 64 * Math.sin(a2);
+        segs += '<path d="M' + x1.toFixed(2) + ' ' + y1.toFixed(2) + ' A64 64 0 ' + (frac > 0.5 ? 1 : 0) + ' 1 ' + x2.toFixed(2) + ' ' + y2.toFixed(2)
+          + '" fill="none" stroke="' + col + '" stroke-width="34"/>';
+      }
+      legend += '<div style="display:flex;align-items:center;gap:6px;font-size:12px;margin:3px 0;">'
+        + '<span style="width:10px;height:10px;border-radius:2px;background:' + col + ';flex-shrink:0;"></span>'
+        + '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(d[0]) + '</span>'
+        + '<b style="font-family:\'IBM Plex Mono\',monospace;">' + Math.round(frac * 1000) / 10 + '%</b></div>';
+      ang = a2;
+    });
+    return '<div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap;margin:6px 0 16px 0;">'
+      + '<svg viewBox="0 0 180 180" style="width:170px;height:170px;flex-shrink:0;">' + segs + '</svg>'
+      + '<div style="flex:1;min-width:200px;">' + (c.title ? '<div style="font-size:11px;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">' + esc(c.title) + '</div>' : '') + legend + '</div></div>';
+  }
+  data = data.slice(0, MAXN);
+  const max = Math.max.apply(null, data.map(d => Math.abs(d[1]))) || 1;
+  const LW = 170, BW = 330, H = 24;
+  let svg = '';
+  data.forEach((d, i) => {
+    const y = i * H + 4;
+    const w = Math.max(2, Math.abs(d[1]) / max * BW);
+    const lbl = d[0].length > 24 ? d[0].slice(0, 23) + '…' : d[0];
+    const col = d[1] < 0 ? '#e6577a' : (c.color || '#5b8def');
+    const val = c.pct ? (Math.round(d[1] * 10) / 10) + '%' : (c.money === false ? Math.round(d[1] * 100) / 100 : inrTxt(d[1]));
+    svg += '<text x="' + (LW - 8) + '" y="' + (y + 15) + '" text-anchor="end" font-size="11" fill="currentColor">' + esc(lbl) + '</text>'
+      + '<rect x="' + LW + '" y="' + (y + 3) + '" width="' + w.toFixed(1) + '" height="16" rx="3" fill="' + col + '"/>'
+      + '<text x="' + (LW + w + 6).toFixed(1) + '" y="' + (y + 15) + '" font-size="11" fill="currentColor">' + esc(String(val)) + '</text>';
+  });
+  return '<div style="margin:4px 0 16px 0;color:var(--text);">'
+    + (c.title ? '<div style="font-size:11px;text-transform:uppercase;color:var(--muted);margin-bottom:6px;">' + esc(c.title) + (data.length >= MAXN ? ' (top ' + MAXN + ')' : '') + '</div>' : '')
+    + '<svg viewBox="0 0 620 ' + (data.length * H + 8) + '" style="width:100%;max-width:760px;height:auto;">' + svg + '</svg></div>';
+}
+
+/* ----- result rows (with drill-down links) ----- */
+function rptRowHtml(R, r){
+  return '<tr>' + r.map((v, i) => {
+    const num = R.numIdx.includes(i);
+    let inner = esc(v == null ? '' : v);
+    if(R.drill && i === R.drillIdx && String(v) !== '' && String(v) !== '(blank)'){
+      inner = '<a href="javascript:void(0)" style="color:var(--accent);text-decoration:underline;" data-k="' + esc(v)
+        + '" onclick="crDrill(this.getAttribute(\'data-k\'))" title="Show the records behind this line">' + inner + '</a>';
+    }
+    return '<td' + (num ? ' class="rpt-num"' : '') + '>' + inner + '</td>';
+  }).join('') + '</tr>';
+}
+
+/* ----- new report builders + chart / drill specs for every report ----- */
+function crBuildAll(key, locs, from, to){
+  const all = k => { const out = []; locs.forEach(loc => rptList(loc, k).forEach(r => out.push(r))); return out; };
+  let out;
+
+  if(key === 'backlogCustomer' || key === 'backlogVendor'){
+    const vendor = key === 'backlogVendor';
+    let lines = [];
+    locs.forEach(loc => { lines = lines.concat(rptBacklogLines(loc, vendor)); });
+    lines.sort((a, b) => String(rptDateVal(a.due) || '9999').localeCompare(String(rptDateVal(b.due) || '9999')));
+    const rows = lines.map(l => [l.party, l.poNumber, fd(l.poDate), l.item, l.ordered, l.done, l.pending, r2(l.value), fd(l.due), l.late, l.status]);
+    const agg = new Map();
+    lines.forEach(l => agg.set(l.party, (agg.get(l.party) || 0) + l.value));
+    out = { headers:[vendor ? 'Vendor' : 'Customer', 'P.O No', 'P.O Date', 'Item', 'Ordered', vendor ? 'Received' : 'Dispatched', 'Pending Qty', 'Pending Value', 'Due Date', 'Days Late', 'Status'],
+      rows: rows, numIdx:[4,5,6,7],
+      chart:{type:'bar', title:'Pending value by ' + (vendor ? 'vendor' : 'customer'), data: Array.from(agg.entries())},
+      share:[lines.length + ' open lines, pending value ' + inrTxt(lines.reduce((a, l) => a + l.value, 0)),
+             lines.filter(l => l.late > 0).length + ' lines past due date'] };
+  }
+  else if(key === 'gstSummary'){
+    const map = new Map();
+    all('salesAccounts').filter(r => rptInRange(r.date, from, to)).forEach(r => {
+      const d = rptDateVal(r.date); const m = d ? d.slice(0, 7) : '(no date)';
+      const rate = rptNum(r.igstPct) > 0 ? rptNum(r.igstPct) : rptNum(r.cgstPct) + rptNum(r.sgstPct);
+      const items = saItems(r);
+      const invTaxable = rptNum(r.taxable);
+      const itemSum = items.reduce((a, it) => a + rptNum(it.amount), 0);
+      const lines = items.length ? items : [{hsnSac: r.hsnSac, amount: invTaxable}];
+      lines.forEach(it => {
+        const share = itemSum > 0 ? rptNum(it.amount) / itemSum : 1 / lines.length;
+        const k = m + '|' + rate + '|' + (String(it.hsnSac || r.hsnSac || '').trim() || '(no HSN)');
+        if(!map.has(k)) map.set(k, [0, 0, 0, 0]);
+        const a = map.get(k);
+        a[0] += invTaxable * share; a[1] += rptNum(r.cgst) * share; a[2] += rptNum(r.sgst) * share; a[3] += rptNum(r.igst) * share;
+      });
+    });
+    const gmap = new Map();
+    Array.from(map.keys()).sort().forEach(k => {
+      const p = k.split('|'); const a = map.get(k);
+      const g = rptMonthLabel(p[0]);
+      if(!gmap.has(g)) gmap.set(g, []);
+      gmap.get(g).push([g, p[1] + '%', p[2], r2(a[0]), r2(a[1]), r2(a[2]), r2(a[3]), r2(a[1] + a[2] + a[3])]);
+    });
+    const groups = Array.from(gmap.entries()).map(e => ({name: e[0], rows: e[1]}));
+    out = { headers:['Month','GST Rate','HSN / SAC','Taxable Value','CGST','SGST','IGST','Total Tax'], groups: groups,
+      count: groups.reduce((n, g) => n + g.rows.length, 0), numIdx:[3,4,5,6,7] };
+  }
+  else if(key === 'gstNet'){
+    const map = new Map();
+    const get = m => { if(!map.has(m)) map.set(m, [0, 0, 0, 0]); return map.get(m); };
+    all('salesAccounts').filter(r => rptInRange(r.date, from, to)).forEach(r => {
+      const d = rptDateVal(r.date); const a = get(d ? d.slice(0, 7) : '(no date)');
+      a[0] += rptNum(r.taxable); a[1] += rptNum(r.cgst) + rptNum(r.sgst) + rptNum(r.igst);
+    });
+    all('purchaseAccounts').filter(r => rptInRange(r.date, from, to)).forEach(r => {
+      const d = rptDateVal(r.date); const a = get(d ? d.slice(0, 7) : '(no date)');
+      a[2] += rptNum(r.taxableValue); a[3] += rptNum(r.cgst) + rptNum(r.sgst) + rptNum(r.igst);
+    });
+    const rows = Array.from(map.keys()).sort().map(m => {
+      const a = map.get(m);
+      return [rptMonthLabel(m), r2(a[0]), r2(a[1]), r2(a[2]), r2(a[3]), r2(a[1] - a[3])];
+    });
+    out = { headers:['Month','Sales Taxable','Output Tax','Purchase Taxable','Input Tax Credit','Net GST Payable'], rows: rows, numIdx:[1,2,3,4,5],
+      chart:{type:'bar', title:'Net GST payable by month', labelIdx:0, valIdx:5, sort:false},
+      share:['Net GST payable ' + inrTxt(rows.reduce((a, r) => a + r[5], 0))] };
+  }
+  else if(key === 'marginItem' || key === 'marginCustomer'){
+    const byItem = key === 'marginItem';
+    const cost = new Map();
+    locs.forEach(loc => rptList(loc, 'inventory').forEach(i => { const k = rptLc(i.name); if(k && rptNum(i.cost) > 0 && !cost.has(k)) cost.set(k, rptNum(i.cost)); }));
+    const map = new Map();
+    let noCost = 0;
+    all('outward').filter(r => rptInRange(r.date, from, to)).forEach(r => {
+      const k = byItem ? (String(r.item || '').trim() || '(blank)') : (String(r.customer || '').trim() || '(blank)');
+      if(!map.has(k)) map.set(k, [0, 0, 0, 0]);
+      const a = map.get(k);
+      const q = rptNum(r.qty), rev = q * rptNum(r.unitPrice);
+      const c = cost.get(rptLc(r.item));
+      a[0] += q; a[1] += rev;
+      if(c != null) a[2] += q * c; else { a[3]++; noCost++; }
+    });
+    const rows = Array.from(map.entries()).map(e => {
+      const a = e[1]; const m = a[1] - a[2];
+      return [e[0], r2(a[0]), r2(a[1]), r2(a[2]), r2(m), a[1] ? (Math.round(m / a[1] * 1000) / 10) + '%' : '-', a[3] ? a[3] + ' line(s) without cost' : ''];
+    }).sort((x, y) => y[4] - x[4]);
+    out = { headers:[byItem ? 'Item' : 'Customer', 'Qty Sold', 'Revenue', 'Cost', 'Margin', 'Margin %', 'Note'], rows: rows, numIdx:[1,2,3,4],
+      chart:{type:'bar', title:'Margin by ' + (byItem ? 'item' : 'customer'), labelIdx:0, valIdx:4},
+      noteExtra: noCost ? noCost + ' outward line(s) have no matching inventory cost and are counted at zero cost' : '' };
+  }
+  else if(key === 'salesFunnel'){
+    const map = new Map();
+    const get = p => { if(!map.has(p)) map.set(p, [0, 0, 0, 0, 0, 0, 0]); return map.get(p); };
+    locs.forEach(loc => {
+      rptList(loc, 'leads').filter(r => rptInRange(r.date, from, to)).forEach(r => { get(rptPerson(r.salesPerson || r.addedBy))[0]++; });
+      rptList(loc, 'enquiry').filter(r => rptInRange(r.date, from, to)).forEach(r => { get(rptPerson(r.salesPerson || r.assignedTo || r.addedBy))[1]++; });
+      rptList(loc, 'quotations').filter(r => rptInRange(r.quoteDate, from, to)).forEach(r => { const a = get(rptPerson(r.salesPoc || r.addedBy)); a[2]++; a[3] += rptNum(r.totalPrice); });
+      const poOwner = new Map();
+      const seenPo = new Set();
+      rptList(loc, 'customerPO').forEach(r => {
+        const pn = rptLc(r.poNumber);
+        const who = rptPerson(r.salesPoc || r.addedBy);
+        if(pn && !poOwner.has(pn)) poOwner.set(pn, who);
+        if(!rptInRange(r.poDate, from, to)) return;
+        const a = get(who);
+        if(!pn || !seenPo.has(pn)){ a[4]++; if(pn) seenPo.add(pn); }
+        a[5] += rptNum(r.totalValue) || rptNum(r.qty) * rptNum(r.unitPrice);
+      });
+      rptList(loc, 'salesAccounts').filter(r => rptInRange(r.date, from, to)).forEach(r => {
+        const who = poOwner.get(rptLc(r.poNo));
+        get(who || '(not linked to a P.O)')[6] += rptNum(r.invoiceValue);
+      });
+    });
+    const rows = Array.from(map.entries()).sort((a, b) => b[1][5] - a[1][5])
+      .map(e => [e[0], e[1][0], e[1][1], e[1][2], r2(e[1][3]), e[1][4], r2(e[1][5]), r2(e[1][6]), rptPct(e[1][4], e[1][2])]);
+    const tot = i => rows.reduce((a, r) => a + rptNum(r[i]), 0);
+    out = { headers:['Sales Person','Leads','Enquiries','Quotes','Quoted Value','P.Os','P.O Value','Invoiced Value','P.Os per Quote'], rows: rows, numIdx:[1,2,3,4,5,6,7],
+      chart:{type:'bar', title:'Funnel (all sales people)', money:false, sort:false, color:'#a48fdb',
+        data:[['Leads', tot(1)], ['Enquiries', tot(2)], ['Quotes', tot(3)], ['P.Os', tot(5)]]} };
+  }
+  else if(key === 'salesTargets'){
+    const fromM = from ? from.slice(0, 7) : '', toM = to ? to.slice(0, 7) : '';
+    const inM = m => (!fromM || m >= fromM) && (!toM || m <= toM);
+    const map = new Map();
+    const get = (p, m) => { const k = p + '|' + m; if(!map.has(k)) map.set(k, [p, m, 0, 0]); return map.get(k); };
+    locs.forEach(loc => {
+      rptList(loc, 'salesTargets').forEach(t => { if(inM(t.month)) get(rptPerson(t.poc), t.month)[2] += rptNum(t.target); });
+      rptList(loc, 'customerPO').forEach(r => {
+        const d = rptDateVal(r.poDate); if(!d) return;
+        const m = d.slice(0, 7); if(!inM(m)) return;
+        get(rptPerson(r.salesPoc || r.addedBy), m)[3] += rptNum(r.totalValue) || rptNum(r.qty) * rptNum(r.unitPrice);
+      });
+    });
+    const list = Array.from(map.values()).filter(a => a[2] > 0)
+      .sort((a, b) => (b[1].localeCompare(a[1])) || a[0].localeCompare(b[0]));
+    const rows = list.map(a => [a[0], rptMonthLabel(a[1]), r2(a[2]), r2(a[3]), rptPct(a[3], a[2]), r2(Math.max(0, a[2] - a[3]))]);
+    out = { headers:['Sales POC','Month','Target','Booked (P.O value)','Achieved','Gap'], rows: rows, numIdx:[2,3,5],
+      chart:{type:'bar', title:'Achievement % of target', pct:true, data: list.map(a => [a[0] + ' ' + rptMonthLabel(a[1]), a[2] ? a[3] / a[2] * 100 : 0])} };
+  }
+  else {
+    out = crBuild(key, locs, from, to);
+    const spec = {
+      salesMonthly:    {chart:{type:'bar', title:'Invoice value by month', labelIdx:0, valIdx:4, sort:false}},
+      topCustomers:    {chart:{type:'donut', title:'Share of sales', labelIdx:1, valIdx:3}, drillIdx:1, drill:'customerInv'},
+      receivables:     {chart:{type:'bar', title:'Outstanding by customer', labelIdx:0, valIdx:7, color:'#e6577a'}, drillIdx:0, drill:'customerOpen'},
+      payables:        {chart:{type:'bar', title:'Outstanding by supplier', labelIdx:0, valIdx:7, color:'#ed8936'}, drillIdx:0, drill:'supplierOpen'},
+      stock:           {chart:{type:'bar', title:'Stock value by item', labelIdx:0, valIdx:5, color:'#38b2ac'}},
+      quoteConversion: {chart:{type:'bar', title:'Quoted value by Sales POC', labelIdx:0, valIdx:2}},
+      leaveSummary:    {chart:{type:'bar', title:'Approved leave days', labelIdx:0, valIdx:2, money:false, color:'#a48fdb'}}
+    }[key] || {};
+    Object.assign(out, spec);
+    if(key === 'receivables' || key === 'payables'){
+      const tot = out.rows.reduce((a, r) => a + r[7], 0), old = out.rows.reduce((a, r) => a + r[6], 0);
+      out.share = ['Total outstanding ' + inrTxt(tot) + ' across ' + out.rows.length + ' parties', 'Over 90 days ' + inrTxt(old)];
+    }
+  }
+  if(out.drill == null && (key === 'backlogCustomer' || key === 'backlogVendor')){ out.drillIdx = 0; out.drill = key === 'backlogVendor' ? 'vendorBacklog' : 'customerBacklog'; }
+  return out;
+}
+
+/* ----- drill-down ----- */
+function crDrill(k){
+  const R = CRR.result;
+  if(!R || !R.drill || !isAdmin()) return;
+  const locs = rptLocList(CRR.loc);
+  const lk = rptLc(k);
+  const multi = locs.length > 1;
+  let headers, rows = [], numIdx, label;
+  const pre = loc => multi ? [loc] : [];
+  if(R.drill === 'customerOpen' || R.drill === 'customerInv'){
+    const open = R.drill === 'customerOpen';
+    label = (open ? 'Open invoices - ' : 'Invoices - ') + k;
+    headers = (multi ? ['Location'] : []).concat(['Invoice No','Date','Due Date','Days Overdue','Invoice Value','Received','Balance','Status']);
+    locs.forEach(loc => rptList(loc, 'salesAccounts').forEach(r => {
+      if(rptLc(r.customer || '(blank)') !== lk) return;
+      const bal = rptNum(salesBalance(r));
+      if(open && bal <= 0) return;
+      if(!open && !rptInRange(r.date, CRR.from, CRR.to)) return;
+      const od = crDaysOverdue(r.date, r.creditDays);
+      rows.push(pre(loc).concat([r.invNo || '', fd(r.date), fd(salesDueInfo(r).dueDate), od == null ? 0 : od, r2(r.invoiceValue), r2(r.amountReceived), r2(bal), r.paymentStatus || 'Pending']));
+    }));
+    numIdx = [4, 5, 6].map(i => i + (multi ? 1 : 0));
+  } else if(R.drill === 'supplierOpen'){
+    label = 'Open bills - ' + k;
+    headers = (multi ? ['Location'] : []).concat(['Supplier Invoice','Date','Days Overdue','Gross Total','Paid','Balance','Status']);
+    locs.forEach(loc => rptList(loc, 'purchaseAccounts').forEach(r => {
+      if(rptLc(r.supplier || '(blank)') !== lk) return;
+      const bal = crPurchaseBalance(r);
+      if(bal <= 0) return;
+      const od = crDaysOverdue(r.date, r.creditDays);
+      rows.push(pre(loc).concat([r.supplierInvoiceNo || '', fd(r.date), od == null ? 0 : od, r2(r.grossTotal), r2(r.amountPaid), r2(bal), r.paymentStatus || '']));
+    }));
+    numIdx = [3, 4, 5].map(i => i + (multi ? 1 : 0));
+  } else if(R.drill === 'customerBacklog' || R.drill === 'vendorBacklog'){
+    const vendor = R.drill === 'vendorBacklog';
+    label = 'Pending P.O lines - ' + k;
+    headers = (multi ? ['Location'] : []).concat(['P.O No','P.O Date','Item','Ordered','Done','Pending','Pending Value','Due','Days Late']);
+    locs.forEach(loc => rptBacklogLines(loc, vendor).filter(l => rptLc(l.party) === lk).forEach(l => {
+      rows.push(pre(loc).concat([l.poNumber, fd(l.poDate), l.item, l.ordered, l.done, l.pending, r2(l.value), fd(l.due), l.late]));
+    }));
+    numIdx = [3, 4, 5, 6].map(i => i + (multi ? 1 : 0));
+  } else return;
+  CRR.parent = R;
+  CRR.result = rptBuildResult({ key: R.srcKey, tab:'reports', label: label, headers: headers, rows: rows, numIdx: numIdx, locs: locs,
+    view:'mgmt', criteria:'Drill-down from ' + R.label + '   |   ' + R.criteria });
+  render();
+}
+function crBack(){ if(CRR.parent){ CRR.result = CRR.parent; CRR.parent = null; render(); } }
+
+/* ----- sales targets admin ----- */
+function crTargetLoc(){ return (CRR.loc && CRR.loc !== 'BOTH') ? CRR.loc : currentLocation; }
+async function crAddTarget(){
+  if(!isAdmin()) return;
+  const gv = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+  const poc = gv('st-poc'), month = gv('st-month'), target = parseFloat(gv('st-target'));
+  if(!poc || !/^\d{4}-\d{2}$/.test(month) || !(target > 0)){ alert('Enter Sales POC, month and a target amount.'); return; }
+  const loc = crTargetLoc();
+  await rptEnsureLoaded([loc]);
+  const d = DATA[loc];
+  if(!Array.isArray(d.salesTargets)) d.salesTargets = [];
+  const name = rptPerson(poc);
+  const ex = d.salesTargets.find(t => rptPerson(t.poc) === name && t.month === month);
+  if(ex){ ex.target = target; ex.updatedBy = actorName(); }
+  else d.salesTargets.push({ id: uid(), poc: name, month: month, target: target, addedBy: actorName() });
+  await saveLocation(loc);
+  logAudit('DATA CHANGE', 'Sales target set: ' + name + ' ' + month + ' = ' + target + ' (' + loc + ')');
+  CRR.result = null;
+  render();
+}
+async function crDeleteTarget(id){
+  if(!isAdmin()) return;
+  const loc = crTargetLoc();
+  const d = DATA[loc];
+  if(!d || !Array.isArray(d.salesTargets)) return;
+  if(!confirm('Delete this target?')) return;
+  d.salesTargets = d.salesTargets.filter(t => t.id !== id);
+  await saveLocation(loc);
+  CRR.result = null;
+  render();
+}
+function crTargetsPanel(){
+  const loc = crTargetLoc();
+  const list = ((DATA[loc] && DATA[loc].salesTargets) || []).slice().sort((a, b) => String(b.month).localeCompare(String(a.month)) || String(a.poc).localeCompare(String(b.poc)));
+  const pocs = (typeof salesPocUsers === 'function' ? salesPocUsers() : []).map(u => '<option value="' + esc(u.name || u.username) + '">').join('');
+  let rows = '';
+  list.slice(0, 60).forEach(t => {
+    rows += '<tr><td>' + esc(t.poc) + '</td><td>' + esc(rptMonthLabel(t.month)) + '</td><td class="rpt-num">' + rptMoney(rptNum(t.target)) + '</td>'
+      + '<td><button type="button" class="icon-btn" onclick="crDeleteTarget(\'' + esc(t.id) + '\')">Delete</button></td></tr>';
+  });
+  return '<div style="margin-top:14px;padding-top:12px;border-top:1px dashed var(--border);">'
+    + '<div style="font-size:11px;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Set monthly targets (' + esc(loc) + ')</div>'
+    + '<div class="form-grid">'
+    + '<div class="field"><label>Sales POC</label><input type="text" id="st-poc" list="st-poc-list" autocomplete="off" placeholder="Pick a sales person"><datalist id="st-poc-list">' + pocs + '</datalist></div>'
+    + '<div class="field"><label>Month</label><input type="month" id="st-month" value="' + esc(rptIso(new Date()).slice(0, 7)) + '"></div>'
+    + '<div class="field"><label>Target (&#8377;)</label><input type="number" id="st-target" min="0" step="1000"></div>'
+    + '</div>'
+    + '<button type="button" class="btn" style="margin-top:10px;" onclick="crAddTarget()">Save Target</button>'
+    + (rows ? '<table style="margin-top:12px;"><thead><tr><th>Sales POC</th><th>Month</th><th style="text-align:right;">Target</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>' : '')
+    + '</div>';
+}
+
+/* ----- saved reports (Report Builder) ----- */
+let SAVED_RPTS = { list: [] };
+let SAVED_RPTS_STATE = '';   /* '' | 'loading' | 'ok' */
+async function srLoad(){
+  SAVED_RPTS_STATE = 'loading';
+  try{
+    const doc = await fsGet('saved_reports');
+    SAVED_RPTS = (doc && Array.isArray(doc.list)) ? doc : { list: [] };
+  }catch(e){ console.error('saved reports load failed', e); SAVED_RPTS = { list: [] }; }
+  SAVED_RPTS_STATE = 'ok';
+  if(currentTab === 'reports') render();
+}
+function srMine(){
+  const me = session ? session.username : '';
+  return (SAVED_RPTS.list || []).filter(x => x.owner === me);
+}
+async function srSave(){
+  const el = document.getElementById('sr-name');
+  const name = el ? el.value.trim() : '';
+  if(!name){ alert('Give the saved report a name.'); return; }
+  if(!rptSource(RPT.src)){ alert('Choose a module in the criteria first.'); return; }
+  let period = '';
+  if(RPT_LAST_PRESET){
+    const r = rptRange(RPT_LAST_PRESET);
+    if(r.from === (RPT.from || '') && r.to === (RPT.to || '')) period = RPT_LAST_PRESET;
+  }
+  const crit = { src:RPT.src, dateField:RPT.dateField, from:RPT.from, to:RPT.to, loc:RPT.loc, cols:RPT.cols, fKey:RPT.fKey, fVal:RPT.fVal,
+                 search:RPT.search, sortKey:RPT.sortKey, sortDir:RPT.sortDir, groupKey:RPT.groupKey };
+  const fresh = await fsGet('saved_reports');
+  SAVED_RPTS = (fresh && Array.isArray(fresh.list)) ? fresh : { list: [] };
+  const me = session ? session.username : '';
+  const ex = SAVED_RPTS.list.find(x => x.owner === me && x.name.toLowerCase() === name.toLowerCase());
+  if(ex){ ex.crit = crit; ex.period = period; ex.updatedAt = new Date().toISOString(); }
+  else SAVED_RPTS.list.push({ id: uid(), owner: me, ownerName: session ? session.name : '', name: name, crit: crit, period: period, createdAt: new Date().toISOString() });
+  await fsSet('saved_reports', SAVED_RPTS);
+  logAudit('DATA CHANGE', 'Saved report "' + name + '"');
+  render();
+}
+async function srRun(id){
+  const x = srMine().find(s => s.id === id);
+  if(!x) return;
+  if(!rptSource(x.crit.src)){ alert('You no longer have access to the module this report uses.'); return; }
+  RPT = Object.assign({src:'', dateField:'', from:'', to:'', loc:'', cols:null, fKey:'', fVal:'', search:'', sortKey:'', sortDir:'desc', groupKey:'', result:null}, JSON.parse(JSON.stringify(x.crit)));
+  if(x.period){ const r = rptRange(x.period); RPT.from = r.from; RPT.to = r.to; RPT_LAST_PRESET = x.period; }
+  RPT.result = null;
+  RPT_VIEW = 'builder';
+  await runReport();
+}
+async function srDelete(id){
+  const x = srMine().find(s => s.id === id);
+  if(!x || !confirm('Delete saved report "' + x.name + '"?')) return;
+  const fresh = await fsGet('saved_reports');
+  SAVED_RPTS = (fresh && Array.isArray(fresh.list)) ? fresh : { list: [] };
+  SAVED_RPTS.list = SAVED_RPTS.list.filter(s => s.id !== id);
+  await fsSet('saved_reports', SAVED_RPTS);
+  render();
+}
+function savedReportsHtml(){
+  if(SAVED_RPTS_STATE === '') setTimeout(srLoad, 0);
+  const PER = {tm:'This month', lm:'Last month', d30:'Last 30 days', fy:'This financial year', all:'All time'};
+  const mine = srMine();
+  let list;
+  if(SAVED_RPTS_STATE !== 'ok') list = '<div style="font-size:12px;color:var(--muted);">Loading saved reports...</div>';
+  else if(!mine.length) list = '<div style="font-size:12px;color:var(--muted);">No saved reports yet. Set up the criteria below, then save them here to run with one click next time.</div>';
+  else {
+    list = '<div style="display:flex;flex-wrap:wrap;gap:8px;">' + mine.map(x => {
+      const s = REPORT_SOURCES.find(r => r.key === x.crit.src);
+      const per = x.period ? PER[x.period] : ((x.crit.from || x.crit.to) ? 'Fixed dates' : 'All time');
+      return '<div style="display:flex;align-items:center;gap:6px;background:var(--panel-2);border:1px solid var(--border);border-radius:6px;padding:6px 8px;">'
+        + '<button type="button" class="icon-btn" onclick="srRun(\'' + esc(x.id) + '\')" title="' + esc((s ? s.label : x.crit.src) + ' - ' + per) + '">&#9654; ' + esc(x.name) + '</button>'
+        + '<span style="font-size:11px;color:var(--muted);">' + esc(per) + '</span>'
+        + '<button type="button" class="icon-btn" onclick="srDelete(\'' + esc(x.id) + '\')" title="Delete">&#10005;</button></div>';
+    }).join('') + '</div>';
+  }
+  return '<div class="panel"><div class="panel-head"><h3>&#11088; My Saved Reports</h3></div><div class="panel-body">'
+    + list
+    + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px;">'
+    + '<input type="text" id="sr-name" placeholder="Name for the current criteria, e.g. Monthly inward" style="flex:1;min-width:220px;">'
+    + '<button type="button" class="btn" onclick="srSave()">Save current criteria</button></div>'
+    + '<div style="font-size:11px;color:var(--muted);margin-top:6px;">Date shortcuts (This month, Last 30 days...) are saved as shortcuts, so they always roll forward.</div>'
+    + '</div></div>';
+}
+
+/* ----- WhatsApp share ----- */
+function rptShareText(R){
+  const lines = ['*SEV7EN - ' + R.label + '*', R.locLabel + ' | ' + R.generatedAt];
+  const per = (R.criteria.split('   |   ').find(x => /^Period:|^As of/.test(x)) || '');
+  if(per) lines.push(per);
+  lines.push('');
+  if(Array.isArray(R.share) && R.share.length) R.share.forEach(s => lines.push(s));
+  lines.push('Records: ' + R.count);
+  const all = rptAllRows(R);
+  const notMoney = /^(rank|open bills|invoices|records|qty|min qty|ordered|dispatched|pending qty|done|requests|leads|enquiries|quotes|quotations|p\.os|converted|approved days|pending days|rejected|records added|qty sold|days|days late|days overdue)/i;
+  const isMoneyCol = h => !notMoney.test(h) && !(String(R.srcKey).indexOf('backlog') === 0 && /^received$/i.test(h));
+  const money = { test: isMoneyCol };
+  R.numIdx.slice(0, 4).forEach(i => {
+    const t = rptSum(all, i);
+    lines.push(R.headers[i] + ': ' + (money.test(R.headers[i]) ? inrTxt(t) : Math.round(t * 100) / 100));
+  });
+  const li = rptLabelIdx(R);
+  const vi = R.numIdx.length ? R.numIdx[R.numIdx.length - 1] : -1;
+  if(all.length && vi >= 0 && !R.groups.some(g => g.name)){
+    lines.push('');
+    lines.push('Top lines:');
+    all.slice(0, 5).forEach(r => lines.push('- ' + r[li] + ': ' + (money.test(R.headers[vi]) ? inrTxt(r[vi]) : r[vi])));
+  }
+  return lines.join('\n');
+}
+function rptShareWA(){
+  const R = rptActiveResult();
+  if(!R){ alert('Run the report first.'); return; }
+  window.open('https://wa.me/?text=' + encodeURIComponent(rptShareText(R)), '_blank');
+}
+
+/* ----- daily brief (dashboard, admin) ----- */
+function dailyBriefData(loc){
+  const y = new Date(); y.setDate(y.getDate() - 1);
+  const yd = rptIso(y), td = rptIso(new Date());
+  const L = k => rptList(loc, k);
+  const onY = (r, k) => rptDateVal(r[k]) === yd;
+  const sales = L('salesAccounts').filter(r => onY(r, 'date'));
+  const coll = L('salesAccounts').filter(r => onY(r, 'paymentDate'));
+  const pos = L('customerPO').filter(r => onY(r, 'poDate'));
+  const overdue = L('salesAccounts').filter(r => rptNum(salesBalance(r)) > 0 && salesDueInfo(r).overdue);
+  const late = rptBacklogLines(loc, false).filter(l => { const d = rptDateVal(l.due); return d && d < td; });
+  return {
+    date: yd,
+    salesN: sales.length, salesV: sales.reduce((a, r) => a + rptNum(r.invoiceValue), 0),
+    collV: coll.reduce((a, r) => a + rptNum(r.amountReceived), 0), collN: coll.length,
+    dispN: L('outward').filter(r => onY(r, 'date')).length,
+    poN: new Set(pos.map(r => rptLc(r.poNumber) || r.id)).size,
+    poV: pos.reduce((a, r) => a + (rptNum(r.totalValue) || rptNum(r.qty) * rptNum(r.unitPrice)), 0),
+    quoteN: L('quotations').filter(r => onY(r, 'quoteDate')).length,
+    odN: overdue.length, odV: overdue.reduce((a, r) => a + rptNum(salesBalance(r)), 0),
+    lateN: late.length,
+    lowN: L('inventory').filter(i => rptNum(i.minQty) > 0 && rptNum(i.qty) < rptNum(i.minQty)).length,
+    leaveN: L('leaves').filter(r => String(r.status || 'Pending') === 'Pending').length
+  };
+}
+function dailyBriefShare(){
+  const b = dailyBriefData(currentLocation);
+  const t = ['*SEV7EN Daily Brief - ' + currentLocation + '*', 'Yesterday (' + fd(b.date) + ')', '',
+    'Sales: ' + b.salesN + ' invoice(s), ' + inrTxt(b.salesV),
+    'Collections: ' + inrTxt(b.collV),
+    'New customer P.Os: ' + b.poN + ', ' + inrTxt(b.poV),
+    'Quotes sent: ' + b.quoteN,
+    'Dispatches: ' + b.dispN, '',
+    'Overdue receivables: ' + b.odN + ' invoice(s), ' + inrTxt(b.odV),
+    'P.O lines past due date: ' + b.lateN,
+    'Low stock items: ' + b.lowN,
+    'Leave requests pending: ' + b.leaveN].join('\n');
+  window.open('https://wa.me/?text=' + encodeURIComponent(t), '_blank');
+}
+function dailyBriefOpen(view, key){ RPT_VIEW = view; if(key){ CRR.key = key; CRR.result = null; CRR.parent = null; } switchTab('reports'); }
+function dailyBriefHtml(){
+  if(!isAdmin() || !DATA[currentLocation]) return '';
+  const b = dailyBriefData(currentLocation);
+  const tile = (label, val, sub, warn, onclick) =>
+    '<div' + (onclick ? ' onclick="' + onclick + '" style="cursor:pointer;' : ' style="') + 'background:var(--panel-2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;">'
+    + '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:0.05em;color:var(--muted);">' + label + '</div>'
+    + '<div style="font-family:\'Oswald\',sans-serif;font-size:20px;font-weight:700;margin-top:2px;' + (warn ? 'color:var(--danger);' : '') + '">' + val + '</div>'
+    + (sub ? '<div style="font-size:11px;color:var(--muted);">' + sub + '</div>' : '') + '</div>';
+  return '<div class="panel" style="margin-bottom:18px;"><div class="panel-head"><h3>&#9728; Daily Brief &mdash; yesterday, ' + esc(fd(b.date)) + '</h3>'
+    + '<div class="panel-head-actions"><button type="button" class="export-btn" onclick="dailyBriefShare()" style="background:#25d366;">&#128172; WhatsApp</button></div></div>'
+    + '<div class="panel-body"><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;">'
+    + tile('Sales', inrTxt(b.salesV), b.salesN + ' invoice(s)', false, "dailyBriefOpen('mgmt','salesMonthly')")
+    + tile('Collections', inrTxt(b.collV), b.collN + ' payment(s)', false, '')
+    + tile('New P.Os', inrTxt(b.poV), b.poN + ' P.O(s)', false, "dailyBriefOpen('mgmt','salesFunnel')")
+    + tile('Quotes sent', String(b.quoteN), '', false, "dailyBriefOpen('mgmt','quoteConversion')")
+    + tile('Dispatches', String(b.dispN), '', false, '')
+    + tile('Overdue receivables', inrTxt(b.odV), b.odN + ' invoice(s)', b.odN > 0, "dailyBriefOpen('mgmt','receivables')")
+    + tile('P.O lines past due', String(b.lateN), 'not yet dispatched', b.lateN > 0, "dailyBriefOpen('mgmt','backlogCustomer')")
+    + tile('Low stock', String(b.lowN), 'below min qty', b.lowN > 0, "dailyBriefOpen('mgmt','stock')")
+    + tile('Leave pending', String(b.leaveN), 'awaiting approval', b.leaveN > 0, '')
+    + '</div></div></div>';
+}
+
+
 function renderReports(){
+  const v = rptView();
+  const top = tabHeader(currentLocation, 'Reports') + rptViewBar();
+  if(v === 'mine') return renderMyReports(top + secHead('&#128100;', 'My Reports'));
+  if(v === 'mgmt') return renderMgmtReports(top + secHead('&#128200;', 'Management Reports'));
   const srcs = rptAllowedSources();
-  const head = tabHeader(currentLocation, 'Reports') + secHead('&#128203;', 'Report Builder');
+  const head = top + savedReportsHtml() + secHead('&#128203;', 'Report Builder');
   if(!srcs.length){
     return `${head}
     <div class="panel"><div class="panel-body">
