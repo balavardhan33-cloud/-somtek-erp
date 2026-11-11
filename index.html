@@ -2277,9 +2277,37 @@ const AUDIT_TABLE_LABELS = {
   poContractDocs:'PO Contract Docs', inward:'Inward', outward:'Outward', logistics:'Logistics',
   futureShipments:'Future Shipments', invoice:'Invoice', sales:'Sales', employees:'HR Employees', attendance:'HR Attendance', leaves:'HR Leave', salaries:'HR Salary', automation:'Automation',
   pendingAssembly:'Pending Assembly', enquiry:'Enquiry', purchaseAccounts:'Purchase Accounts',
-  salesAccounts:'Sales Accounts', proformaInvoices:'Proforma Invoices', quotations:'Quotations'
+  salesAccounts:'Sales Accounts', proformaInvoices:'Proforma Invoices', quotations:'Quotations',
+  customers:'Customers', opportunities:'Opportunities', rfqs:'RFQs', followups:'Follow-ups', leads:'Leads',
+  salesQuotes:'Sales Quotes', salesPOs:'Sales Purchase Orders', poContracts:'PO Contracts', projects:'Projects',
+  tenders:'Tenders', salesActivities:'Sales Activities', soAcks:'Order Acknowledgements', dispatches:'Dispatches',
+  valveEnquiries:'Valve Enquiries', pumpEnquiries:'Pump Enquiries'
 };
+/* Every list in a company's data is tracked, including any table added later that has no label yet. */
+function auditTrackedKeys(d, prev){
+  const keys = new Set(Object.keys(AUDIT_TABLE_LABELS));
+  Object.keys(d || {}).forEach(k => { if(Array.isArray(d[k])) keys.add(k); });
+  Object.keys(prev || {}).forEach(k => keys.add(k));
+  return [...keys];
+}
+/* Short name of a record for the log: its number if it has one, otherwise who or what it is. */
+function auditRowLabel(r){
+  if(!r || typeof r !== 'object') return '';
+  const pick = ['enqNo','quoteNo','quotationNo','poNumber','poNo','invoiceNo','invNo','ackNo','soNo','dcNo','refNo','name','customer','company','vendor','item','itemName','title','employee'];
+  for(const k of pick){
+    let v = r[k];
+    if(Array.isArray(v)) v = v[0];
+    if(v != null && String(v).trim() !== '') return String(v).trim().slice(0, 30);
+  }
+  return '';
+}
+function auditNames(rows){
+  const names = [...new Set(rows.map(auditRowLabel).filter(Boolean))];
+  if(!names.length) return '';
+  return ' (' + names.slice(0, 3).join(', ') + (names.length > 3 ? ', +' + (names.length - 3) + ' more' : '') + ')';
+}
 
+let AUDIT_WRITE_QUEUE = Promise.resolve();
 async function loadAudit(){
   const doc = await fsGet('audit_log');
   AUDIT = (doc && Array.isArray(doc.list)) ? doc : { list: [] };
@@ -2299,7 +2327,9 @@ function logAudit(action, details, locOverride){
     action: action,
     details: details || ''
   };
-  (async () => {
+  /* One write at a time: each event waits for the previous one to be stored, so two events
+     logged close together (e.g. a save and a logout) cannot overwrite each other. */
+  AUDIT_WRITE_QUEUE = AUDIT_WRITE_QUEUE.then(async () => {
     try{
       const doc = await fsGet('audit_log');
       const list = (doc && Array.isArray(doc.list)) ? doc.list : [];
@@ -2313,7 +2343,7 @@ function logAudit(action, details, locOverride){
       AUDIT = { list: list };
       await fsSet('audit_log', AUDIT);
     }catch(e){ console.error('audit log append failed', e); }
-  })();
+  });
 }
 
 /* ---- change detection: snapshot + diff ---- */
@@ -2321,7 +2351,7 @@ function snapshotLocation(loc){
   const d = DATA[loc];
   if(!d) return;
   const snap = {};
-  Object.keys(AUDIT_TABLE_LABELS).forEach(k => { snap[k] = JSON.stringify(d[k] || []); });
+  auditTrackedKeys(d).forEach(k => { snap[k] = JSON.stringify(d[k] || []); });
   LAST_SNAP[loc] = snap;
 }
 function auditRowKey(r){
@@ -2333,7 +2363,7 @@ function diffLocationChanges(loc){
   const prev = LAST_SNAP[loc];
   if(!d || !prev) return [];
   const msgs = [];
-  Object.keys(AUDIT_TABLE_LABELS).forEach(k => {
+  auditTrackedKeys(d, prev).forEach(k => {
     const nowStr = JSON.stringify(d[k] || []);
     if(nowStr === (prev[k] || '[]')) return;
     let oldArr = [];
@@ -2341,14 +2371,14 @@ function diffLocationChanges(loc){
     const newArr = Array.isArray(d[k]) ? d[k] : [];
     const oldMap = new Map(oldArr.map(r => [auditRowKey(r), JSON.stringify(r)]));
     const newMap = new Map(newArr.map(r => [auditRowKey(r), JSON.stringify(r)]));
-    let added = 0, removed = 0, modified = 0;
-    newMap.forEach((v, kk) => { if(!oldMap.has(kk)) added++; else if(oldMap.get(kk) !== v) modified++; });
-    oldMap.forEach((v, kk) => { if(!newMap.has(kk)) removed++; });
+    const addedRows = [], editedRows = [], removedRows = [];
+    newArr.forEach(r => { const kk = auditRowKey(r); if(!oldMap.has(kk)) addedRows.push(r); else if(oldMap.get(kk) !== newMap.get(kk)) editedRows.push(r); });
+    oldArr.forEach(r => { if(!newMap.has(auditRowKey(r))) removedRows.push(r); });
     const parts = [];
-    if(added) parts.push(added + ' added');
-    if(modified) parts.push(modified + ' edited');
-    if(removed) parts.push(removed + ' deleted');
-    msgs.push(AUDIT_TABLE_LABELS[k] + ': ' + (parts.length ? parts.join(', ') : 'updated'));
+    if(addedRows.length) parts.push(addedRows.length + ' added' + auditNames(addedRows));
+    if(editedRows.length) parts.push(editedRows.length + ' edited' + auditNames(editedRows));
+    if(removedRows.length) parts.push(removedRows.length + ' deleted' + auditNames(removedRows));
+    msgs.push((AUDIT_TABLE_LABELS[k] || k) + ': ' + (parts.length ? parts.join(', ') : 'updated'));
   });
   return msgs;
 }
@@ -3066,7 +3096,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'SEV7EN v11.98';
+const APP_VERSION_LABEL = 'SEV7EN v11.99';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
