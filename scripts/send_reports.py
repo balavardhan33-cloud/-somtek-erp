@@ -191,7 +191,12 @@ def age_label(days):
     return ">" + str(days // 365) + " yrs"
 
 
-def sheet_for(section, loc, d, schema):
+def in_period(v, fr, to):
+    d = date_only(v)
+    return bool(d) and (not fr or d >= fr) and (not to or d <= to)
+
+
+def sheet_for(section, loc, d, schema, period=""):
     if section == "summary":
         sa, pa, inv = d.get("salesAccounts") or [], d.get("purchaseAccounts") or [], d.get("inventory") or []
         pending = lambda r: (r.get("paymentStatus") or "Pending") == "Pending"
@@ -237,9 +242,10 @@ def sheet_for(section, loc, d, schema):
     sec = (schema.get("sections") or {}).get(section) or {}
     keys, headers = sec.get("keys") or [], sec.get("headers") or []
     label = sec.get("label") or section
+    fr, to = period_range(period, {}) if period and period != "all" and sec.get("dateKey") else ("", "")
     rows = []
     for r in d.get(section) or []:
-        if isinstance(r, dict):
+        if isinstance(r, dict) and (not (fr or to) or in_period(r.get(sec["dateKey"]), fr, to)):
             rows.append([cell(r.get(k)) for k in keys] + [r.get("addedBy") or ""])
     return loc + " " + label, headers + ["Added By"], rows
 
@@ -257,6 +263,9 @@ def date_only(v):
 def period_range(p, b):
     now = datetime.now(IST).replace(tzinfo=None)
     iso = lambda d: d.strftime("%Y-%m-%d")
+    if p in ("lw", "tw"):
+        mon = now - timedelta(days=now.weekday() + (7 if p == "lw" else 0))
+        return iso(mon), iso(mon + timedelta(days=5))
     if p == "yday":
         d = now - timedelta(days=1)
         return iso(d), iso(d)
@@ -330,7 +339,7 @@ def build_workbook(s, schema, loc_cache):
         if loc not in loc_cache:
             loc_cache[loc] = fs_get("loc_" + loc) or {}
         d = loc_cache[loc]
-        jobs = [sheet_for(sec, loc, d, schema) for sec in s.get("sections") or []]
+        jobs = [sheet_for(sec, loc, d, schema, s.get("period") or "") for sec in s.get("sections") or []]
         if s.get("builder"):
             jobs.append(builder_sheet(s["builder"], loc, d))
         for name, headers, rows in jobs:
@@ -436,8 +445,15 @@ def main():
             secs = ", ".join((schema.get("sections") or {}).get(k, {}).get("label", k) for k in s.get("sections") or [])
             if s.get("builder"):
                 secs = ", ".join(filter(None, [secs, (s["builder"].get("label") or "") + " (Report Builder)"]))
+            per = (s.get("builder") or {}).get("period") if s.get("builder") else s.get("period")
+            per_txt = ""
+            if per and per != "all":
+                fr, to = period_range(per, s.get("builder") or {})
+                if fr:
+                    fmt = lambda x: datetime.strptime(x, "%Y-%m-%d").strftime("%d-%m-%Y")
+                    per_txt = f"\nPeriod: {fmt(fr)} to {fmt(to)}"
             body = (f"Hello,\n\nPlease find attached the {s.get('freq', '').lower()} report \"{s.get('name')}\" "
-                    f"({s.get('loc')}) generated on {stamp}.\n\nSections: {secs}\n\n- SEV7EN ERP (automatic email)\n")
+                    f"({s.get('loc')}) generated on {stamp}.{per_txt}\n\nSections: {secs}\n\n- SEV7EN ERP (automatic email)\n")
             send_mail(to, f"[SEV7EN] {s.get('name')} - {stamp}", body, fname, data)
             results[s["id"]] = "ok"
             print("Sent", s.get("name"), "to", ", ".join(to))
