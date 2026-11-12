@@ -850,17 +850,17 @@ const CHIP_SWITCHBOX_URI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAUAAAA
 
 const TABS = [
   {id:'dashboard', num:'', label:'Dashboard', icon:'&#128202;'},
+  {id:'sales', num:'06', label:'Sales', icon:'&#128200;'},
   {id:'salesdesk', num:'', label:'Sales Desk', icon:'&#128188;'},
+  {id:'accounts', num:'09', label:'Accounts', icon:'&#128176;'},
   {id:'inward', num:'02', label:'Inward', icon:'&#128230;'},
   {id:'inventory', num:'03', label:'Inventory', icon:'&#127970;'},
   {id:'outward', num:'04', label:'Outward', icon:'&#128666;'},
-  {id:'logistics', num:'05', label:'Logistics', icon:'&#128667;'},
-  {id:'sales', num:'06', label:'Sales', icon:'&#128200;'},
   {id:'automation', num:'07', label:'Automation', icon:'&#9881;'},
+  {id:'logistics', num:'05', label:'Logistics', icon:'&#128667;'},
   {id:'barcode', num:'', label:'Barcode Station', icon:'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 8v8M10 8v8M13 8v8M16 8v8"/></svg>'},
-  {id:'accounts', num:'09', label:'Accounts', icon:'&#128176;'},
-  {id:'hr', num:'11', label:'HR', icon:'&#128101;'},
   {id:'reports', num:'12', label:'Reports', icon:'&#128203;'},
+  {id:'hr', num:'11', label:'HR', icon:'&#128101;'},
   {id:'users', num:'', label:'Users', icon:'&#128100;'}
 ];
 
@@ -872,7 +872,7 @@ function normalizeSalesDeskTab(){
   if(map[currentTab]){ salesDeskSection = map[currentTab]; currentTab = 'salesdesk'; }
 }
 const ROLE_TABS = {
-  admin: ['dashboard','salesdesk','inward','inventory','outward','logistics','sales','automation','barcode','accounts','hr','reports','users'],
+  admin: ['dashboard','sales','salesdesk','accounts','inward','inventory','outward','automation','logistics','barcode','reports','hr','users'],
   stores: ['dashboard','inward','inventory','outward','barcode','reports'],
   logistics: ['dashboard','outward','logistics','reports'],
   automation: ['dashboard','automation','barcode','reports'],
@@ -3186,7 +3186,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'SEV7EN v12.06';
+const APP_VERSION_LABEL = 'SEV7EN v12.08';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -15996,14 +15996,18 @@ const EDIT_SCHEMAS = {
     {key:'remarks', label:'Remarks', type:'text'}
   ],
   salesActivities: [
-    {key:'date', label:'Date', type:'date'},
-    {key:'activityType', label:'Activity', type:'select', options:['Visit','Call','Meeting','Email','WhatsApp','Demo','Exhibition']},
-    {key:'customer', label:'Customer / Party', type:'text'},
+    {key:'state', label:'State', type:'select', options:['','Andhra Pradesh','Arunachal Pradesh','Assam','Bihar','Chhattisgarh','Goa','Gujarat','Haryana','Himachal Pradesh','Jharkhand','Karnataka','Kerala','Madhya Pradesh','Maharashtra','Manipur','Meghalaya','Mizoram','Nagaland','Odisha','Punjab','Rajasthan','Sikkim','Tamil Nadu','Telangana','Tripura','Uttar Pradesh','Uttarakhand','West Bengal','Andaman and Nicobar Islands','Chandigarh','Dadra and Nagar Haveli and Daman and Diu','Delhi','Jammu and Kashmir','Ladakh','Lakshadweep','Puducherry']},
+    {key:'customerType', label:'Type of Customer', type:'select', options:['','End User','Project','OEM','EPC']},
+    {key:'date', label:'Date of Visit', type:'date'},
+    {key:'customer', label:'Customer Name', type:'text'},
+    {key:'sector', label:'Sector', type:'text'},
     {key:'location', label:'Location', type:'text'},
-    {key:'outcome', label:'Outcome', type:'text'},
-    {key:'nextStep', label:'Next Step', type:'text'},
-    {key:'salesPerson', label:'Sales Person', type:'text'},
-    {key:'remarks', label:'Remarks', type:'text'}
+    {key:'discussion', label:'Discussion Points', type:'text'},
+    {key:'scope', label:'Scope of Requirement', type:'select', options:['','Product','MRO','Project']},
+    {key:'scopeInfo', label:'Requirement Details', type:'text'},
+    {key:'potentiality', label:'Potentiality', type:'select', options:['','High','Medium','Low']},
+    {key:'actionPlan', label:'Action Plan', type:'text'},
+    {key:'salesPerson', label:'Sales Person', type:'text'}
   ],
   dispatches: [
     {key:'date', label:'Dispatch Date', type:'date'},
