@@ -3186,7 +3186,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'SEV7EN v12.04';
+const APP_VERSION_LABEL = 'SEV7EN v12.05';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -11684,7 +11684,6 @@ function enqDeskAskPick(id){
       <div class="form-grid">
         ${field('Brand Name', `<input type="text" id="ep-brand" value="${val('deskBrand')}" autocomplete="off">`)}
         ${field('Vendor Name', `<input type="text" id="ep-vendor" value="${val('deskVendor')}" autocomplete="off">`)}
-        ${field('Customer Quotation No.', `<input type="text" id="ep-custquote" value="${val('deskCustQuoteNo')}" autocomplete="off">`)}
         ${field('Due Date', `<input type="date" id="ep-due" value="${val('followUp')}">`)}
         ${field('Priority', `<select id="ep-priority"><option value="">Select</option>${['H','M','L'].map(p => `<option value="${p}" ${r.deskPriority === p ? 'selected' : ''}>${p}</option>`).join('')}</select>`)}
       </div>
@@ -11696,17 +11695,16 @@ function enqDeskAskPick(id){
     </div></div>`;
   document.body.appendChild(root);
 }
-/* Checks the five details; only then is the enquiry picked and the review form opened. */
+/* Checks the four details; only then is the enquiry picked and the review form opened. */
 async function enqDeskPickConfirm(id){
   const g = k => (((document.getElementById(k) || {}).value) || '').trim();
   const details = {
     deskBrand: g('ep-brand'),
     deskVendor: g('ep-vendor'),
-    deskCustQuoteNo: g('ep-custquote'),
     followUp: g('ep-due'),
     deskPriority: g('ep-priority')
   };
-  const missing = [['Brand Name', details.deskBrand], ['Vendor Name', details.deskVendor], ['Customer Quotation No.', details.deskCustQuoteNo], ['Due Date', details.followUp], ['Priority', details.deskPriority]]
+  const missing = [['Brand Name', details.deskBrand], ['Vendor Name', details.deskVendor], ['Due Date', details.followUp], ['Priority', details.deskPriority]]
     .filter(x => !x[1]).map(x => x[0]);
   if(missing.length){ alert('Please fill in: ' + missing.join(', ')); return; }
   enqDeskPickClose();
