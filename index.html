@@ -2866,7 +2866,7 @@ function applyLocationBranding(){
     const inEvissat = !!(session && locationChosen && currentLocation === 'EVISSAT');
     document.title = inEvissat ? 'EVISSAT ERP' : 'SOMTEK ERP';
     const link = document.querySelector("link[rel~='icon']");
-    if(link) link.href = inEvissat ? EVISSAT_ICON_DATA_URI : LOGO_DATA_URI;
+    if(link){ link.type = 'image/png'; link.href = inEvissat ? EVISSAT_ICON_DATA_URI : SOMTEK_ICON_DATA_URI; }
   }catch(e){}
 }
 /* Remember where every scrollable element inside #app is scrolled to, so a
@@ -3186,7 +3186,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'SEV7EN v12.05';
+const APP_VERSION_LABEL = 'SEV7EN v12.06';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
