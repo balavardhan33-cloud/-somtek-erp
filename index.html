@@ -3399,7 +3399,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'SEV7EN v12.14';
+const APP_VERSION_LABEL = 'SEV7EN v12.15';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -16278,6 +16278,9 @@ const EDIT_SCHEMAS = {
     {key:'customerType', label:'Type of Customer', type:'select', options:['','End User','Project','OEM','EPC']},
     {key:'date', label:'Date of Visit', type:'date'},
     {key:'customer', label:'Customer Name', type:'text'},
+    {key:'poc', label:'POC (Contact Person)', type:'text'},
+    {key:'pocEmail', label:'Email', type:'text'},
+    {key:'pocMobile', label:'Mobile', type:'text'},
     {key:'sector', label:'Sector', type:'text'},
     {key:'location', label:'Location', type:'text'},
     {key:'discussion', label:'Discussion Points', type:'text'},
