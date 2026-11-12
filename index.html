@@ -2314,6 +2314,45 @@ async function addReportSchedule(){
   render();
 }
 /* Ask the mailer to send this one at its next hourly run */
+/* ---- "Report sent" popup: the mailer stamps lastSent; show it once per send ---- */
+function rsSeenKey(){ return 'sev7en_rs_seen_' + (session ? session.username : ''); }
+function rsToast(lines){
+  let box = document.getElementById('rs-sent-toasts');
+  if(!box){
+    box = document.createElement('div'); box.id = 'rs-sent-toasts';
+    box.style.cssText = 'position:fixed; right:16px; top:16px; z-index:10000; display:flex; flex-direction:column; gap:8px; max-width:380px;';
+    document.body.appendChild(box);
+  }
+  const t = document.createElement('div');
+  t.className = 'rs-toast';
+  t.style.cssText = 'background:var(--panel,#fff); border-left:5px solid #2e9e5b; box-shadow:0 6px 24px rgba(0,0,0,.2); padding:12px 14px; font-size:13px;';
+  t.innerHTML = '<div style="font-weight:700; color:#2e9e5b; margin-bottom:4px;">&#9993; Report sent</div>' + lines.map(l => '<div style="margin-top:4px;">' + l + '</div>').join('')
+    + '<div style="text-align:right; margin-top:8px;"><button type="button" class="icon-btn" onclick="this.closest(\'.rs-toast\').remove()">OK</button></div>';
+  box.appendChild(t);
+}
+async function rsCheckSentPopups(fromBoot){
+  if(!session || !isAdmin() || !firebaseReady) return;
+  const doc = await fsGet('report_schedules');
+  if(!doc || !Array.isArray(doc.list)) return;
+  let seen = {};
+  try{ seen = JSON.parse(localStorage.getItem(rsSeenKey()) || '{}') || {}; }catch(e){ seen = {}; }
+  const lines = [];
+  const dayAgo = Date.now() - 24*60*60*1000;
+  doc.list.forEach(s => {
+    if(!s || !s.lastSent || s.lastStatus !== 'ok') return;
+    if(seen[s.id] === s.lastSent) return;
+    seen[s.id] = s.lastSent;
+    if(new Date(s.lastSent).getTime() < dayAgo) return;   /* too old to announce */
+    const to = (s.recipients||[]).filter(r => r && r.email).map(r => esc(r.username || r.email)).join(', ');
+    lines.push('<b>' + esc(s.name) + '</b> was emailed to ' + (to || 'its recipients') + '<br><span style="color:var(--muted); font-size:11.5px;">' + esc(new Date(s.lastSent).toLocaleString('en-IN')) + '</span>');
+  });
+  try{ localStorage.setItem(rsSeenKey(), JSON.stringify(seen)); }catch(e){}
+  /* keep the Schedules list up to date (only the fields the mailer writes) */
+  (REPORT_SCHEDULES.list||[]).forEach(s => { const f = doc.list.find(x => x && x.id === s.id); if(f){ s.lastSent = f.lastSent; s.lastStatus = f.lastStatus; s.sendNow = f.sendNow; } });
+  if(lines.length) rsToast(lines);
+  if(lines.length && currentTab === 'reports' && RPT_VIEW === 'sched' && !isUserTyping() && !hasUnsavedFormInput()) render();
+}
+
 async function rsEmailNow(id){
   if(!isAdmin()) return;
   const s = (REPORT_SCHEDULES.list||[]).find(x=>x.id===id);
@@ -2322,7 +2361,7 @@ async function rsEmailNow(id){
   s.sendNow = true;
   await saveReportSchedules();
   await saveReportSchema();
-  alert('Queued. "' + (s.name||'') + '" will be emailed within the next hour.');
+  alert('Queued. "' + (s.name||'') + '" will be emailed at the next mailer run (within the hour). You will see a "Report sent" popup here once it goes out.');
   render();
 }
 async function deleteReportSchedule(id){
@@ -3399,7 +3438,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'SEV7EN v12.22';
+const APP_VERSION_LABEL = 'SEV7EN v12.23';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -4081,7 +4120,8 @@ async function chooseLocation(loc){
   subscribeLocation(loc);
   render();
   /* generate any scheduled reports that fell due (admins only) */
-  setTimeout(()=>{ checkDueReports().catch(e=>console.error('report check failed', e)); }, 1500);
+  setTimeout(()=>{ checkDueReports().catch(e=>console.error('report check failed', e)).then(()=>rsCheckSentPopups(true)); }, 1500);
+  if(!window._rsSentTimer) window._rsSentTimer = setInterval(()=>{ rsCheckSentPopups(false).catch(()=>{}); }, 60000);
 }
 
 async function handleLogout(){
