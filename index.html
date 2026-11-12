@@ -3399,7 +3399,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'SEV7EN v12.17';
+const APP_VERSION_LABEL = 'SEV7EN v12.22';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -12538,9 +12538,12 @@ function renderAccounts(){
     if(!p) return;
     const key = (p.poNumber && String(p.poNumber).trim()) ? 'po_'+String(p.poNumber).trim() : 'rec_'+p.id;
     if(sq[key] && sq[key].done) return;
+    const rem = sqRemainingQty(sq[key], p);
+    if(rem !== null && rem <= 0) return;   /* this line is fully shipped */
+    const shown = rem === null ? p : Object.assign({}, p, {qty: String(rem)});
     if(!queueGroups[key]) queueGroups[key] = { key, poNumber:p.poNumber||'', poDate:p.poDate||'', customer:p.customer||'', items:[], total:0 };
-    queueGroups[key].items.push(p);
-    queueGroups[key].total += parseFloat(rowTotal(p.qty,p.unitPrice)||p.totalValue||0) || 0;
+    queueGroups[key].items.push(shown);
+    queueGroups[key].total += rem === null ? (parseFloat(rowTotal(p.qty,p.unitPrice)||p.totalValue||0) || 0) : rem * (parseFloat(p.unitPrice) || 0);
   });
   const salesQueueList = Object.values(queueGroups).sort((a,b)=> String(b.poDate||'').localeCompare(String(a.poDate||'')));
   SALES_QUEUE_LIST = salesQueueList;
@@ -12561,7 +12564,7 @@ function renderAccounts(){
       <td>${fd(q.poDate)}</td>
       <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(q.customer)}</td>
       <td style="max-width:340px; min-width:200px; white-space:normal; word-break:break-word;">${queueItemsCell(qi, itemsTxt)}</td>
-      <td style="font-family:'IBM Plex Mono',monospace; text-align:right;">${esc(queueQtyText(q))}</td>
+      <td style="font-family:'IBM Plex Mono',monospace; text-align:right;">${esc(queueQtyText(q))}${(st.partInvoices||[]).length ? `<div style="font-family:'IBM Plex Sans',sans-serif; font-size:10.5px; color:#e6a23c; font-weight:600; white-space:nowrap;" title="Already invoiced: ${esc((st.partInvoices||[]).join(', '))}">PART SHIPPED &middot; balance</div>` : ''}</td>
       <td style="font-family:'IBM Plex Mono',monospace; text-align:right;">${esc(queueUnitPriceText(q))}</td>
       <td style="font-family:'IBM Plex Mono',monospace; text-align:right;">${q.total ? q.total.toLocaleString('en-IN',{minimumFractionDigits:2, maximumFractionDigits:2}) : '-'}</td>
       <td>${st.pickedBy ? `<span style="font-weight:600; color:var(--success);">${esc(st.pickedBy)}</span>` : '<span style="opacity:.5;">-</span>'}</td>
@@ -12587,6 +12590,7 @@ function renderAccounts(){
       <div class="field"><label>DC No.</label><input type="text" id="sa-dcno" placeholder="Optional"></div>
       <div class="field"><label>DC Date</label><input type="date" id="sa-dcdate"></div>
       <div class="field"><label>PO No</label><input type="text" id="sa-pono" placeholder="Optional"></div>
+      <div class="field"><label>Part Shipment</label><select id="sa-partship" onchange="saPartShipChanged(this.value)"><option value="No">No</option><option value="Yes">Yes</option></select></div>
       <div class="field"><label>PO Date</label><input type="date" id="sa-podate"></div>
       <div class="field"><label>Name of the Customer <span style="color:var(--danger);">*</span> <span style="color:var(--muted); font-weight:400;">(pick a previous customer to auto-fill details)</span></label><input type="text" id="sa-customer" list="sa-customer-list" oninput="saCustomerAutofill(this.value)" autocomplete="off" required><datalist id="sa-customer-list">${saCustomerOptions()}</datalist></div>
       <div class="field"><label>Bill To (Name &amp; Address)</label><input type="text" id="sa-billto" placeholder="Optional"></div>
@@ -12611,9 +12615,9 @@ function renderAccounts(){
       <div class="field"><label>Cess</label><input type="number" step="0.01" id="sa-cess" placeholder="Optional" oninput="saRecalc()"></div>
       <div class="field"><label>Round Off</label><input type="number" step="0.01" id="sa-roundoff" placeholder="Optional" oninput="saRecalc()"></div>
       <div class="field"><label>Total Invoice Value <span style="color:var(--muted); font-weight:400;">(auto)</span></label><input type="number" step="0.01" id="sa-invval" placeholder="Auto" readonly tabindex="-1"></div>
-      <div class="field"><label>Amount Received</label><input type="number" step="0.01" min="0" id="sa-received" placeholder="Optional" oninput="saRecalc()"></div>
+      <div class="field"><label>Amount Received</label><input type="number" step="0.01" min="0" id="sa-received" placeholder="Optional" oninput="saRecalc(); saAutoPayStatus()"></div>
       <div class="field"><label>Payment Date</label><input type="date" id="sa-paydate"></div>
-      <div class="field"><label>Balance Outstanding <span style="color:var(--muted); font-weight:400;">(auto: Invoice Value &minus; Received)</span></label><input type="number" step="0.01" id="sa-balance" placeholder="Auto" readonly tabindex="-1"></div>
+      <div class="field"><label>Due Amount <span style="color:var(--muted); font-weight:400;">(auto: Invoice Value &minus; Received)</span> <span id="sa-due-tag" class="age-chip age-yellow" style="display:none;">DUE</span></label><input type="number" step="0.01" id="sa-balance" placeholder="Auto" readonly tabindex="-1"></div>
       <div class="field"><label>Credit Period (days)</label><input type="number" id="sa-credit" min="0" placeholder="e.g. 30"></div>
       <div class="field"><label>Insurance Details</label><input type="text" id="sa-insurance" placeholder="Optional"></div>
       <div class="field"><label>Our Bank Details <span style="color:var(--muted); font-weight:400;">(auto-filled)</span></label><input type="text" id="sa-bank" value="${esc(defaultBankDetails(currentLocation))}" placeholder="Bank Name, A/c No., IFSC, Branch"></div>
@@ -12638,7 +12642,7 @@ function renderAccounts(){
     <th>DC No.</th><th>DC Date</th><th>PO No</th><th>PO Date</th><th>Place of Supply</th><th>State Code</th><th>Contact Person &amp; Phone</th>
     <th>Description of Goods</th><th>HSN/SAC</th><th>Qty</th><th>UOM</th><th>Rate</th>
     <th>Taxable Value</th><th>Freight</th><th>CGST</th><th>SGST</th><th>IGST</th><th>Cess</th><th>Round Off</th><th>Total Invoice Value</th>
-    <th>Amount Received</th><th>Balance Outstanding</th><th>Credit Days</th><th>Due Date</th>
+    <th>Amount Received</th><th>Due Amount</th><th>Credit Days</th><th>Due Date</th>
     <th>Payment Status</th><th>Documents</th>${cfHeaders('salesAccounts')}<th>Added By</th><th></th>
   </tr></thead><tbody>
   ${salesShown.length===0 ? noMatchRow(33, d.salesAccounts.length) :
@@ -12658,7 +12662,7 @@ function renderAccounts(){
       <td style="font-family:'IBM Plex Sans',sans-serif; max-width:260px; min-width:180px; white-space:normal; vertical-align:top;">${saDescCellHtml(r)}</td><td>${esc(hsn)}</td>
       <td>${totQty||esc(r.qty)}</td><td>${esc(uom||r.uom)}</td><td>${esc(rate)}</td>
       <td>${esc(r.taxable)}</td><td>${esc(r.freight)}</td><td>${esc(r.cgst)}${(parseFloat(r.cgstPct)||0)?` <span style="color:var(--muted); font-size:10px;">(${esc(r.cgstPct)}%)</span>`:''}</td><td>${esc(r.sgst)}${(parseFloat(r.sgstPct)||0)?` <span style="color:var(--muted); font-size:10px;">(${esc(r.sgstPct)}%)</span>`:''}</td><td>${esc(r.igst)}${(parseFloat(r.igstPct)||0)?` <span style="color:var(--muted); font-size:10px;">(${esc(r.igstPct)}%)</span>`:''}</td><td>${esc(r.cess)}</td><td>${esc(r.roundOff)}</td><td><b>${esc(r.invoiceValue)}</b></td>
-      <td>${esc(r.amountReceived)}</td><td><b>${esc(salesBalance(r))}</b></td><td>${esc(r.creditDays)}</td><td>${fd(sdue.dueDate)}</td>
+      <td>${esc(r.amountReceived)}</td><td style="white-space:nowrap;"><b>${esc(salesBalance(r))}</b>${(parseFloat(salesBalance(r))||0) > 0 ? ' <span class="age-chip age-yellow">DUE</span>' : ''}</td><td>${esc(r.creditDays)}</td><td>${fd(sdue.dueDate)}</td>
       <td><div style="display:flex; align-items:center; gap:6px;"><select class="status-select" onchange="updateSalesPaymentStatus('${r.id}', this.value)">
         <option value="Pending" ${(r.paymentStatus||'Pending')==='Pending'?'selected':''}>Pending</option>
         <option value="Received" ${r.paymentStatus==='Received'?'selected':''}>Received</option>
@@ -13378,6 +13382,8 @@ function salesBalanceFilterBar(count, outstandingTotal){
   </div>`;
 }
 function salesBalance(r){
+  /* marked Received = fully paid, even on older entries without an Amount Received */
+  if(r && r.paymentStatus === 'Received') return '0';
   const inv = parseFloat(r.invoiceValue);
   if(isNaN(inv)) return r.balanceOutstanding || '';
   const rec = parseFloat(r.amountReceived)||0;
@@ -13409,7 +13415,7 @@ function exportPurchaseAccounts(){
 const SA_UOMS = ['Nos','Kg','Grams','Ltr','Mtr','Set','Box','Pair','Roll','Pkt','Bag','Drum','MT'];
 function saItemLineHtml(it){
   it = it || {};
-  return `<div class="out-line sa-item-line" style="flex-wrap:wrap;">
+  return `<div class="out-line sa-item-line" style="flex-wrap:wrap;"${it.recId ? ` data-rec="${esc(it.recId)}" data-rem="${esc(it.remaining)}"` : ''}>
     <input type="text" class="sa-line-desc" placeholder="Description of goods" value="${esc(it.description||'')}" style="flex:3 1 240px; min-width:200px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:'IBM Plex Sans',sans-serif; font-size:13px; border-radius:4px;">
     <input type="text" class="sa-line-hsn" placeholder="HSN/SAC" value="${esc(it.hsnSac||'')}" style="flex:1 1 90px; min-width:80px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:'IBM Plex Mono',monospace; font-size:12.5px; border-radius:4px;">
     <input type="number" class="out-line-qty sa-line-qty" step="any" min="0" placeholder="Qty" value="${esc(it.qty||'')}" oninput="saRecalc()">
@@ -13417,6 +13423,7 @@ function saItemLineHtml(it){
     <input type="number" class="sa-line-rate" step="0.01" min="0" placeholder="Rate" value="${esc(it.rate||'')}" oninput="saRecalc()" style="flex:0 1 110px; min-width:90px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:'IBM Plex Mono',monospace; font-size:12.5px; border-radius:4px;">
     <input type="number" class="sa-line-amount" step="0.01" placeholder="Amount" readonly tabindex="-1" style="flex:0 1 120px; min-width:100px; background:var(--bg); border:1px solid var(--border); color:var(--muted); padding:9px 10px; font-family:'IBM Plex Mono',monospace; font-size:12.5px; border-radius:4px;">
     <button type="button" class="icon-btn out-line-remove" onclick="removeSaItemLine(this)" title="Remove this item">&#10005;</button>
+    ${it.recId ? `<div class="sa-line-bal" style="flex-basis:100%; font-size:11px; color:var(--muted);">P.O qty ${esc(it.poQty)} &middot; balance to ship <b>${esc(it.remaining)}</b></div>` : ''}
   </div>`;
 }
 function addSaItemLine(){
@@ -13475,6 +13482,8 @@ function saRecalc(){
   if(balEl){
     const bal = r2(Math.max(0, total - gv('sa-received')));
     balEl.value = total ? bal.toFixed(2) : '';
+    const tag = document.getElementById('sa-due-tag');
+    if(tag) tag.style.display = (total && bal > 0) ? '' : 'none';
   }
 }
 /* Returns invoice line items for a sales record; falls back to flat fields for
@@ -13593,6 +13602,36 @@ async function dismissSalesQueue(key){
   await saveLocation(currentLocation);
   render();
 }
+/* Part shipment: quantity still to ship on one Customer P.O line (null = no qty on the P.O) */
+function sqRemainingQty(st, p){
+  const q = parseFloat(p && p.qty);
+  if(isNaN(q)) return null;
+  const done = parseFloat(((st && st.shipped) || {})[p.id]) || 0;
+  return Math.round((q - done) * 1000) / 1000;
+}
+function saAutoPayStatus(){
+  const inv = parseFloat((document.getElementById('sa-invval')||{}).value) || 0;
+  const rec = parseFloat((document.getElementById('sa-received')||{}).value) || 0;
+  const st = document.getElementById('sa-paystatus');
+  if(st && inv > 0) st.value = rec >= inv ? 'Received' : 'Pending';
+}
+function saPartShipChanged(v){
+  if(v === 'Yes'){
+    if(!saQueueKey){ alert('Part shipment works with a P.O from the Sales Queue. Click "Create Sales Entry" on the P.O first.'); }
+    else alert('Enter the quantity being shipped now in each item\'s Qty box.\n\nThe balance quantity will stay in the Sales Queue for the next invoice.');
+    const el = document.querySelector('#sa-item-lines .sa-line-qty'); if(el) el.focus();
+  }
+}
+/* qty shipped now per P.O line, read from the item lines that came from the queue */
+function saLineShipments(){
+  const out = {};
+  document.querySelectorAll('#sa-item-lines .sa-item-line[data-rec]').forEach(line => {
+    const id = line.getAttribute('data-rec');
+    const q = parseFloat((line.querySelector('.sa-line-qty') || {}).value) || 0;
+    out[id] = (out[id] || 0) + q;
+  });
+  return out;
+}
 function saFillFromQueue(key){
   const d = DATA[currentLocation];
   const sq = sqState(d);
@@ -13614,11 +13653,23 @@ function saFillFromQueue(key){
   set('sa-pono', h.poNumber);
   set('sa-podate', h.poDate);
   const wrap = document.getElementById('sa-item-lines');
-  if(wrap){ wrap.innerHTML = recs.map(p=>saItemLineHtml({description:p.item||'', qty:p.qty||'', rate:p.unitPrice||''})).join(''); }
+  const open = recs.filter(p => { const r = sqRemainingQty(st, p); return r === null || r > 0; });
+  if(wrap){ wrap.innerHTML = open.map(p=>{
+    const r = sqRemainingQty(st, p);
+    return saItemLineHtml({description:p.item||'', qty: r === null ? (p.qty||'') : String(r), rate:p.unitPrice||'',
+      recId: r === null ? '' : p.id, remaining: r === null ? '' : String(r), poQty: p.qty||''});
+  }).join(''); }
+  set('sa-partship', (st.partInvoices||[]).length ? 'Yes' : 'No');
   saRecalc();
   saQueueKey = key;
   const anchor = document.getElementById('sa-invno');
-  if(anchor) anchor.scrollIntoView({behavior:'smooth', block:'center'});
+  /* open the "New Entry" section so the user lands on the filled form */
+  const sec = anchor && anchor.closest('[data-tabsec]');
+  if(sec){
+    const btn = document.querySelector('#app .main .tabsec-btn[data-idx="' + sec.getAttribute('data-tabsec') + '"]');
+    if(btn) btn.click();
+  }
+  if(anchor) setTimeout(()=>{ anchor.scrollIntoView({behavior:'smooth', block:'start'}); }, 50);
 }
 async function addSalesAccount(e){
   e.preventDefault();
@@ -13642,6 +13693,15 @@ async function addSalesAccount(e){
   const dupInv = gv('sa-invno');
   if(dupInv && d.salesAccounts.some(r=>(r.invNo||'').toLowerCase() === dupInv.toLowerCase())){
     if(!confirm('Invoice No "' + dupInv + '" already exists in the Sales register. Save it again anyway?')) return false;
+  }
+  const partShip = gv('sa-partship') === 'Yes';
+  let ship = null;
+  if(saQueueKey && partShip){
+    ship = saLineShipments();
+    const lines = [...document.querySelectorAll('#sa-item-lines .sa-item-line[data-rec]')];
+    const over = lines.filter(l => (parseFloat((l.querySelector('.sa-line-qty')||{}).value)||0) > (parseFloat(l.getAttribute('data-rem'))||0) + 1e-9);
+    if(over.length){ alert('Shipped quantity is more than the balance on the P.O. Please check the Qty boxes.'); return false; }
+    if(!Object.values(ship).some(q => q > 0)){ alert('Part shipment: enter the quantity being shipped now (more than 0).'); return false; }
   }
   const items = readSaItemLines();
   const taxable = gv('sa-taxable');
@@ -13689,6 +13749,7 @@ async function addSalesAccount(e){
     balanceOutstanding: gv('sa-balance'),
     creditDays: gv('sa-credit'),
     paymentStatus: gv('sa-paystatus') || 'Pending',
+    partShipment: partShip ? 'Yes' : 'No',
     addedBy: actorName()
   });
   if(PROFORMA_CONVERT_ID){
@@ -13698,7 +13759,19 @@ async function addSalesAccount(e){
   }
   if(saQueueKey){
     const sq2 = sqState(d);
-    sq2[saQueueKey] = { ...(sq2[saQueueKey]||{}), done:true, invNo: gv('sa-invno'), doneBy: actorName(), doneAt: today() };
+    const st2 = { ...(sq2[saQueueKey]||{}) };
+    if(ship){
+      /* part shipment: add what went now, keep the P.O in the queue while any balance is left */
+      st2.shipped = { ...(st2.shipped||{}) };
+      Object.keys(ship).forEach(id => { st2.shipped[id] = Math.round(((parseFloat(st2.shipped[id])||0) + ship[id]) * 1000) / 1000; });
+      st2.partInvoices = (st2.partInvoices||[]).concat([gv('sa-invno')]);
+      const recs2 = (d.customerPO||[]).filter(p => p && ((p.poNumber && String(p.poNumber).trim()) ? 'po_'+String(p.poNumber).trim() : 'rec_'+p.id) === saQueueKey);
+      const left = recs2.some(p => { const r = sqRemainingQty(st2, p); return r !== null && r > 0; });
+      if(!left){ st2.done = true; st2.invNo = st2.partInvoices.join(', '); st2.doneBy = actorName(); st2.doneAt = today(); }
+    }else{
+      Object.assign(st2, { done:true, invNo: (st2.partInvoices||[]).concat([gv('sa-invno')]).join(', '), doneBy: actorName(), doneAt: today() });
+    }
+    sq2[saQueueKey] = st2;
     saQueueKey = null;
   }
   await saveLocation(currentLocation);
@@ -16642,6 +16715,7 @@ const EDIT_SCHEMAS = {
     {key:'dcDate', label:'DC Date', type:'date'},
     {key:'poNo', label:'PO No', type:'text'},
     {key:'poDate', label:'PO Date', type:'date'},
+    {key:'partShipment', label:'Part Shipment', type:'select', options:['No','Yes']},
     {key:'placeOfSupply', label:'Place of Supply', type:'text'},
     {key:'stateCode', label:'State Code', type:'text'},
     {key:'contactPerson', label:'Contact Person', type:'text'},
@@ -16790,6 +16864,7 @@ function editItemsRecalc(){
   });
   const total = r2(taxable + gv('edit-f-freight') + gv('edit-f-cgst') + gv('edit-f-sgst') + gv('edit-f-igst') + gv('edit-f-cess') + gv('edit-f-roundOff'));
   if(total) sv('edit-f-invoiceValue', total.toFixed(2));
+  if(typeof editPayRecalc === 'function') editPayRecalc(false);
 }
 
 function renderEditModal(record){
@@ -16798,13 +16873,25 @@ function renderEditModal(record){
   /* For sales entries the item details are edited line by line below,
      so the merged flat fields are hidden from the modal. */
   const itemKeys = ['description','hsnSac','qty','uom','rate'];
-  const schema = isSalesAcct ? schema0.filter(f=>itemKeys.indexOf(f.key)===-1) : schema0;
+  let schema = isSalesAcct ? schema0.filter(f=>itemKeys.indexOf(f.key)===-1) : schema0;
+  const isSaPay = editModalState.table === 'salesAccounts';
+  if(isSaPay){
+    const payKeys = ['invoiceValue','amountReceived','paymentDate','creditDays','paymentStatus'];
+    schema = payKeys.map(k => schema.find(f => f.key === k)).filter(Boolean).concat(schema.filter(f => payKeys.indexOf(f.key) === -1));
+  }
   const itemsSection = isSalesAcct ? `
     <div class="out-lines-head" style="margin-top:14px;">Description of Goods &mdash; item lines</div>
     <div id="edit-item-lines">${(saItems(record).map(it=>editItemLineHtml(it)).join('')) || editItemLineHtml()}</div>
     <div style="margin:10px 0 4px 0;"><button type="button" class="btn btn-ghost" onclick="addEditItemLine()">+ Add another item</button></div>` : '';
   const fieldsHtml = schema.map((f, fi)=> schemaSecHead(schema, fi) + (()=>{
     const val = record[f.key]==null ? '' : record[f.key];
+    if(isSaPay && f.key === 'amountReceived'){
+      return `<div class="field"><label>${esc(f.label)}</label><input type="number" step="0.01" min="0" id="edit-f-amountReceived" value="${esc(val)}" oninput="editPayRecalc(true)"></div>`
+        + `<div class="field"><label>Due Amount <span style="color:var(--muted); font-weight:400;">(auto)</span> <span id="edit-due-tag" class="age-chip age-yellow" style="display:none;">DUE</span></label><input type="number" id="edit-due" readonly tabindex="-1"></div>`;
+    }
+    if(isSaPay && f.key === 'paymentStatus'){
+      return `<div class="field"><label>${esc(f.label)}</label><select id="edit-f-paymentStatus" onchange="editPayRecalc(false)">${['Pending','Received'].map(o=>`<option value="${o}" ${(val||'Pending')===o?'selected':''}>${o}</option>`).join('')}</select></div>`;
+    }
     if(f.type==='select'){
       return `<div class="field"><label>${esc(f.label)}</label><select id="edit-f-${f.key}">
         ${csWith(f.options, val).map(o=>`<option value="${esc(o)}" ${val===o?'selected':''}>${o===''?'Select':esc(o)}</option>`).join('')}
@@ -16836,6 +16923,18 @@ function renderEditModal(record){
     </div>
   </div>`;
   document.body.insertAdjacentHTML('beforeend', modalHtml);
+  if(isSaPay) editPayRecalc(false);
+}
+/* Sales edit form: Due = Invoice Value - Received (0 once marked Received).
+   Typing the received amount sets the status: full amount -> Received, less -> Pending. */
+function editPayRecalc(fromReceived){
+  const num = id => { const el = document.getElementById(id); return el ? (parseFloat(el.value) || 0) : 0; };
+  const inv = num('edit-f-invoiceValue'), rec = num('edit-f-amountReceived');
+  const st = document.getElementById('edit-f-paymentStatus');
+  if(fromReceived && st && inv > 0) st.value = rec >= inv ? 'Received' : 'Pending';
+  const due = (st && st.value === 'Received') ? 0 : Math.max(0, Math.round((inv - rec) * 100) / 100);
+  const dEl = document.getElementById('edit-due'); if(dEl) dEl.value = inv ? due.toFixed(2) : '';
+  const tag = document.getElementById('edit-due-tag'); if(tag) tag.style.display = (inv && due > 0) ? '' : 'none';
 }
 
 function handleEditImageChange(evt, key){
