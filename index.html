@@ -877,12 +877,13 @@ const ROLE_TABS = {
   logistics: ['dashboard','outward','logistics','reports'],
   automation: ['dashboard','automation','barcode','reports'],
   enquiry: ['dashboard','salesdesk','inventory','reports'],
-  sales: ['dashboard','sales','reports']
+  sales: ['dashboard','sales','reports'],
+  salesmanager: ['dashboard','sales','salesdesk','reports']
 };
 
 /* ---------------- PER-USER ACCESS (role tabs + extra grants) ---------------- */
 const LOCKED_TABS = ['dashboard','users']; /* can never be granted/removed via the access panel */
-const BUILTIN_ROLES = ['admin','stores','logistics','automation','enquiry','sales'];
+const BUILTIN_ROLES = ['admin','stores','logistics','automation','enquiry','sales','salesmanager'];
 const VALVE_TYPES = ['Gate Valve','Globe Valve','Ball Valve','Butterfly Valve','Check Valve','Plug Valve','Diaphragm Valve','Needle Valve','Control Valve','Safety Relief Valve','Solenoid Valve','Pressure Reducing Valve'];
 const VALVE_SIZES = ['1/2"','3/4"','1"','1.5"','2"','2.5"','3"','4"','5"','6"','8"','10"','12"','14"','16"','18"','20"','24"'];
 let CUSTOM_ROLES = {}; /* {roleName: {tabs:[...]}} - created by admin in the Users tab */
@@ -1054,6 +1055,9 @@ function nextOaNumber(d){
   return 'OA-' + n;
 }
 function isAdmin(){ return !!(session && session.role === 'admin'); }
+/* Sales Manager: sees every sales person's records and the whole team's performance */
+function isSalesManager(){ return !!(session && session.role === 'salesmanager'); }
+function canSeeAllSales(){ return isAdmin() || isSalesManager(); }
 function isOperationsRole(){
   if(!session) return false;
   const role = String(session.role || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
@@ -2014,17 +2018,15 @@ async function restoreUsersFromBackup(){
 /* ---------------- SCHEDULED REPORTS (admin) ---------------- */
 let REPORT_SCHEDULES = { list: [] };   /* Firestore doc 'report_schedules' */
 
+/* General sections; every module section from REPORT_SOURCES can be scheduled too */
 const REPORT_SECTIONS = [
   {key:'summary', label:'Summary (totals & KPIs)'},
-  {key:'salesAccounts', label:'Sales (Accounts)'},
-  {key:'purchaseAccounts', label:'Purchases (Accounts)'},
-  {key:'outstanding', label:'Outstanding & Overdue'},
-  {key:'inventory', label:'Inventory (with Aging & Dead flags)'},
-  {key:'inward', label:'Inward log'},
-  {key:'outward', label:'Outward log'},
-  {key:'enquiry', label:'Enquiries'},
-  {key:'attendance', label:'HR Attendance'}
+  {key:'outstanding', label:'Outstanding & Overdue'}
 ];
+function schedSectionLabel(k){
+  const g = REPORT_SECTIONS.find(x => x.key === k); if(g) return g.label.split(' (')[0];
+  const r = REPORT_SOURCES.find(x => x.key === k); return r ? r.label : k;
+}
 
 async function loadReportSchedules(){
   const doc = await fsGet('report_schedules');
@@ -2116,7 +2118,7 @@ function reportSheetFor(section, loc, d){
   const fields = ttFields(section);
   const list = d[section] || [];
   return {
-    name: loc+' '+section,
+    name: loc+' '+schedSectionLabel(section),
     headers: fields.map(f=>f.label).concat(['Added By']),
     rows: list.map(r=>fields.map(f=>r[f.key]==null?'':r[f.key]).concat([r.addedBy||'']))
   };
@@ -2129,6 +2131,7 @@ async function generateReport(s, auto){
     if(!DATA[loc] || !Object.keys(DATA[loc]||{}).length){ await loadLocation(loc); }
     const d = DATA[loc] || {};
     (s.sections||[]).forEach(sec=>{ sheets.push(reportSheetFor(sec, loc, d)); });
+    if(s.builder) sheets.push(builderSheetFor(s.builder, loc, d));
   }
   if(sheets.length === 0){ alert('This schedule has no sections selected.'); return; }
   const stamp = today();
@@ -2144,11 +2147,123 @@ async function generateReport(s, auto){
 async function checkDueReports(){
   if(!isAdmin()) return;
   await loadReportSchedules();
-  const due = (REPORT_SCHEDULES.list||[]).filter(reportIsDue);
+  const due = (REPORT_SCHEDULES.list||[]).filter(s => !schedHasRecipients(s) && reportIsDue(s));
   for(const s of due){
     await generateReport(s, true);
   }
   if(due.length) alert(due.length + ' scheduled report(s) were due and have been downloaded:\n' + due.map(s=>'- '+s.name).join('\n'));
+}
+
+/* ---- schedule form: recipients (login name + email), send time, edit ---- */
+let RS_EDIT = null;   /* id of the schedule being edited, or null */
+const RS_DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+const RS_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function schedHasRecipients(s){ return Array.isArray(s.recipients) && s.recipients.some(r => r && r.email); }
+/* email last used for a login in any schedule - pre-fills the email box */
+function schedKnownEmail(username){
+  let em = '';
+  (REPORT_SCHEDULES.list||[]).forEach(s => (s.recipients||[]).forEach(r => { if(r && r.username === username && r.email) em = r.email; }));
+  return em;
+}
+function rsRecipientRowHtml(r){
+  r = r || {};
+  const users = (USERS||[]).filter(u => u && u.username);
+  return '<div class="rs-rcpt" style="display:flex; gap:8px; align-items:center; margin-bottom:6px; flex-wrap:wrap;">'
+    + '<select class="rs-rcpt-user" style="min-width:200px;" onchange="rsRcptUserChanged(this)"><option value="">-- Login name --</option>'
+    + users.map(u => '<option value="' + esc(u.username) + '"' + (u.username === r.username ? ' selected' : '') + '>' + esc(u.username) + (u.name ? ' (' + esc(u.name) + ')' : '') + '</option>').join('')
+    + '</select>'
+    + '<input type="email" class="rs-rcpt-email" placeholder="email@company.com" value="' + esc(r.email || '') + '" style="min-width:240px;">'
+    + '<button type="button" class="icon-btn" onclick="this.parentNode.remove()">Remove</button></div>';
+}
+function rsAddRecipientRow(){
+  const box = document.getElementById('rs-rcpts');
+  if(box) box.insertAdjacentHTML('beforeend', rsRecipientRowHtml());
+}
+function rsRcptUserChanged(sel){
+  const em = sel.parentNode.querySelector('.rs-rcpt-email');
+  if(em && !em.value){ const k = schedKnownEmail(sel.value); if(k) em.value = k; }
+}
+function rsEdit(id){ RS_EDIT = id; RS_DRAFT_BUILDER = null; render(); setTimeout(()=>{ const el = document.getElementById('rs-name'); if(el && el.scrollIntoView) el.scrollIntoView({behavior:'smooth', block:'center'}); }, 0); }
+/* show only the "send on" box that fits the frequency */
+function rsFreqChanged(v){
+  const w = document.getElementById('rs-wday-wrap'), m = document.getElementById('rs-mday-wrap');
+  if(w) w.style.display = v === 'Weekly' ? '' : 'none';
+  if(m) m.style.display = v === 'Monthly' ? '' : 'none';
+}
+function rsCancelEdit(){ const c = RS_EDIT ? (REPORT_SCHEDULES.list||[]).find(x => x.id === RS_EDIT) : null; if(c) delete c._dropBuilder; RS_EDIT = null; RS_DRAFT_BUILDER = null; render(); }
+
+/* Column layout for every section, so the server-side mailer builds the same sheets */
+async function saveReportSchema(){
+  const sections = {};
+  REPORT_SOURCES.forEach(x => {
+    const fields = ttFields(x.key);
+    sections[x.key] = { label: x.label, keys: fields.map(f => f.key), headers: fields.map(f => f.label) };
+  });
+  await fsSet('report_schema', { locations: LOCATIONS.slice(), sections: sections, updatedAt: new Date().toISOString() });
+}
+
+/* ---- schedules built in the Report Builder ---- */
+let RS_DRAFT_BUILDER = null;   /* builder criteria waiting to be scheduled */
+const RS_PERIODS = [['all','All records'],['yday','Yesterday'],['d7','Last 7 days'],['tm','This month'],['lm','Last month'],['d30','Last 30 days'],['fy','This financial year'],['fixed','Fixed dates (as set)']];
+function rsPeriodRange(p, b){
+  const now = new Date();
+  if(p === 'yday'){ const d = new Date(now); d.setDate(d.getDate() - 1); return {from: rptIso(d), to: rptIso(d)}; }
+  if(p === 'd7'){ const d = new Date(now); d.setDate(d.getDate() - 6); return {from: rptIso(d), to: rptIso(now)}; }
+  if(p === 'fixed') return {from: (b && b.from) || '', to: (b && b.to) || ''};
+  if(p === 'all') return {from:'', to:''};
+  return rptRange(p);
+}
+function rsScheduleFromBuilder(){
+  if(!isAdmin()) return;
+  const src = rptSource(RPT.src);
+  if(!src){ alert('Choose a module and section first.'); return; }
+  const cols = rptSelectedFields(src);
+  if(!cols.length){ alert('Select at least one column to include.'); return; }
+  let period = RPT.from || RPT.to ? 'fixed' : 'all';
+  if(RPT_LAST_PRESET){ const r = rptRange(RPT_LAST_PRESET); if(r.from === (RPT.from||'') && r.to === (RPT.to||'')) period = RPT_LAST_PRESET; }
+  RS_DRAFT_BUILDER = {
+    src: src.key, label: src.label,
+    dateField: RPT.dateField || src.dateKey || '', from: RPT.from || '', to: RPT.to || '', period: period,
+    cols: cols.map(c => ({key: c.key, label: c.label, type: c.type || 'text'})),
+    fKey: RPT.fKey || '', fVal: RPT.fVal || '', search: RPT.search || '',
+    sortKey: RPT.sortKey || '', sortDir: RPT.sortDir || 'desc',
+    loc: RPT.loc === 'BOTH' ? 'Both' : (RPT.loc || currentLocation)
+  };
+  RS_EDIT = null;
+  RPT_VIEW = 'sched';
+  render();
+  setTimeout(()=>{ const el = document.getElementById('rs-name'); if(el){ el.focus(); if(el.scrollIntoView) el.scrollIntoView({behavior:'smooth', block:'center'}); } }, 0);
+}
+function rsDropBuilder(){
+  if(RS_EDIT){ const cur = (REPORT_SCHEDULES.list||[]).find(x => x.id === RS_EDIT); if(cur) cur._dropBuilder = true; }
+  RS_DRAFT_BUILDER = null; render();
+}
+function rsBuilderText(b){
+  const p = (RS_PERIODS.find(x => x[0] === b.period) || ['', ''])[1];
+  let t = b.label + ' - ' + b.cols.length + ' column' + (b.cols.length === 1 ? '' : 's');
+  if(b.dateField) t += ', ' + p.toLowerCase();
+  if(b.fKey && b.fVal) t += ', filter ' + b.fKey + ' = "' + b.fVal + '"';
+  if(b.search) t += ', search "' + b.search + '"';
+  return t;
+}
+/* rows for a builder schedule, same rules as the Report Builder */
+function builderSheetFor(b, loc, d){
+  const r = b.dateField ? rsPeriodRange(b.period || 'all', b) : {from:'', to:''};
+  let list = ((d && d[b.src]) || []).slice();
+  if(b.dateField && (r.from || r.to)) list = list.filter(x => rptInRange(x[b.dateField], r.from, r.to));
+  if(b.fKey && String(b.fVal||'').trim() !== ''){ const fv = String(b.fVal).trim().toLowerCase(); list = list.filter(x => String(x[b.fKey]==null?'':x[b.fKey]).toLowerCase().includes(fv)); }
+  const q = String(b.search||'').trim().toLowerCase();
+  if(q) list = list.filter(x => b.cols.some(c => String(x[c.key]==null?'':x[c.key]).toLowerCase().includes(q)));
+  const sk = b.sortKey || b.dateField;
+  if(sk){
+    const dir = b.sortDir === 'asc' ? 1 : -1;
+    const isNum = (b.cols.find(c => c.key === sk) || {}).type === 'number';
+    const isDate = sk === b.dateField;
+    list.sort((x, y) => isNum ? (rptNum(x[sk]) - rptNum(y[sk])) * dir
+      : isDate ? rptDateVal(x[sk]).localeCompare(rptDateVal(y[sk])) * dir
+      : String(x[sk]==null?'':x[sk]).localeCompare(String(y[sk]==null?'':y[sk])) * dir);
+  }
+  return { name: loc + ' ' + b.label, headers: b.cols.map(c => c.label), rows: list.map(x => b.cols.map(c => x[c.key]==null ? '' : x[c.key])) };
 }
 
 async function addReportSchedule(){
@@ -2156,12 +2271,58 @@ async function addReportSchedule(){
   const gv = id => { const el = document.getElementById(id); return el ? (el.value||'').trim() : ''; };
   const name = gv('rs-name');
   if(!name){ alert('Give the report a name.'); return; }
-  const sections = [...document.querySelectorAll('.rs-section:checked')].map(el=>el.value);
-  if(sections.length === 0){ alert('Tick at least one section to include.'); return; }
+  const editing = RS_EDIT ? (REPORT_SCHEDULES.list||[]).find(x => x.id === RS_EDIT) : null;
+  let builder = RS_DRAFT_BUILDER || (editing && !editing._dropBuilder ? editing.builder : null) || null;
+  if(builder){ builder = Object.assign({}, builder, {period: gv('rs-period') || builder.period || 'all'}); }
+  const sections = builder ? [] : [...document.querySelectorAll('.rs-section:checked')].map(el=>el.value);
+  if(!builder && sections.length === 0){ alert('Tick at least one section to include.'); return; }
+  const recipients = [];
+  const bad = [];
+  document.querySelectorAll('#rs-rcpts .rs-rcpt').forEach(row => {
+    const username = (row.querySelector('.rs-rcpt-user') || {}).value || '';
+    const email = String((row.querySelector('.rs-rcpt-email') || {}).value || '').trim();
+    if(!username && !email) return;
+    if(!RS_EMAIL_RE.test(email)){ bad.push(username || email || '(blank)'); return; }
+    if(!recipients.some(r => r.email.toLowerCase() === email.toLowerCase())) recipients.push({ username: username, email: email });
+  });
+  if(bad.length){ alert('Please enter a valid email for: ' + bad.join(', ')); return; }
+  const fields = {
+    name: name,
+    freq: gv('rs-freq') || 'Weekly',
+    loc: gv('rs-loc') || currentLocation,
+    sections: sections,
+    builder: builder,
+    sendHour: parseInt(gv('rs-hour'), 10) || 9,
+    sendWeekday: parseInt(gv('rs-wday'), 10) || 0,
+    sendMonthday: parseInt(gv('rs-mday'), 10) || 1,
+    recipients: recipients
+  };
   REPORT_SCHEDULES.list = REPORT_SCHEDULES.list || [];
-  REPORT_SCHEDULES.list.push({ id: uid(), name: name, freq: gv('rs-freq')||'Weekly', loc: gv('rs-loc')||currentLocation, sections: sections, lastRun: '' });
+  const cur = RS_EDIT ? REPORT_SCHEDULES.list.find(x => x.id === RS_EDIT) : null;
+  if(cur){
+    delete cur._dropBuilder;
+    Object.assign(cur, fields);
+    logAudit('USER ADMIN', 'Report schedule updated: "'+name+'"');
+  }else{
+    REPORT_SCHEDULES.list.push(Object.assign({ id: uid(), lastRun: '', lastSent: '' }, fields));
+    logAudit('USER ADMIN', 'Report schedule added: "'+name+'"');
+  }
+  RS_EDIT = null;
+  RS_DRAFT_BUILDER = null;
   await saveReportSchedules();
-  logAudit('USER ADMIN', 'Report schedule added: "'+name+'"');
+  await saveReportSchema();
+  render();
+}
+/* Ask the mailer to send this one at its next hourly run */
+async function rsEmailNow(id){
+  if(!isAdmin()) return;
+  const s = (REPORT_SCHEDULES.list||[]).find(x=>x.id===id);
+  if(!s) return;
+  if(!schedHasRecipients(s)){ alert('Add at least one recipient email first (Edit).'); return; }
+  s.sendNow = true;
+  await saveReportSchedules();
+  await saveReportSchema();
+  alert('Queued. "' + (s.name||'') + '" will be emailed within the next hour.');
   render();
 }
 async function deleteReportSchedule(id){
@@ -2169,6 +2330,7 @@ async function deleteReportSchedule(id){
   const s = (REPORT_SCHEDULES.list||[]).find(x=>x.id===id);
   if(s && !confirm('Delete the schedule "'+(s.name||'')+'"?')) return;
   REPORT_SCHEDULES.list = (REPORT_SCHEDULES.list||[]).filter(x=>x.id!==id);
+  if(RS_EDIT === id) RS_EDIT = null;
   await saveReportSchedules();
   render();
 }
@@ -2177,34 +2339,85 @@ function runReportNow(id){
   if(s) generateReport(s, false);
 }
 
+function schedSectionGroupsHtml(){
+  const box = (k, lbl, on) => `<label style="display:flex; align-items:center; gap:6px; font-size:12.5px; cursor:pointer; text-transform:none; letter-spacing:normal;"><input type="checkbox" class="rs-section" value="${k}"${on?' checked':''}> ${esc(lbl)}</label>`;
+  const group = (title, items) => `<div style="margin-top:10px;"><div style="font-family:'Oswald',sans-serif; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; color:var(--muted); margin-bottom:6px;">${esc(title)}</div><div style="display:flex; flex-wrap:wrap; gap:8px 18px;">${items}</div></div>`;
+  let html = group('General', REPORT_SECTIONS.map(x => box(x.key, x.label, x.key === 'summary')).join(''));
+  rptModules(REPORT_SOURCES).forEach(m => {
+    html += group(m, REPORT_SOURCES.filter(x => x.mod === m).map(x => box(x.key, x.sec, false)).join(''));
+  });
+  return html;
+}
+function schedWhenText(s){
+  const h = parseInt(s.sendHour, 10) || 9;
+  const t = (h % 12 || 12) + ':00 ' + (h < 12 ? 'AM' : 'PM');
+  if(s.freq === 'Daily') return 'Daily, ' + t;
+  if(s.freq === 'Weekly') return 'Weekly, ' + RS_DAYS[parseInt(s.sendWeekday, 10) || 0] + ' ' + t;
+  return 'Monthly, day ' + (parseInt(s.sendMonthday, 10) || 1) + ' ' + t;
+}
 function reportSchedulesPanelHtml(){
   const list = REPORT_SCHEDULES.list || [];
+  const ed = RS_EDIT ? list.find(x => x.id === RS_EDIT) : null;
+  if(RS_EDIT && !ed) RS_EDIT = null;
+  const e = ed || { freq:'Weekly', loc: RS_DRAFT_BUILDER ? RS_DRAFT_BUILDER.loc : currentLocation, sections:['summary'], sendHour:9, sendWeekday:0, sendMonthday:1, recipients:[] };
+  const bld = RS_DRAFT_BUILDER || (ed && !ed._dropBuilder ? ed.builder : null);
+  const sel = (v, cur) => String(v) === String(cur) ? ' selected' : '';
+  const hours = []; for(let h = 6; h <= 22; h++) hours.push(h);
+  const hourLbl = h => (h % 12 || 12) + ':00 ' + (h < 12 ? 'AM' : 'PM');
+  const rcpts = (e.recipients && e.recipients.length) ? e.recipients : [{}];
+  let groups = schedSectionGroupsHtml();
+  if(ed){
+    /* tick this schedule's sections instead of the defaults */
+    groups = groups.replace(/ checked>/g, '>');
+    (ed.sections||[]).forEach(k => { groups = groups.replace('value="' + k + '">', 'value="' + k + '" checked>'); });
+  }
+  const rcptText = s => (s.recipients||[]).filter(r => r && r.email).map(r => (r.username ? r.username + ' &lt;' + esc(r.email) + '&gt;' : esc(r.email))).join('<br>');
   return `
-  ${secHead('&#128200;', 'Scheduled Reports')}
-  <div class="panel"><div class="panel-head"><h3>&#128200; Scheduled Reports <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(generated &amp; downloaded automatically when an admin opens the ERP after they fall due)</span></h3></div>
+  ${secHead('&#9200;', 'Scheduled Reports')}
+  <div class="panel"><div class="panel-head"><h3>${ed ? 'Edit schedule: ' + esc(ed.name) : 'New schedule'} <span style="font-weight:400; text-transform:none; letter-spacing:normal; color:var(--muted); font-size:11px;">(schedules with recipients are emailed automatically at the set time, IST; schedules without recipients download when an admin opens the ERP)</span></h3></div>
   <div class="panel-body">
     <div class="form-grid">
-      <div class="field"><label>Report name</label><input type="text" id="rs-name" placeholder="e.g. Weekly Sales &amp; Outstanding"></div>
-      <div class="field"><label>Frequency</label><select id="rs-freq"><option>Daily</option><option selected>Weekly</option><option>Monthly</option></select></div>
-      <div class="field"><label>Location</label><select id="rs-loc">${LOCATIONS.map(l=>`<option ${l===currentLocation?'selected':''}>${l}</option>`).join('')}<option>Both</option></select></div>
+      <div class="field"><label>Report name</label><input type="text" id="rs-name" value="${esc(ed ? ed.name : '')}" placeholder="e.g. Weekly Sales &amp; Outstanding"></div>
+      <div class="field"><label>Frequency</label><select id="rs-freq" onchange="rsFreqChanged(this.value)">${['Daily','Weekly','Monthly'].map(f => '<option' + sel(f, e.freq) + '>' + f + '</option>').join('')}</select></div>
+      <div class="field"><label>Send time (IST)</label><select id="rs-hour">${hours.map(h => '<option value="' + h + '"' + sel(h, e.sendHour || 9) + '>' + hourLbl(h) + '</option>').join('')}</select></div>
+      <div class="field" id="rs-wday-wrap"${e.freq === 'Weekly' ? '' : ' style="display:none;"'}><label>Send on (day of week)</label><select id="rs-wday">${RS_DAYS.map((d, i) => '<option value="' + i + '"' + sel(i, e.sendWeekday || 0) + '>' + d + '</option>').join('')}</select></div>
+      <div class="field" id="rs-mday-wrap"${e.freq === 'Monthly' ? '' : ' style="display:none;"'}><label>Send on (date of month)</label><select id="rs-mday">${Array.from({length:28}, (_, i) => i + 1).map(n => '<option value="' + n + '"' + sel(n, e.sendMonthday || 1) + '>' + n + '</option>').join('')}</select></div>
+      <div class="field"><label>Location</label><select id="rs-loc">${LOCATIONS.map(l=>'<option' + sel(l, e.loc) + '>' + l + '</option>').join('')}<option${sel('Both', e.loc)}>Both</option></select></div>
     </div>
-    <div class="field" style="margin-top:10px;"><label>Sections to include</label>
-      <div style="display:flex; flex-wrap:wrap; gap:10px 18px; margin-top:6px;">
-        ${REPORT_SECTIONS.map(sec=>`<label style="display:flex; align-items:center; gap:6px; font-size:12.5px; cursor:pointer; text-transform:none; letter-spacing:normal;"><input type="checkbox" class="rs-section" value="${sec.key}" ${sec.key==='summary'?'checked':''}> ${sec.label}</label>`).join('')}
+    <div class="field" style="margin-top:12px;"><label>Send to (login name + email)</label>
+      <div id="rs-rcpts" style="margin-top:6px;">${rcpts.map(rsRecipientRowHtml).join('')}</div>
+      <button type="button" class="icon-btn" onclick="rsAddRecipientRow()">&#10133; Add recipient</button>
+    </div>
+    ${bld ? `<div class="field" style="margin-top:10px;"><label>Report (from Report Builder)</label>
+      <div style="padding:10px 12px; border:1px solid var(--border); background:var(--panel-2); font-size:13px;">&#128203; ${esc(rsBuilderText(bld))}
+        <button type="button" class="icon-btn" style="margin-left:8px;" onclick="rsDropBuilder()">Use sections instead</button></div>
       </div>
+      ${bld.dateField ? `<div class="form-grid" style="margin-top:10px;"><div class="field"><label>Date range each time</label><select id="rs-period">${RS_PERIODS.filter(p => p[0] !== 'fixed' || bld.from || bld.to).map(p => '<option value="' + p[0] + '"' + sel(p[0], bld.period || 'all') + '>' + p[1] + '</option>').join('')}</select></div></div>` : ''}`
+    : `<div class="field" style="margin-top:10px;"><label>Sections to include</label>
+      ${groups}
+    </div>`}
+    <div style="margin-top:12px; display:flex; gap:8px;">
+      <button type="button" class="btn" onclick="addReportSchedule()">${ed ? 'Save changes' : 'Add Schedule'}</button>
+      ${ed ? '<button type="button" class="icon-btn" onclick="rsCancelEdit()">Cancel</button>' : ''}
     </div>
-    <button type="button" class="btn" style="margin-top:10px;" onclick="addReportSchedule()">Add Schedule</button>
-    ${list.length ? `
-    <table style="margin-top:16px;"><thead><tr><th>Name</th><th>Frequency</th><th>Location</th><th>Sections</th><th>Last Run</th><th>Next</th><th></th></tr></thead><tbody>
-    ${list.map(s=>`<tr>
-      <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(s.name)}</td><td>${esc(s.freq)}</td><td>${esc(s.loc)}</td>
-      <td style="max-width:220px; white-space:normal;">${esc((s.sections||[]).map(k=>{const f=REPORT_SECTIONS.find(x=>x.key===k); return f?f.label.split(' (')[0]:k;}).join(', '))}</td>
-      <td>${s.lastRun ? esc(new Date(s.lastRun).toLocaleString()) : '<span style="color:var(--muted);">never</span>'}</td>
-      <td>${reportIsDue(s) ? '<span class="age-chip age-yellow">DUE NOW</span>' : 'scheduled'}</td>
-      <td>${actionCell(`<button class="icon-btn" onclick="runReportNow('${s.id}')" title="Generate and download this report now">&#9654; Run Now</button>`, deleteBtn(`deleteReportSchedule('${s.id}')`))}</td>
-    </tr>`).join('')}
-    </tbody></table>` : ''}
-  </div></div>`;
+  </div></div>
+  ${list.length ? `
+  <div class="panel"><div class="panel-head"><h3>Schedules <span style="font-weight:400; color:var(--muted); font-size:11px;">(${list.length})</span></h3></div>
+  <div class="panel-body table-scroll">
+  <table><thead><tr><th>Name</th><th>When</th><th>Location</th><th>Report</th><th>Send to</th><th>Last emailed</th><th></th></tr></thead><tbody>
+  ${list.map(s=>`<tr>
+    <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(s.name)}</td>
+    <td>${esc(schedWhenText(s))}</td><td>${esc(s.loc)}</td>
+    <td style="max-width:220px; white-space:normal;">${esc(s.builder ? rsBuilderText(s.builder) : (s.sections||[]).map(schedSectionLabel).join(', '))}</td>
+    <td style="max-width:260px; white-space:normal; font-size:12px;">${rcptText(s) || '<span style="color:var(--muted);">download only</span>'}</td>
+    <td style="font-size:12px;">${s.lastSent ? esc(new Date(s.lastSent).toLocaleString()) : '<span style="color:var(--muted);">never</span>'}${s.sendNow ? '<br><span class="age-chip age-yellow">QUEUED</span>' : ''}${s.lastStatus && s.lastStatus !== 'ok' ? '<br><span style="color:#e6577a;">' + esc(s.lastStatus) + '</span>' : ''}</td>
+    <td>${actionCell(
+      (schedHasRecipients(s) ? `<button class="icon-btn" onclick="rsEmailNow('${s.id}')" title="Email this report at the next hourly run">&#9993; Email Now</button> ` : '')
+      + `<button class="icon-btn" onclick="runReportNow('${s.id}')" title="Generate and download this report now">&#9654; Download</button> `
+      + `<button class="icon-btn" onclick="rsEdit('${s.id}')">Edit</button>`,
+      deleteBtn(`deleteReportSchedule('${s.id}')`))}</td>
+  </tr>`).join('')}
+  </tbody></table></div></div>` : ''}`;
 }
 
 /* ---------------- NOTIFICATIONS (admin -> all users) ---------------- */
@@ -3186,7 +3399,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'SEV7EN v12.08';
+const APP_VERSION_LABEL = 'SEV7EN v12.14';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -4524,15 +4737,32 @@ const IMPORT_SCHEMAS = {
 
 let importTargetTable = null;
 
+/* Sales tab: tables that get Import (built from the same labels Export uses) */
+const SALES_IMPORT_TABLES = ['customers','salesActivities','pumpEnquiries','projects','tenders'];
+function canImportTable(table){
+  return isAdmin() || (isSalesManager() && SALES_IMPORT_TABLES.includes(table));
+}
+function importSchemaFor(table){
+  if(SALES_IMPORT_TABLES.includes(table)){
+    return (EDIT_SCHEMAS[table] || []).map(f => {
+      const o = {key: f.key, header: f.label};
+      if(f.type === 'date') o.type = 'date';
+      if(f.type === 'select' && Array.isArray(f.options)) o.options = f.options;
+      return o;
+    });
+  }
+  return IMPORT_SCHEMAS[table];
+}
+
 function triggerImport(table){
-  if(!isAdmin()) return;
+  if(!canImportTable(table)) return;
   importTargetTable = table;
   const input = document.getElementById('import-file-input');
   if(input) input.click();
 }
 
 function importBtn(table){
-  if(!isAdmin()) return '';
+  if(!canImportTable(table)) return '';
   return `<button type="button" class="export-btn" style="background:var(--accent-2);" onclick="triggerImport('${table}')">&#8593; Import Excel</button>`;
 }
 
@@ -4563,11 +4793,11 @@ async function handleImportFile(e){
   const table = importTargetTable;
   input.value = '';
   importTargetTable = null;
-  if(!isAdmin()) return;
-  if(!file || !table) return;
+  if(!table || !canImportTable(table)) return;
+  if(!file) return;
   if(typeof XLSX === 'undefined'){ alert('Excel import library failed to load. Check your connection.'); return; }
   if(table === 'users'){ await importUsersFile(file); return; }
-  const schema = IMPORT_SCHEMAS[table];
+  const schema = importSchemaFor(table);
   if(!schema){ alert('Import is not available for this table.'); return; }
 
   try{
@@ -4598,6 +4828,7 @@ async function handleImportFile(e){
     }
 
     const d = DATA[currentLocation];
+    if(!Array.isArray(d[table])) d[table] = [];
     let imported = 0;
     for(let i=1; i<rows.length; i++){
       const row = rows[i];
@@ -4615,6 +4846,7 @@ async function handleImportFile(e){
         }
       });
       record.addedBy = (addedByIdx!==-1 && row[addedByIdx]) ? String(row[addedByIdx]).trim() : actorName();
+      if(SALES_IMPORT_TABLES.includes(table) && schema.some(f => f.key === 'salesPerson') && !record.salesPerson) record.salesPerson = actorLogin();
       if(table==='outward'){
         const qty = parseFloat(record.qty)||0;
         const unitPrice = parseFloat(record.unitPrice)||0;
@@ -8604,6 +8836,25 @@ function crmExport(table, fileLabel){
   exportToExcel(currentLocation+'_'+fileLabel, headers, rows);
 }
 function exportCustomers(){ crmExport('customers','CustomerMaster'); }
+function exportSalesTable(table){ crmExport(table, (TABLE_LABELS_FOR_EXPORT[table] || table).replace(/\s+/g,'')); }
+const TABLE_LABELS_FOR_EXPORT = {salesActivities:'Sales Activity', pumpEnquiries:'Pump Enquiries', valveEnquiries:'Valve Enquiries', projects:'Project Tracker', tenders:'Tenders', soAcks:'Order Acknowledgements'};
+/* Import / Export buttons for a Sales-tab section (admin + sales manager) */
+function salesIoButtons(table){
+  if(!canSeeAllSales()) return '';
+  return (SALES_IMPORT_TABLES.includes(table) ? importBtn(table) : '') + `<button type="button" class="export-btn" onclick="exportSalesTable('${table}')">&#8681; Export Excel</button>`;
+}
+function exportSalesQuotations(){
+  const d = DATA[currentLocation];
+  const me = String(actorName() || '').trim().toLowerCase();
+  let list = (d.quotations || []).slice().reverse();
+  if(salesQuoView !== 'all') list = list.filter(q => {
+    const poc = String(q.salesPoc || '').trim().toLowerCase(), by = String(q.addedBy || '').trim().toLowerCase();
+    return me && (poc === me || (!poc && by === me));
+  });
+  const headers = ['Quote #','Date','Rev','Customer','Sales POC','POC Contact','Items','Total Price INR','Status'];
+  const rows = list.map(r => [r.quoteNumber||'', fd(r.quoteDate || r.date), r.revNo || 'R0', r.customer||'', r.salesPoc || r.addedBy || '', r.salesPocPhone || '', (r.items||[]).length, parseFloat(r.totalPrice != null ? r.totalPrice : r.grandTotal) || 0, r.quoteStatus || 'Pending']);
+  exportToExcel(currentLocation + '_Quotations', headers, rows);
+}
 function exportOpportunities(){ crmExport('opportunities','Opportunities'); }
 function exportRfqs(){ crmExport('rfqs','RFQs'); }
 function exportFollowups(){ crmExport('followups','Followups'); }
@@ -8673,7 +8924,7 @@ const SL_FIXED = {
   'poc-prod': {dept:'Production Team'}
 };
 function slOwn(r){ const who = (r && (r.salesPerson || r.addedBy)) || ''; return who === actorName() || who === actorLogin(); }
-function slVisible(r){ return isAdmin() || slOwn(r); }
+function slVisible(r){ return canSeeAllSales() || slOwn(r); }
 function slNum(v){ const n = parseFloat(v); return isNaN(n) ? 0 : n; }
 function slMoney(v){ return '&#8377; ' + slNum(v).toLocaleString('en-IN', {maximumFractionDigits:2}); }
 function slSalesNames(){ return USERS.map(u=>u.name).filter(Boolean); }
@@ -8686,7 +8937,7 @@ function slInputHtml(f, id, required){
   if(f.key === 'salesPerson'){
     /* Sales persons: login name only (read-only), so ownership always matches the login.
        Admin: can type any name, defaulting to the admin's own login name. */
-    if(!isAdmin()) return `<div class="field"><label>${esc(f.label)}</label><input type="text" id="${id}" value="${esc(actorLogin())}" readonly style="opacity:.75;"></div>`;
+    if(!canSeeAllSales()) return `<div class="field"><label>${esc(f.label)}</label><input type="text" id="${id}" value="${esc(actorLogin())}" readonly style="opacity:.75;"></div>`;
     return `<div class="field"><label>${esc(f.label)}</label><input type="text" id="${id}" value="${esc(actorLogin())}"></div>`;
   }
   if(f.type === 'select'){
@@ -8759,7 +9010,7 @@ function slSection(sid, icon, label, table, opts){
     ? `<tr><td colspan="${cols.length + 1}" style="text-align:center; color:var(--muted); padding:18px;">No records yet.</td></tr>`
     : rows.map(r => `<tr>${cols.map(f => `<td>${slCell(f, r[f.key])}</td>`).join('')}<td>${actionCell((opts.rowActions ? opts.rowActions(r) : '') + editBtn(table, r.id), deleteBtn(`slDelete('${table}','${r.id}')`))}</td></tr>`).join('');
   const form = opts.noForm ? '' : slFormHtml(table, sid, label, opts);
-  return secHead(icon, label) + form + `<div class="panel"><div class="panel-head"><h3>${esc(label)} register</h3><div class="panel-head-actions"><span style="color:var(--muted); font-size:12px;">${rows.length} record${rows.length===1?'':'s'}</span></div></div>
+  return secHead(icon, label) + form + `<div class="panel"><div class="panel-head"><h3>${esc(label)} register</h3><div class="panel-head-actions">${salesIoButtons(table)}<span style="color:var(--muted); font-size:12px;">${rows.length} record${rows.length===1?'':'s'}</span></div></div>
   <div class="panel-body table-scroll"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div></div>`;
 }
 function slPerformanceHtml(){
@@ -8770,7 +9021,7 @@ function slPerformanceHtml(){
     (d[t] || []).forEach(r => { const n = r.salesPerson || r.addedBy; if(n) names.add(n); });
   });
   let list = [...names].filter(Boolean);
-  if(!isAdmin()) list = list.filter(n => n === actorName());
+  if(!canSeeAllSales()) list = list.filter(n => n === actorName());
   const recs = (t, n) => (d[t] || []).filter(r => (r.salesPerson || r.addedBy) === n);
   const count = (t, n, pred) => recs(t, n).filter(pred || (() => true)).length;
   const total = (t, n, f) => recs(t, n).reduce((a, r) => a + slNum(r[f]), 0);
@@ -8795,12 +9046,12 @@ function slPerformanceHtml(){
   const cell = (k, r) => money.has(k) ? slMoney(r[k]) : Number(r[k]).toLocaleString('en-IN');
   const head = ['Sales Person','Leads','Converted','Quotes','Quoted Value','P.O Count','P.O Value','SO Ack Value','Bids Submitted','Tenders Won','Activities','Follow-ups'];
   const dataRows = rows.map(r => `<tr><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.name)}</td>${keys.map(k => `<td>${cell(k, r)}</td>`).join('')}</tr>`).join('');
-  const totalRow = (isAdmin() && rows.length > 1)
+  const totalRow = (canSeeAllSales() && rows.length > 1)
     ? `<tr class="totals-row"><td>Total</td>${keys.map(k => `<td>${cell(k, sumRow)}</td>`).join('')}</tr>` : '';
   const body = rows.length === 0
     ? `<tr><td colspan="${head.length}" style="text-align:center; color:var(--muted); padding:18px;">No sales persons yet.</td></tr>`
     : dataRows + totalRow;
-  return secHead('&#127942;', 'Sales Performance') + `<div class="panel"><div class="panel-head"><h3>${isAdmin() ? 'All sales persons' : 'My performance'}</h3></div>
+  return secHead('&#127942;', 'Sales Performance') + `<div class="panel"><div class="panel-head"><h3>${canSeeAllSales() ? 'All sales persons' : 'My performance'}</h3></div>
   <div class="panel-body table-scroll"><table><thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div></div>`;
 }
 
@@ -8832,7 +9083,7 @@ function custTableHtml(rows, title){
   const body = shown.length === 0
     ? noMatchRow(colspan, rows.length)
     : shown.map(r => `<tr>${fields.map(f => `<td>${f.type === 'date' ? fd(r[f.key]) : esc(r[f.key] == null ? '' : r[f.key])}</td>`).join('')}${addedByCell(r)}<td>${actionCell(editBtn('customers', r.id), deleteBtn(`crmDelete('customers','${r.id}')`))}</td></tr>`).join('');
-  return `<div class="panel"><div class="panel-head"><h3>${esc(title)} register</h3><div class="panel-head-actions">${isAdmin() ? exportBtn('exportCustomers') : ''}</div></div>
+  return `<div class="panel"><div class="panel-head"><h3>${esc(title)} register</h3><div class="panel-head-actions">${canSeeAllSales() ? importBtn('customers') + exportBtn('exportCustomers') : ''}</div></div>
   <div class="panel-body table-scroll">
   ${tableToolbar('customers', rows)}
   <table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>
@@ -9194,7 +9445,7 @@ function valveEnqFormHtml(nextNo){
     const v = dr.head[f.key];
     let input;
     if(f.key === 'enqNo') input = `<input type="text" id="${id}" value="${esc(editing ? (editing.enqNo || '') : nextNo)}" readonly style="background:var(--panel-2); color:var(--accent-2); font-weight:600; cursor:not-allowed;">`;
-    else if(f.key === 'salesPerson') input = `<input type="text" id="${id}" value="${esc(v != null && v !== '' ? v : actorLogin())}"${isAdmin() ? '' : ' readonly style="opacity:.75;"'}>`;
+    else if(f.key === 'salesPerson') input = `<input type="text" id="${id}" value="${esc(v != null && v !== '' ? v : actorLogin())}"${canSeeAllSales() ? '' : ' readonly style="opacity:.75;"'}>`;
     else input = valveEnqBareInput(f, id, v != null ? String(v) : (f.key === 'date' ? today() : ''), !!required[f.key]);
     return `<div class="ds-row"><span class="ds-no">${i + 1}.</span><label class="ds-q" for="${id}">${esc(f.label)}${required[f.key] ? ' *' : ''}</label><div class="field ds-a">${input}</div></div>`;
   }).join('');
@@ -9301,7 +9552,7 @@ function salesQuotationsSectionHtml(){
     </tr>`).join('');
   return secHead('&#128221;', 'Quotations')
     + `<div class="acct-switch" style="margin-bottom:14px;">${btn('mine', 'My Quotations')}${btn('all', 'All Quotations')}</div>`
-    + `<div class="panel"><div class="panel-head"><h3>${salesQuoView==='all' ? 'All quotations' : 'My quotations'} <span style="font-weight:400; color:var(--muted); font-size:11px;">(${qAll.length})</span></h3></div>
+    + `<div class="panel"><div class="panel-head"><h3>${salesQuoView==='all' ? 'All quotations' : 'My quotations'} <span style="font-weight:400; color:var(--muted); font-size:11px;">(${qAll.length})</span></h3><div class="panel-head-actions">${canSeeAllSales() ? exportBtn('exportSalesQuotations') : ''}</div></div>
   <div class="panel-body table-scroll">
   ${tableToolbar('quotations', d.quotations)}
   <table><thead><tr><th>Quote #</th><th>Date</th><th>Rev</th><th>Customer</th><th>Sales POC</th><th>POC Contact</th><th>Items</th><th>Total Price INR</th><th>Status</th><th></th></tr></thead>
@@ -9326,7 +9577,7 @@ function salesDispatchesSectionHtml(){
       <td style="white-space:normal; max-width:240px;">${esc(r.remarks || '')}</td>
     </tr>`).join('');
   return secHead('&#128666;', 'Dispatches')
-    + `<div class="panel"><div class="panel-head"><h3>Dispatch register <span style="font-weight:400; color:var(--muted); font-size:11px;">(from Shipment Tracker &middot; ${lAll.length})</span></h3></div>
+    + `<div class="panel"><div class="panel-head"><h3>Dispatch register <span style="font-weight:400; color:var(--muted); font-size:11px;">(from Shipment Tracker &middot; ${lAll.length})</span></h3><div class="panel-head-actions">${canSeeAllSales() ? exportBtn('exportLogistics') : ''}</div></div>
   <div class="panel-body table-scroll">
   ${tableToolbar('logistics', d.logistics || [])}
   <table><thead><tr><th>L.R Number</th><th>Date</th><th>Transporter</th><th>Customer Name</th><th>Customer P.O</th><th>Status</th><th>Delivery Date</th><th>Remarks</th></tr></thead>
@@ -9375,7 +9626,7 @@ function customerPoSalesSectionHtml(){
     const all = applyTableTools('customerPO', newestFirst);
     const allRows = limitRows('customerPO', all).map(p => cpoSalesRowHtml(p, true)).join('');
     return secHead('&#128188;', 'Customer P.O') + switcher
-      + `<div class="panel"><div class="panel-head"><h3>All P.O's <span style="font-weight:400; color:var(--muted); font-size:11px;">(from Purchase &middot; ${all.length})</span></h3></div>
+      + `<div class="panel"><div class="panel-head"><h3>All P.O's <span style="font-weight:400; color:var(--muted); font-size:11px;">(from Purchase &middot; ${all.length})</span></h3><div class="panel-head-actions">${canSeeAllSales() ? exportBtn('exportCustomerPO') : ''}</div></div>
   <div class="panel-body table-scroll">
   ${tableToolbar('customerPO', d.customerPO || [])}
   <table><thead>${cpoSalesHeadHtml(true)}</thead>
@@ -9436,7 +9687,7 @@ function renderSales(){
   ['customers','leads','salesActivities','salesQuotes','salesPOs','soAcks','dispatches','projects','tenders','valveEnquiries','pumpEnquiries'].forEach(k => { if(!Array.isArray(d[k])) d[k] = []; });
   const allCustomers = d.customers;
   const myCustomers = allCustomers.filter(slOwn);
-  const masterBlock = isAdmin()
+  const masterBlock = canSeeAllSales()
     ? secHead('&#127970;', 'Customer Master') + custFormHtml('cm', 'Customer') + custTableHtml(allCustomers, 'Customer Master')
     : '';
   return `
@@ -14261,30 +14512,40 @@ function exportSalesAccounts(){
    access to - rptAllowedSources() filters on canSeeTab(), and run/export/print
    each re-check before doing anything. */
 const REPORT_SOURCES = [
-  {key:'vendorPO',         tab:'po',         label:'Purchase - Vendor P.O',        dateKey:'poDate'},
-  {key:'customerPO',       tab:'po',         label:'Purchase - Customer P.O',      dateKey:'poDate'},
-  {key:'inward',           tab:'inward',     label:'Inward',                       dateKey:'date'},
-  {key:'inventory',        tab:'inventory',  label:'Inventory',                    dateKey:'addedOn'},
-  {key:'outward',          tab:'outward',    label:'Outward',                      dateKey:'date'},
-  {key:'logistics',        tab:'logistics',  label:'Logistics',                    dateKey:'date'},
-  {key:'futureShipments',  tab:'logistics',  label:'Future Shipments',             dateKey:'date'},
-  {key:'sales',            tab:'sales',      label:'Sales Register',               dateKey:'date'},
-  {key:'leads',            tab:'sales',      label:'Leads',                        dateKey:'date'},
-  {key:'automation',       tab:'automation', label:'Automation',                   dateKey:'date'},
-  {key:'pendingAssembly',  tab:'automation', label:'Pending Assembly',             dateKey:'date'},
-  {key:'enquiry',          tab:'enquiry',    label:'Enquiry',                      dateKey:'date'},
-  {key:'purchaseAccounts', tab:'accounts',   label:'Accounts - Purchase',          dateKey:'date'},
-  {key:'salesAccounts',    tab:'accounts',   label:'Accounts - Sales Invoices',    dateKey:'date'},
-  {key:'proformaInvoices', tab:'accounts',   label:'Accounts - Proforma Invoices', dateKey:'date'},
-  {key:'quotations',       tab:'quotation',  label:'Quotations',                   dateKey:'quoteDate'},
-  {key:'employees',        tab:'hr',         label:'HR - Employees',               dateKey:'joinDate'},
-  {key:'attendance',       tab:'hr',         label:'HR - Attendance',              dateKey:'date'},
-  {key:'leaves',           tab:'hr',         label:'HR - Leave',                   dateKey:'from'},
-  {key:'salaries',         tab:'hr',         label:'HR - Salary',                  dateKey:'month'}
+  {key:'customers',        tab:'sales',      mod:'Sales',      sec:'Customers',               dateKey:''},
+  {key:'salesActivities',  tab:'sales',      mod:'Sales',      sec:'Sales Activity',          dateKey:'date'},
+  {key:'valveEnquiries',   tab:'sales',      mod:'Sales',      sec:'Valve Enquiries',         dateKey:'date'},
+  {key:'pumpEnquiries',    tab:'sales',      mod:'Sales',      sec:'Pump Enquiries',          dateKey:'date'},
+  {key:'projects',         tab:'sales',      mod:'Sales',      sec:'Project Tracker',         dateKey:'startDate'},
+  {key:'tenders',          tab:'sales',      mod:'Sales',      sec:'Tenders',                 dateKey:'issueDate'},
+  {key:'vendorPO',         tab:'po',         mod:'Sales Desk', sec:'Purchase - Vendor P.O',   dateKey:'poDate'},
+  {key:'customerPO',       tab:'po',         mod:'Sales Desk', sec:'Purchase - Customer P.O', dateKey:'poDate'},
+  {key:'enquiry',          tab:'enquiry',    mod:'Sales Desk', sec:'Enquiry',                 dateKey:'date'},
+  {key:'quotations',       tab:'quotation',  mod:'Sales Desk', sec:'Quotations',              dateKey:'quoteDate'},
+  {key:'soAcks',           tab:'salesdesk',  mod:'Sales Desk', sec:'Order Acknowledgement',   dateKey:'date'},
+  {key:'purchaseAccounts', tab:'accounts',   mod:'Accounts',   sec:'Purchase',                dateKey:'date'},
+  {key:'salesAccounts',    tab:'accounts',   mod:'Accounts',   sec:'Sales Invoices',          dateKey:'date'},
+  {key:'proformaInvoices', tab:'accounts',   mod:'Accounts',   sec:'Proforma Invoices',       dateKey:'date'},
+  {key:'inward',           tab:'inward',     mod:'Inward',     sec:'Inward Log',              dateKey:'date'},
+  {key:'inventory',        tab:'inventory',  mod:'Inventory',  sec:'Inventory',               dateKey:'addedOn'},
+  {key:'outward',          tab:'outward',    mod:'Outward',    sec:'Outward Log',             dateKey:'date'},
+  {key:'automation',       tab:'automation', mod:'Automation', sec:'Automation',              dateKey:'date'},
+  {key:'pendingAssembly',  tab:'automation', mod:'Automation', sec:'Pending Assembly',        dateKey:'date'},
+  {key:'logistics',        tab:'logistics',  mod:'Logistics',  sec:'Shipment Tracker',        dateKey:'date'},
+  {key:'futureShipments',  tab:'logistics',  mod:'Logistics',  sec:'Future Shipments',        dateKey:'date'},
+  {key:'employees',        tab:'hr',         mod:'HR',         sec:'Employees',               dateKey:'joinDate'},
+  {key:'attendance',       tab:'hr',         mod:'HR',         sec:'Attendance',              dateKey:'date'},
+  {key:'leaves',           tab:'hr',         mod:'HR',         sec:'Leave',                   dateKey:'from'},
+  {key:'salaries',         tab:'hr',         mod:'HR',         sec:'Salary',                  dateKey:'month'}
 ];
+REPORT_SOURCES.forEach(x => { x.label = x.mod === x.sec ? x.mod : (x.mod + ' - ' + x.sec); });
+/* Sales-team tables: sales users only see their own rows (same rule as the Sales tab) */
+const RPT_OWN_ROW_TABLES = ['customers','salesActivities','valveEnquiries','pumpEnquiries','projects','tenders','soAcks'];
+function rptModules(srcs){ const out = []; srcs.forEach(x => { if(!out.includes(x.mod)) out.push(x.mod); }); return out; }
+
 
 let RPT = {
-  src:'', dateField:'', from:'', to:'', loc:'',
+  mod:'', src:'', dateField:'', from:'', to:'', loc:'',
   cols:null,            /* null = every column */
   fKey:'', fVal:'', search:'',
   sortKey:'', sortDir:'desc', groupKey:'',
@@ -14338,8 +14599,14 @@ function rptSum(rows, idx){ return rows.reduce((a, r) => a + rptNum(r[idx]), 0);
 
 /* ----- criteria setters (assign only; no re-render, so typing is never lost) ----- */
 function rptSet(k, v){ RPT[k] = v; }
+function rptSetMod(v){
+  RPT.mod = v;
+  const secs = rptAllowedSources().filter(x => x.mod === v);
+  rptSetSrc(secs.length === 1 ? secs[0].key : '');
+}
 function rptSetSrc(v){
   RPT.src = v;
+  const src0 = rptSource(v); if(src0) RPT.mod = src0.mod;
   RPT.cols = null; RPT.fKey = ''; RPT.fVal = ''; RPT.sortKey = ''; RPT.groupKey = ''; RPT.result = null;
   const s = rptSource(v);
   RPT.dateField = s ? (s.dateKey || '') : '';
@@ -14371,7 +14638,7 @@ function rptPreset(p){
   render();
 }
 function rptReset(){
-  RPT = {src:'', dateField:'', from:'', to:'', loc:'', cols:null, fKey:'', fVal:'', search:'', sortKey:'', sortDir:'desc', groupKey:'', result:null};
+  RPT = {mod:'', src:'', dateField:'', from:'', to:'', loc:'', cols:null, fKey:'', fVal:'', search:'', sortKey:'', sortDir:'desc', groupKey:'', result:null};
   render();
 }
 
@@ -14412,6 +14679,7 @@ async function runReport(){
     const list = (DATA[loc] && DATA[loc][s.key]) || [];
     list.forEach(r => recs.push({__loc: loc, r: r}));
   });
+  if(RPT_OWN_ROW_TABLES.includes(s.key) && !canSeeAllSales()) recs = recs.filter(x => slOwn(x.r));
 
   if(df && (from || to)){
     recs = recs.filter(x => {
@@ -14676,7 +14944,7 @@ let MYR = { from:'', to:'', loc:'', result:null };
 let CRR = { key:'salesMonthly', from:'', to:'', loc:'', result:null };
 
 function rptView(){
-  if(RPT_VIEW === 'mgmt' && !isAdmin()) RPT_VIEW = 'mine';
+  if((RPT_VIEW === 'mgmt' || RPT_VIEW === 'sched') && !isAdmin()) RPT_VIEW = 'mine';
   if(!RPT_VIEW) RPT_VIEW = isAdmin() ? 'mgmt' : 'mine';
   return RPT_VIEW;
 }
@@ -14695,6 +14963,7 @@ function rptViewBar(){
     + b('mine', '&#128100; My Reports')
     + (isAdmin() ? b('mgmt', '&#128200; Management Reports') : '')
     + b('builder', '&#128295; Report Builder')
+    + (isAdmin() ? b('sched', '&#9200; Scheduled Reports') : '')
     + '</div>';
 }
 
@@ -15528,6 +15797,7 @@ async function srRun(id){
   if(!rptSource(x.crit.src)){ alert('You no longer have access to the module this report uses.'); return; }
   RPT = Object.assign({src:'', dateField:'', from:'', to:'', loc:'', cols:null, fKey:'', fVal:'', search:'', sortKey:'', sortDir:'desc', groupKey:'', result:null}, JSON.parse(JSON.stringify(x.crit)));
   if(x.period){ const r = rptRange(x.period); RPT.from = r.from; RPT.to = r.to; RPT_LAST_PRESET = x.period; }
+  RPT.mod = (rptSource(RPT.src) || {}).mod || '';
   RPT.result = null;
   RPT_VIEW = 'builder';
   await runReport();
@@ -15667,6 +15937,7 @@ function renderReports(){
   const top = tabHeader(currentLocation, 'Reports') + rptViewBar();
   if(v === 'mine') return renderMyReports(top + secHead('&#128100;', 'My Reports'));
   if(v === 'mgmt') return renderMgmtReports(top + secHead('&#128200;', 'Management Reports'));
+  if(v === 'sched') return top + reportSchedulesPanelHtml();
   const srcs = rptAllowedSources();
   const head = top + savedReportsHtml() + secHead('&#128203;', 'Report Builder');
   if(!srcs.length){
@@ -15689,10 +15960,16 @@ function renderReports(){
     </div>
     <div class="panel-body">
       <div class="form-grid">
-        <div class="field"><label>Module / report</label>
-          <select onchange="rptSetSrc(this.value)">
-            ${opt('', '-- Select a module --', RPT.src)}
-            ${srcs.map(x => opt(x.key, x.label, RPT.src)).join('')}
+        <div class="field"><label>Module</label>
+          <select onchange="rptSetMod(this.value)">
+            ${opt('', '-- Select a module --', RPT.mod)}
+            ${rptModules(srcs).map(m => opt(m, m, RPT.mod)).join('')}
+          </select>
+        </div>
+        <div class="field"><label>Section</label>
+          <select onchange="rptSetSrc(this.value)" ${RPT.mod ? '' : 'disabled'}>
+            ${opt('', RPT.mod ? '-- Select a section --' : '--', RPT.src)}
+            ${srcs.filter(x => x.mod === RPT.mod).map(x => opt(x.key, x.sec, RPT.src)).join('')}
           </select>
         </div>
         <div class="field"><label>Location</label>
@@ -15761,6 +16038,7 @@ function renderReports(){
       </div>`}
       <div class="rpt-actions">
         <button type="button" class="btn" onclick="runReport()">&#9654; Run Report</button>
+        ${isAdmin() && s ? `<button type="button" class="btn" style="background:var(--accent-2);" onclick="rsScheduleFromBuilder()">&#9200; Schedule this report</button>` : ''}
         ${RPT.result ? `<button type="button" class="export-btn" onclick="exportReport()">&#8681; Export Excel</button>
         <button type="button" class="export-btn" onclick="printReport()" style="background:var(--accent-2);">&#128424; Print / PDF</button>` : ''}
         <span style="font-size:11.5px;color:var(--muted);">You can only report on modules your account has access to.</span>
@@ -18061,7 +18339,6 @@ function renderUsers(){
   ${tabHeader('Access Control', 'Users')}
   ${importantNoticePanelHtml()}
   ${sendNotificationPanelHtml()}
-  ${reportSchedulesPanelHtml()}
   ${secHead('&#10133;', 'New Entry')}
   <div class="panel"><div class="panel-head"><h3>Add user login</h3></div>
   <div class="panel-body">
