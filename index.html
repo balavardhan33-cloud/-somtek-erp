@@ -2604,15 +2604,22 @@ let syncTickCount = 0;
 const SYNC_INTERVAL_MS = 6000;
 
 async function syncTick(){
-  if(!firebaseReady || isUserTyping() || hasUnsavedFormInput() || !session) return;
+  if(!firebaseReady || isUserTyping() || hasUnsavedFormInput() || isUserScrolling() || !session) return;
   const loc = currentLocation;
   const [locDoc, usersDoc, noticeDoc] = await Promise.all([ fsGet('loc_'+loc), fsGet(USERS_DOC), fsGet('notice') ]);
+  /* user may have started typing while we were waiting on the network */
+  if(isUserTyping() || hasUnsavedFormInput() || isUserScrolling() || !session || currentLocation!==loc) return;
   let changed = false;
-  if(locDoc){ DATA[loc] = ensureShape(locDoc); applySharedHr(loc); snapshotLocation(loc); changed = true; }
+  if(locDoc){
+    const fresh = ensureShape(locDoc);
+    if(JSON.stringify(fresh) !== JSON.stringify(DATA[loc])){
+      DATA[loc] = fresh; applySharedHr(loc); snapshotLocation(loc); changed = true;
+    }
+  }
   /* refresh the shared HR copy from the cloud every ~30s */
   syncTickCount = (syncTickCount||0) + 1;
   if(syncTickCount % 5 === 0){ loadHrShared().catch(()=>{}); }
-  if(usersDoc && Array.isArray(usersDoc.list)){
+  if(usersDoc && Array.isArray(usersDoc.list) && JSON.stringify([usersDoc.list, usersDoc.roles||null, usersDoc.customFields||null]) !== JSON.stringify([USERS, CUSTOM_ROLES||null, CUSTOM_FIELDS||null])){
     USERS = usersDoc.list;
     CUSTOM_ROLES = (usersDoc.roles && typeof usersDoc.roles==='object' && !Array.isArray(usersDoc.roles)) ? usersDoc.roles : CUSTOM_ROLES;
     CUSTOM_FIELDS = (usersDoc.customFields && typeof usersDoc.customFields==='object' && !Array.isArray(usersDoc.customFields)) ? usersDoc.customFields : CUSTOM_FIELDS;
@@ -2632,7 +2639,7 @@ async function syncTick(){
     NOTICE = noticeDoc;
     changed = true;
   }
-  if(changed && currentLocation===loc) render();
+  if(changed && currentLocation===loc && !isUserTyping() && !hasUnsavedFormInput() && !isUserScrolling()) render();
 }
 function startSync(){
   if(syncTimer) return; // already running
@@ -2866,6 +2873,14 @@ function applyLocationBranding(){
    re-render (auto-sync, recalculation, etc.) does not jump tables back to
    the left / top. Positions are matched by element order, which is stable
    because the same tab re-renders with the same structure. */
+let lastUserScrollAt = 0, _restoringScroll = false;
+(function(){
+  const mark = () => { if(!_restoringScroll) lastUserScrollAt = Date.now(); };
+  ['scroll','wheel','touchstart','touchmove','pointerdown'].forEach(ev =>
+    document.addEventListener(ev, mark, {capture:true, passive:true}));
+})();
+/* true while the user is moving a table / the page, and for 5s after */
+function isUserScrolling(){ return Date.now() - lastUserScrollAt < 5000; }
 function captureScrollPositions(){
   const app = document.getElementById('app');
   if(!app) return [];
@@ -2875,17 +2890,22 @@ function captureScrollPositions(){
     const el = els[i];
     if(el.scrollLeft || el.scrollTop) snap.push({i: i, left: el.scrollLeft, top: el.scrollTop});
   }
+  snap.win = {x: window.scrollX, y: window.scrollY};
   return snap;
 }
 function restoreScrollPositions(snap){
-  if(!snap || !snap.length) return;
+  if(!snap) return;
   const app = document.getElementById('app');
   if(!app) return;
-  const els = app.querySelectorAll('*');
-  snap.forEach(s=>{
-    const el = els[s.i];
-    if(el){ el.scrollLeft = s.left; el.scrollTop = s.top; }
-  });
+  _restoringScroll = true;
+  try{
+    const els = app.querySelectorAll('*');
+    snap.forEach(s=>{
+      const el = els[s.i];
+      if(el){ el.scrollLeft = s.left; el.scrollTop = s.top; }
+    });
+    if(snap.win) window.scrollTo(snap.win.x, snap.win.y);
+  } finally { setTimeout(()=>{ _restoringScroll = false; }, 50); }
 }
 function render(customHtml){
   normalizeSalesDeskTab();
@@ -2905,6 +2925,7 @@ function render(customHtml){
   if(session && locationChosen){ setTimeout(injectCustomFieldInputs, 0); }
   if(session && locationChosen){ setTimeout(injectBulkCheckboxes, 0); }
   if(session && locationChosen){ setTimeout(injectSerialNumbers, 0); }
+  if(session && locationChosen){ setTimeout(()=>restoreScrollPositions(scrollSnap), 30); }
   cfPending = null;
 }
 
@@ -3165,7 +3186,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'SEV7EN v12.02';
+const APP_VERSION_LABEL = 'SEV7EN v12.04';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -4008,16 +4029,18 @@ function isUserTyping(){
 function hasUnsavedFormInput(){
   try{
     if(typeof editModalState !== 'undefined' && editModalState) return true;
-    const inputs = document.querySelectorAll('#app form input, #app form textarea');
+    const inputs = document.querySelectorAll('input, textarea');
     for(const el of inputs){
+      if(el.type==='hidden' || el.readOnly || el.disabled) continue;
       if(el.type==='checkbox' || el.type==='radio'){
         if(el.checked !== el.defaultChecked) return true;
       } else if(el.value !== el.defaultValue){
         return true;
       }
     }
-    const sels = document.querySelectorAll('#app form select');
+    const sels = document.querySelectorAll('select');
     for(const el of sels){
+      if(el.disabled) continue;
       const opts = [...el.options];
       let defIdx = opts.findIndex(o=>o.defaultSelected);
       if(defIdx === -1) defIdx = 0;
