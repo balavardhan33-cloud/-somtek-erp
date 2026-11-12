@@ -3399,7 +3399,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'SEV7EN v12.15';
+const APP_VERSION_LABEL = 'SEV7EN v12.17';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -14909,7 +14909,6 @@ function reportResultHtml(R){
       <div class="panel-head-actions">
         <button type="button" class="export-btn" onclick="exportReport()">&#8681; Export Excel</button>
         <button type="button" class="export-btn" onclick="printReport()" style="background:var(--accent-2);">&#128424; Print / PDF</button>
-        <button type="button" class="export-btn" onclick="rptShareWA()" style="background:#25d366;">&#128172; WhatsApp</button>
       </div>
     </div>
     <div class="panel-body">
@@ -15917,7 +15916,7 @@ function dailyBriefHtml(){
     + '<div style="font-family:\'Oswald\',sans-serif;font-size:20px;font-weight:700;margin-top:2px;' + (warn ? 'color:var(--danger);' : '') + '">' + val + '</div>'
     + (sub ? '<div style="font-size:11px;color:var(--muted);">' + sub + '</div>' : '') + '</div>';
   return '<div class="panel" style="margin-bottom:18px;"><div class="panel-head"><h3>&#9728; Daily Brief &mdash; yesterday, ' + esc(fd(b.date)) + '</h3>'
-    + '<div class="panel-head-actions"><button type="button" class="export-btn" onclick="dailyBriefShare()" style="background:#25d366;">&#128172; WhatsApp</button></div></div>'
+    + '</div>'
     + '<div class="panel-body"><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;">'
     + tile('Sales', inrTxt(b.salesV), b.salesN + ' invoice(s)', false, "dailyBriefOpen('mgmt','salesMonthly')")
     + tile('Collections', inrTxt(b.collV), b.collN + ' payment(s)', false, '')
