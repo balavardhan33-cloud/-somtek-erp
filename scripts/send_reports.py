@@ -375,7 +375,12 @@ def is_due(s, now):
 
 
 def send_mail(to_list, subject, body, filename, data):
-    user, pw = os.environ["SMTP_USER"], os.environ["SMTP_PASS"]
+    user = os.environ.get("SMTP_USER", "").strip()
+    pw = os.environ.get("SMTP_PASS", "").replace(" ", "").strip()
+    if not user or not pw:
+        raise RuntimeError("SMTP_USER / SMTP_PASS secret is empty - add them in GitHub Settings > Secrets")
+    if len(pw) != 16:
+        print(f"Note: SMTP_PASS has {len(pw)} characters; a Gmail app password has 16")
     msg = EmailMessage()
     msg["From"] = "SEV7EN Reports <" + user + ">"
     msg["To"] = ", ".join(to_list)
@@ -383,9 +388,33 @@ def send_mail(to_list, subject, body, filename, data):
     msg.set_content(body)
     msg.add_attachment(data, maintype="application",
                        subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet", filename=filename)
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=60) as smtp:
-        smtp.login(user, pw)
-        smtp.send_message(msg)
+    errors = []
+    # try port 587 (STARTTLS) first, then 465 (SSL); retry once each
+    for attempt in range(2):
+        for port in (587, 465):
+            stage = "connect"
+            try:
+                if port == 587:
+                    smtp = smtplib.SMTP("smtp.gmail.com", 587, timeout=60)
+                    smtp.ehlo()
+                    stage = "starttls"
+                    smtp.starttls()
+                    smtp.ehlo()
+                else:
+                    smtp = smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=60)
+                with smtp:
+                    stage = "login"
+                    smtp.login(user, pw)
+                    stage = "send"
+                    smtp.send_message(msg)
+                return
+            except smtplib.SMTPAuthenticationError as e:
+                raise RuntimeError(f"Gmail rejected the login ({e.smtp_code}) - check SMTP_USER and the 16-letter app password in SMTP_PASS")
+            except Exception as e:
+                errors.append(f"port {port} {stage}: {e}")
+                print("  mail attempt failed -", errors[-1])
+        time.sleep(5)
+    raise RuntimeError("; ".join(errors[-2:]))
 
 
 def main():
