@@ -3535,7 +3535,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'SEV7EN v12.27';
+const APP_VERSION_LABEL = 'SEV7EN v12.28';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -14646,7 +14646,7 @@ function packingListHtml(r){
   const items = saItems(r);
   const totQty = items.reduce((a,it)=>a+(parseFloat(it.qty)||0),0);
   const rows = items.length===0 ? `<tr><td style="${td}" colspan="7">-</td></tr>` :
-    items.map((it,i)=>`<tr>
+    items.map((it,i)=>`<tr style="break-inside:avoid; page-break-inside:avoid;">
       <td style="${td}">${i+1}</td>
       <td style="${td} text-align:left;"><b>${esc(dash(it.description))}</b>${it.hsnSac?`<div style="font-size:9px; color:#333;">HSN/SAC : ${esc(it.hsnSac)}</div>`:''}</td>
       <td style="${td}">${esc(dash(it.qty))}</td>
@@ -14668,6 +14668,7 @@ function packingListHtml(r){
         <th style="${th} width:80px;">Dimension</th>
         <th style="${th} width:90px;">No of Boxes</th>
       </tr></thead>
+      <tfoot style="display:table-footer-group;"><tr><td colspan="7" style="border-top:1px solid #444; padding:0; height:0; line-height:0; font-size:0;"></td></tr></tfoot>
       <tbody>${rows}</tbody>
     </table>
     <table style="border-collapse:collapse; width:100%;">
@@ -14694,7 +14695,7 @@ function deliveryChallanHtml(r){
   const items = saItems(r);
   const totQty = items.reduce((a,it)=>a+(parseFloat(it.qty)||0),0);
   const rows = items.length===0 ? `<tr><td style="${td}" colspan="5">-</td></tr>` :
-    items.map((it,i)=>`<tr>
+    items.map((it,i)=>`<tr style="break-inside:avoid; page-break-inside:avoid;">
       <td style="${td}">${i+1}</td>
       <td style="${td} text-align:left;"><b>${esc(dash(it.description))}</b></td>
       <td style="${td}">${esc(dash(it.hsnSac))}</td>
@@ -14712,6 +14713,7 @@ function deliveryChallanHtml(r){
         <th style="${th} width:60px;">Qty</th>
         <th style="${th} width:60px;">UOM</th>
       </tr></thead>
+      <tfoot style="display:table-footer-group;"><tr><td colspan="5" style="border-top:1px solid #444; padding:0; height:0; line-height:0; font-size:0;"></td></tr></tfoot>
       <tbody>
         ${rows}
         <tr>
@@ -14993,7 +14995,7 @@ function invoiceDocumentHtml(r, heading, docTitle){
   const items = saItems(r);
   const pctTxt = p => { const v = parseFloat(p)||0; return v ? (v + '%') : '0%'; };
   const itemRows = items.length===0 ? `<tr><td style="${itd}" colspan="7" align="center">-</td></tr>` :
-    items.map((it,i)=>`<tr>
+    items.map((it,i)=>`<tr style="break-inside:avoid; page-break-inside:avoid;">
       <td style="${itd} text-align:center;">${i+1}</td>
       <td style="${itd}"><b>${esc(dash(it.description))}</b></td>
       <td style="${itd} text-align:center;">${esc(dash(it.hsnSac))}</td>
@@ -15101,6 +15103,7 @@ function invoiceDocumentHtml(r, heading, docTitle){
         <th style="${th} width:92px;">RATE</th>
         <th style="${th} width:112px;">AMOUNT</th>
       </tr></thead>
+      <tfoot style="display:table-footer-group;"><tr><td colspan="7" style="border-top:${B}; padding:0; height:0; line-height:0; font-size:0;"></td></tr></tfoot>
       <tbody>
         ${itemRows}
         <tr>
