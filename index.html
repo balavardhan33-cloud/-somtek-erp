@@ -4330,7 +4330,7 @@ function getSalesDeskSections(){
     {id:'ack', label:'Order Acknowledgement', icon:'&#9989;', render:()=>{
       const d = DATA[currentLocation];
       if(!Array.isArray(d.soAcks)) d.soAcks = [];
-      return slSection('soa', '&#9989;', 'Order Acknowledgement', 'soAcks', {});
+      return oaSectionHtml();
     }}
   ];
 }
@@ -5782,28 +5782,7 @@ function renderPO(){
   </form>
   <p style="margin:10px 0 0 0; font-size:11.5px; color:var(--muted);">All items are saved under the same P.O number and customer in one go. Total value per item is calculated automatically from Qty &times; Unit Price.</p>
   </div></div>
-  ${secHead('&#128203;', 'Records')}
-  <div class="panel"><div class="panel-head"><h3>Customer purchase orders</h3><div class="panel-head-actions">${importBtn('customerPO')}${exportBtn('exportCustomerPO')}</div></div>
-  <div class="panel-body table-scroll">
-  ${tableToolbar('customerPO', d.customerPO)}
-  <table><thead><tr><th>P.O Number</th><th>P.O Date</th><th>Customer Name</th><th>Customer Address</th><th>Vendor P.O Num</th><th>Item Description</th><th>Qty</th><th>Unit Price</th><th>Total Value</th><th>DOD</th><th>Status</th>${cfHeaders('customerPO')}<th>Added By</th><th></th></tr></thead><tbody>
-  ${cpoRows.length===0 ? noMatchRow(13, d.customerPO.length) :
-    cpoRows.map(p=>`<tr>
-      <td>${esc(p.poNumber)}</td><td>${fd(p.poDate)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(p.customer)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${descCellHtml('customerPO:'+p.id+':address', p.customerAddress)}</td><td>${esc(p.vendorPoNum)}</td><td>${descCellHtml('customerPO:'+p.id+':item', p.item)}</td><td>${esc(p.qty)}</td><td>${esc(p.unitPrice)}</td><td>${rowTotal(p.qty, p.unitPrice) || esc(p.totalValue)}</td><td>${fd(p.dod)}</td>
-      <td>
-        <select class="status-select ${poStatusClass(p.status)}" onchange="updateCustomerPOStatus('${p.id}', this.value)">
-          <option value="Non-Executed" ${(!p.status||p.status==='Non-Executed')?'selected':''}>Non-Executed</option>
-          <option value="Part Shipment" ${p.status==='Part Shipment'?'selected':''}>Part Shipment</option>
-          <option value="Executed" ${p.status==='Executed'?'selected':''}>Executed</option>
-          <option value="Cancelled" ${p.status==='Cancelled'?'selected':''}>Cancelled</option>
-        </select>
-      </td>
-      ${cfCells('customerPO', p)}${addedByCell(p)}
-      <td>${actionCell(editBtn('customerPO', p.id), deleteBtn(`deleteCustomerPO('${p.id}')`))}</td>
-    </tr>`).join('')}
-  </tbody></table>
-  ${showMoreBar('customerPO', cpoAll.length)}
-  </div></div>`;
+  ${cpoOaSplitHtml(cpoAll)}`;
 
   const contactSection = `
   <div class="subsection-title">P.O Contract Information</div>
@@ -6096,6 +6075,414 @@ function removeCpoItemLine(btn){
     return;
   }
   line.remove();
+}
+/* ---- Customer P.O > Pending O.A / Completed O.A, and the "Create O.A" flow ----
+   One Customer P.O (all item rows with the same P.O number + customer) gets one O.A.
+   The P.O moves to Completed once an O.A created from it is saved in Order Acknowledgement. */
+function cpoKeyOf(p){ return String((p && p.poNumber) || '').trim().toLowerCase() + '|' + String((p && p.customer) || '').trim().toLowerCase(); }
+function oaForCpoKey(d, key){ return (d.soAcks || []).find(a => a && a.cpoKey === key) || null; }
+function cpoRecordRowHtml(p, extraCells, actionsHtml){
+  return `<tr>
+      <td>${esc(p.poNumber)}</td><td>${fd(p.poDate)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(p.customer)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${descCellHtml('customerPO:'+p.id+':address', p.customerAddress)}</td><td>${esc(p.vendorPoNum)}</td><td>${descCellHtml('customerPO:'+p.id+':item', p.item)}</td><td>${esc(p.qty)}</td><td>${esc(p.unitPrice)}</td><td>${rowTotal(p.qty, p.unitPrice) || esc(p.totalValue)}</td><td>${fd(p.dod)}</td>
+      <td>
+        <select class="status-select ${poStatusClass(p.status)}" onchange="updateCustomerPOStatus('${p.id}', this.value)">
+          <option value="Non-Executed" ${(!p.status||p.status==='Non-Executed')?'selected':''}>Non-Executed</option>
+          <option value="Part Shipment" ${p.status==='Part Shipment'?'selected':''}>Part Shipment</option>
+          <option value="Executed" ${p.status==='Executed'?'selected':''}>Executed</option>
+          <option value="Cancelled" ${p.status==='Cancelled'?'selected':''}>Cancelled</option>
+        </select>
+      </td>
+      ${extraCells}${cfCells('customerPO', p)}${addedByCell(p)}
+      <td>${actionsHtml}</td>
+    </tr>`;
+}
+let cpoOaView = 'pending';   /* Customer P.O sub-section: 'pending' or 'completed' */
+function switchCpoOaView(v){ cpoOaView = v; render(); }
+function cpoOaSplitHtml(cpoAll){
+  const d = DATA[currentLocation];
+  const pending = [], done = [];
+  cpoAll.forEach(p => (oaForCpoKey(d, cpoKeyOf(p)) ? done : pending).push(p));
+  const baseHead = `<th>P.O Number</th><th>P.O Date</th><th>Customer Name</th><th>Customer Address</th><th>Vendor P.O Num</th><th>Item Description</th><th>Qty</th><th>Unit Price</th><th>Total Value</th><th>DOD</th><th>Status</th>`;
+  const tail = `${cfHeaders('customerPO')}<th>Added By</th><th></th>`;
+  /* All row buttons sit in one line: [select] [Create O.A / View O.A] [Edit] [Delete] */
+  const std = (p, lead) => actionCell((lead || '') + editBtn('customerPO', p.id), deleteBtn(`deleteCustomerPO('${p.id}')`));
+  const oaBtnStyle = 'white-space:nowrap; background:var(--accent-2); color:#fff; border:2px solid var(--accent); font-weight:700;';
+  /* Create O.A shows once per P.O (on its first item row). */
+  const seen = new Set();
+  const pRows = limitRows('customerPO', pending).map(p => {
+    const k = cpoKeyOf(p);
+    const btn = seen.has(k) ? '' : `<button type="button" class="icon-btn" style="${oaBtnStyle}" title="Create Order Acknowledgement for this P.O" onclick="createOAFromCPO('${esc(p.id)}')">&#43; Create O.A</button>`;
+    seen.add(k);
+    return cpoRecordRowHtml(p, '', std(p, btn));
+  }).join('');
+  const dRows = limitRows('customerPO', done).map(p => {
+    const oa = oaForCpoKey(d, cpoKeyOf(p));
+    return cpoRecordRowHtml(p, `<td>${esc(oa.soNo || '')}</td><td>${fd(oa.date)}</td>`,
+      std(p, `<button type="button" class="icon-btn" style="${oaBtnStyle}" onclick="openOAPreview('${esc(oa.id)}')">View O.A</button>`));
+  }).join('');
+  const empty = (n, msg) => `<tr><td colspan="${n}" style="text-align:center; color:var(--muted); padding:18px;">${msg}</td></tr>`;
+  /* Pending = yellow, Completed = green when selected */
+  const tabOn = {pending: 'background:#f0b429; color:#2b2100;', completed: 'background:var(--success); color:#fff;'};
+  const tab = (id, label, n) => `<button type="button" class="acct-switch-btn ${cpoOaView === id ? 'active' : ''}" style="${cpoOaView === id ? tabOn[id] : ''}" onclick="switchCpoOaView('${id}')">${label} (${n})</button>`;
+  const switcher = `<div class="acct-switch" style="margin-top:18px;">${tab('pending', 'Pending O.A', pending.length)}${tab('completed', 'Completed O.A', done.length)}</div>`;
+  return switcher + (cpoOaView === 'completed' ? '' : `
+  <div class="panel"><div class="panel-head"><h3>Customer P.O &mdash; O.A not created</h3><div class="panel-head-actions">${importBtn('customerPO')}${exportBtn('exportCustomerPO')}<span style="color:var(--muted); font-size:12px;">${pending.length} row${pending.length===1?'':'s'}</span></div></div>
+  <div class="panel-body table-scroll">
+  ${tableToolbar('customerPO', d.customerPO)}
+  <table><thead><tr>${baseHead}${tail}</tr></thead><tbody>
+  ${pRows || empty(14, 'No pending Customer P.O.')}
+  </tbody></table>
+  ${showMoreBar('customerPO', pending.length)}
+  </div></div>`) + (cpoOaView !== 'completed' ? '' : `
+  <div class="panel"><div class="panel-head"><h3>Customer P.O &mdash; O.A created</h3><div class="panel-head-actions"><span style="color:var(--muted); font-size:12px;">${done.length} row${done.length===1?'':'s'}</span></div></div>
+  <div class="panel-body table-scroll">
+  <table><thead><tr>${baseHead}<th>O.A No.</th><th>O.A Date</th>${tail}</tr></thead><tbody>
+  ${dRows || empty(16, 'No O.A created yet.')}
+  </tbody></table>
+  ${showMoreBar('customerPO', done.length)}
+  </div></div>`);
+}
+function createOAFromCPO(id){
+  const d = DATA[currentLocation];
+  const p = (d.customerPO || []).find(x => x && x.id === id);
+  if(!p) return;
+  const key = cpoKeyOf(p);
+  const existing = oaForCpoKey(d, key);
+  if(existing){ openOAPreview(existing.id); return; }
+  const rows = (d.customerPO || []).filter(x => x && cpoKeyOf(x) === key);
+  const str = v => String(v == null ? '' : v).trim();
+  OA_DRAFT = {
+    poNo: str(p.poNumber), poDate: str(p.poDate), customer: str(p.customer), customerAddress: str(p.customerAddress),
+    quoteRef: str(p.quoteRef), salesPerson: str(p.salesPoc), deliveryDate: str(p.dod), ackStatus: 'Pending',
+    items: rows.map(r => ({item: str(r.item), qty: str(r.qty), unitPrice: str(r.unitPrice)})).filter(it => it.item || it.qty || it.unitPrice),
+    cpoKey: key, cpoIds: rows.map(r => r.id)
+  };
+  if(!OA_DRAFT.items.length) OA_DRAFT.items = [{}];
+  oaEditId = null;
+  currentTab = 'salesdesk';
+  salesDeskSection = 'ack';
+  render();
+  const el = document.getElementById('oa-form');
+  if(el && el.scrollIntoView) el.scrollIntoView({behavior: 'smooth', block: 'start'});
+}
+
+/* ---- Sales Desk > Order Acknowledgement ---- */
+let OA_DRAFT = null;   /* values copied from a Customer P.O, shown in the O.A form until saved / cleared */
+let oaEditId = null;
+/* O.A No. = <prefix>/<yyyymmdd>/<O.A count>, e.g. SOM/OA/20261113/002 or EVI/OA/20261113/009.
+   The last part (3 digits, grows past 999) is the running count of all O.As for the company (never resets).
+   Count = highest count already used (read from the end of any existing O.A No.) or the number of O.As, whichever is bigger, + 1. */
+const OA_PREFIX = {SOMTEK: 'SOM/OA', EVISSAT: 'EVI/OA'};
+function oaPrefix(){ return OA_PREFIX[currentLocation] || 'OA'; }
+function oaNextNo(d){
+  const list = (d.soAcks || []).filter(Boolean);
+  let max = list.length;
+  list.forEach(a => {
+    const no = String(a.soNo || '').trim();
+    const m = no.match(/\/(\d+)$/) || no.match(/^\d{8}(\d{6})$/);   /* new SOM|EVI/OA/date/count, or old yyyymmdd000000 */
+    if(m){ const v = parseInt(m[1], 10); if(v > max) max = v; }
+  });
+  return oaPrefix() + '/' + today().replace(/-/g, '') + '/' + String(max + 1).padStart(3, '0');
+}
+function oaVisible(r){ return slVisible(r) || (r && (r.addedBy === actorName() || r.addedBy === actorLogin())); }
+function oaItems(r){
+  if(r && Array.isArray(r.items) && r.items.length) return r.items;
+  return [{item: '', qty: '', unitPrice: ''}];
+}
+function oaTotal(items){ return items.reduce((t, it) => t + (slNum(it.qty) * slNum(it.unitPrice)), 0); }
+function oaLineHtml(it){
+  it = it || {};
+  const tot = slNum(it.qty) * slNum(it.unitPrice);
+  return `<div class="out-line oa-line">
+    <input type="text" class="oa-line-item" value="${esc(it.item || '')}" placeholder="Description" style="flex:2 1 220px; min-width:180px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:'IBM Plex Sans',sans-serif; font-size:13px; border-radius:4px;">
+    <input type="text" class="oa-line-hsn" value="${esc(it.hsn || '')}" placeholder="HSN Code" style="width:110px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:9px 10px; font-family:'IBM Plex Sans',sans-serif; font-size:13px; border-radius:4px;">
+    <input type="number" step="0.01" class="out-line-price oa-line-price" placeholder="Unit Price" value="${esc(it.unitPrice || '')}" oninput="oaRecalc()">
+    <input type="number" step="any" class="out-line-qty oa-line-qty" placeholder="Qty" value="${esc(it.qty || '')}" oninput="oaRecalc()">
+    <input type="text" class="oa-line-total" readonly tabindex="-1" placeholder="Total" value="${tot ? tot.toFixed(2) : ''}" style="width:120px; opacity:.8;">
+    <button type="button" class="icon-btn out-line-remove" onclick="oaRemoveLine(this)" title="Remove this item">&#10005;</button>
+  </div>`;
+}
+function oaAddLine(){
+  const wrap = document.getElementById('oa-item-lines');
+  if(wrap) wrap.insertAdjacentHTML('beforeend', oaLineHtml());
+}
+function oaRemoveLine(btn){
+  const line = btn.closest('.oa-line');
+  const wrap = document.getElementById('oa-item-lines');
+  if(!line || !wrap) return;
+  if(wrap.querySelectorAll('.oa-line').length <= 1){ line.querySelectorAll('input').forEach(i => i.value = ''); }
+  else line.remove();
+  oaRecalc();
+}
+function oaReadLines(){
+  return [...document.querySelectorAll('#oa-item-lines .oa-line')].map(l => ({
+    item: l.querySelector('.oa-line-item').value.trim(),
+    hsn: l.querySelector('.oa-line-hsn').value.trim(),
+    qty: l.querySelector('.oa-line-qty').value.trim(),
+    unitPrice: l.querySelector('.oa-line-price').value.trim()
+  }));
+}
+/* Sub Total -> GST at Tax Rate: CGST + SGST (half each) or IGST (full) -> Total */
+const OA_TAX_TYPES = ['CGST + SGST', 'IGST'];
+function oaTaxCalc(subTotal, rate, type){
+  const r2 = n => Math.round(n * 100) / 100;
+  const tax = r2(subTotal * slNum(rate) / 100);
+  const igst = type === 'IGST' ? tax : 0;
+  const cgst = type === 'IGST' ? 0 : r2(tax / 2);
+  const sgst = type === 'IGST' ? 0 : r2(tax - cgst);
+  return {subTotal: r2(subTotal), cgst: cgst, sgst: sgst, igst: igst, grandTotal: r2(subTotal + cgst + sgst + igst)};
+}
+function oaRecalc(){
+  document.querySelectorAll('#oa-item-lines .oa-line').forEach(l => {
+    const t = slNum(l.querySelector('.oa-line-qty').value) * slNum(l.querySelector('.oa-line-price').value);
+    l.querySelector('.oa-line-total').value = t ? t.toFixed(2) : '';
+  });
+  const rate = (document.getElementById('oa-taxRate') || {}).value || '';
+  const type = (document.getElementById('oa-taxType') || {}).value || OA_TAX_TYPES[0];
+  const c = oaTaxCalc(oaTotal(oaReadLines()), rate, type);
+  ['subTotal','cgst','sgst','igst','grandTotal'].forEach(k => { const el = document.getElementById('oa-calc-' + k); if(el) el.value = c[k].toFixed(2); });
+}
+function oaCopyBillToShip(){
+  ['Address','Gst','Email'].forEach(k => {
+    const from = document.getElementById('oa-bill' + k), to = document.getElementById('oa-ship' + k);
+    if(from && to) to.value = from.value;
+  });
+}
+const OA_STATUSES = ['Pending','Sent','Customer Confirmed','Revised','Cancelled'];
+const OA_TERMS = [
+  ['termPrices','Prices'], ['termPayment','Payment Terms'], ['termFreight','Freight'], ['termPF','P&F'],
+  ['termGadQap','GAD/QAP'], ['termLD','LD Clause'], ['termCertificate','Certificate'], ['termInspection','Inspection']
+];
+const OA_TEXT_KEYS = ['soNo','date','poNo','poDate','customer','customerAddress','billGst','billEmail','shipAddress','shipGst','shipEmail','quoteRef','salesPerson','deliveryDate','ackSentOn','ackStatus','remarks','taxRate','taxType'].concat(OA_TERMS.map(t => t[0]));
+function oaFormHtml(){
+  const d = DATA[currentLocation];
+  const editing = oaEditId ? (d.soAcks || []).find(x => x && x.id === oaEditId) : null;
+  if(oaEditId && !editing) oaEditId = null;
+  const src = editing || OA_DRAFT || {};
+  const v = k => esc(src[k] == null ? '' : String(src[k]));
+  const items = editing ? oaItems(editing) : ((OA_DRAFT && OA_DRAFT.items) || [{}]);
+  const status = src.ackStatus || 'Pending';
+  const taxType = OA_TAX_TYPES.includes(src.taxType) ? src.taxType : OA_TAX_TYPES[0];
+  const taxRate = (src.taxRate == null || src.taxRate === '') ? '18' : String(src.taxRate);
+  const calc = oaTaxCalc(oaTotal(items), taxRate, taxType);
+  const pocOptions = salesPocUsers().map(u => '<option value="' + esc(u.name || u.username) + '">').join('');
+  const field = (lbl, inner) => `<div class="field"><label>${lbl}</label>${inner}</div>`;
+  const txt = (k, lbl, req) => field(lbl + (req ? ' *' : ''), `<input type="text" id="oa-${k}" value="${v(k)}"${req ? ' required' : ''}>`);
+  const dt = (k, lbl) => field(lbl, `<input type="date" id="oa-${k}" value="${v(k)}">`);
+  const ro = (k, lbl) => field(lbl, `<input type="text" id="oa-calc-${k}" readonly tabindex="-1" value="${calc[k].toFixed(2)}" style="opacity:.85;${k === 'grandTotal' ? ' font-weight:700;' : ''}">`);
+  const sub = t => `<div class="out-lines-head" style="margin-top:14px;">${t}</div>`;
+  const note = (!editing && OA_DRAFT && OA_DRAFT.cpoKey)
+    ? `<div style="margin-bottom:12px; padding:10px 12px; border-left:3px solid #1f4491; background:var(--panel-2); font-size:13px;">Details copied from Customer P.O <b>${esc(OA_DRAFT.poNo || '')}</b> &mdash; review, fill in the rest and save. <button type="button" class="icon-btn" style="margin-left:8px;" onclick="oaCancel()">Clear</button></div>` : '';
+  const title = editing ? `Edit O.A ${esc(editing.soNo || '')}` : 'New order acknowledgement';
+  return `<div class="panel" id="oa-form"><div class="panel-head"><h3>${title}</h3>${editing ? `<div class="panel-head-actions"><button type="button" class="icon-btn" onclick="openOAPreview('${esc(editing.id)}')">View / Print</button><button type="button" class="export-btn" style="background:var(--muted);" onclick="oaCancel()">Cancel Edit</button></div>` : ''}</div>
+  <div class="panel-body">
+  ${note}
+  <form onsubmit="return oaSave(event)">
+    <div class="form-grid">
+      ${field('Sales O.A No. *', `<input type="text" id="oa-soNo" value="${editing ? v('soNo') : esc(oaNextNo(d))}" required style="color:var(--accent-2); font-weight:600;">`)}
+      ${field('Acknowledgement Date *', `<input type="date" id="oa-date" value="${editing ? v('date') : today()}" required>`)}
+      ${txt('poNo', 'Customer P.O No.')}
+      ${dt('poDate', 'P.O Date')}
+      ${dt('deliveryDate', 'Delivery Date')}
+      ${field('Sales Representative', `<input type="text" id="oa-salesPerson" list="oa-sp-list" autocomplete="off" value="${src.salesPerson ? v('salesPerson') : esc(actorLogin())}"><datalist id="oa-sp-list">${pocOptions}</datalist>`)}
+      ${txt('quoteRef', 'Quotation No.')}
+      ${field('Ack Status', `<select id="oa-ackStatus">${OA_STATUSES.map(o => `<option value="${o}" ${o === status ? 'selected' : ''}>${o}</option>`).join('')}</select>`)}
+      ${dt('ackSentOn', 'Ack Sent On')}
+    </div>
+    ${sub('Bill To')}
+    <div class="form-grid">
+      ${txt('customer', 'Customer Name', true)}
+      ${field('Address', `<input type="text" id="oa-billAddress" value="${v('customerAddress')}">`)}
+      ${txt('billGst', 'GST No.')}
+      ${txt('billEmail', 'Email-Id')}
+    </div>
+    ${sub(`Ship To <button type="button" class="icon-btn" style="margin-left:8px; text-transform:none;" onclick="oaCopyBillToShip()">Same as Bill To</button>`)}
+    <div class="form-grid">
+      ${txt('shipAddress', 'Address')}
+      ${txt('shipGst', 'GST No.')}
+      ${txt('shipEmail', 'Email-Id')}
+    </div>
+    ${sub('Items &mdash; Description, HSN Code, Unit Price, Qty, Total')}
+    <div id="oa-item-lines">${items.map(oaLineHtml).join('')}</div>
+    <div style="margin:10px 0 4px 0;"><button type="button" class="btn btn-ghost" onclick="oaAddLine()">+ Add another item</button></div>
+    ${sub('Tax &amp; Total')}
+    <div class="form-grid">
+      ${ro('subTotal', 'Sub Total')}
+      ${field('Tax Rate (%)', `<input type="number" step="any" min="0" id="oa-taxRate" value="${esc(taxRate)}" oninput="oaRecalc()">`)}
+      ${field('Tax Type', `<select id="oa-taxType" onchange="oaRecalc()">${OA_TAX_TYPES.map(o => `<option value="${o}" ${o === taxType ? 'selected' : ''}>${o}</option>`).join('')}</select>`)}
+      ${ro('cgst', 'CGST')}
+      ${ro('sgst', 'SGST')}
+      ${ro('igst', 'IGST')}
+      ${ro('grandTotal', 'Total')}
+    </div>
+    ${sub('Terms &amp; Conditions')}
+    <div class="form-grid">${OA_TERMS.map(t => txt(t[0], t[1])).join('')}</div>
+    <div class="form-grid" style="margin-top:10px;">${txt('remarks', 'Remarks')}</div>
+    <p style="margin:10px 0 12px 0; font-size:11.5px; color:var(--muted);">Bank details and company address print automatically for ${esc(invoiceCompanyName(currentLocation))}.</p>
+    <button type="submit" class="btn">${editing ? 'Save changes' : 'Save entry'}</button>
+  </form>
+  </div></div>`;
+}
+async function oaSave(e){
+  e.preventDefault();
+  const d = DATA[currentLocation];
+  d.soAcks = d.soAcks || [];
+  const g = k => { const el = document.getElementById('oa-' + k); return el ? el.value.trim() : ''; };
+  const vals = {};
+  OA_TEXT_KEYS.forEach(k => vals[k] = g(k));
+  vals.customerAddress = g('billAddress');
+  if(!vals.soNo || !vals.date || !vals.customer){ alert('O.A No., Acknowledgement Date and Customer are required.'); return false; }
+  if(d.soAcks.some(a => a && a.id !== oaEditId && String(a.soNo || '').trim() === vals.soNo)){ alert('O.A No. ' + vals.soNo + ' already exists. Please use a different number.'); return false; }
+  const items = oaReadLines().filter(it => it.item || it.hsn || it.qty || it.unitPrice);
+  vals.items = items;
+  const c = oaTaxCalc(oaTotal(items), vals.taxRate, vals.taxType);
+  vals.orderValue = String(c.subTotal);
+  ['cgst','sgst','igst','grandTotal'].forEach(k => vals[k] = String(c[k]));
+  let rec = oaEditId ? d.soAcks.find(x => x && x.id === oaEditId) : null;
+  if(rec){
+    Object.assign(rec, vals);
+  } else {
+    rec = Object.assign({id: uid()}, vals);
+    if(!rec.salesPerson) rec.salesPerson = actorLogin();
+    rec.addedBy = actorName();
+    rec.addedByLogin = actorLogin();
+    if(OA_DRAFT && OA_DRAFT.cpoKey){ rec.cpoKey = OA_DRAFT.cpoKey; rec.cpoIds = OA_DRAFT.cpoIds || []; }
+    d.soAcks.push(rec);
+  }
+  OA_DRAFT = null;
+  oaEditId = null;
+  await saveLocation(currentLocation);
+  render();
+  return false;
+}
+function oaOpenEdit(id){
+  const d = DATA[currentLocation];
+  const rec = (d.soAcks || []).find(x => x && x.id === id);
+  if(!rec || !oaVisible(rec)) return false;
+  oaEditId = id;
+  OA_DRAFT = null;
+  currentTab = 'salesdesk';
+  salesDeskSection = 'ack';
+  render();
+  const el = document.getElementById('oa-form');
+  if(el && el.scrollIntoView) el.scrollIntoView({behavior: 'smooth', block: 'start'});
+  return true;
+}
+function oaCancel(){ oaEditId = null; OA_DRAFT = null; render(); }
+function oaSectionHtml(){
+  const d = DATA[currentLocation];
+  const rows = (d.soAcks || []).filter(oaVisible).slice().reverse();
+  const body = rows.length === 0
+    ? `<tr><td colspan="11" style="text-align:center; color:var(--muted); padding:18px;">No records yet.</td></tr>`
+    : rows.map(r => `<tr>
+        <td>${esc(r.soNo || '')}</td><td>${fd(r.date)}</td><td>${esc(r.poNo || '')}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.customer || '')}</td>
+        <td>${Array.isArray(r.items) ? r.items.length : ''}</td><td>${slMoney(r.orderValue)}</td><td>${r.grandTotal ? slMoney(r.grandTotal) : ''}</td><td>${fd(r.deliveryDate)}</td><td>${esc(r.ackStatus || '')}</td><td>${esc(r.salesPerson || '')}</td>
+        <td>${actionCell(`<button type="button" class="icon-btn" onclick="openOAPreview('${esc(r.id)}')">View / Print</button>` + editBtn('soAcks', r.id), deleteBtn(`slDelete('soAcks','${r.id}')`))}</td>
+      </tr>`).join('');
+  return secHead('&#9989;', 'Order Acknowledgement') + oaFormHtml()
+    + `<div class="panel"><div class="panel-head"><h3>Order Acknowledgement register</h3><div class="panel-head-actions">${salesIoButtons('soAcks')}<span style="color:var(--muted); font-size:12px;">${rows.length} record${rows.length===1?'':'s'}</span></div></div>
+  <div class="panel-body table-scroll"><table><thead><tr><th>O.A No.</th><th>O.A Date</th><th>Customer P.O No.</th><th>Customer</th><th>Items</th><th>Sub Total</th><th>Total (incl. GST)</th><th>Delivery Date</th><th>Ack Status</th><th>Sales Person</th><th></th></tr></thead><tbody>${body}</tbody></table></div></div>`;
+}
+/* ---- O.A document: View / Print (same overlay as the quotation preview) ---- */
+let previewOAId = null;
+function oaDocHtml(r){
+  const items = Array.isArray(r.items) ? r.items : [];
+  const co = saCompanyInfo();
+  const ACC = '#d0714a';
+  const B = '1px solid #222', G = '1px solid #bbb';
+  const c = oaTaxCalc(oaTotal(items), r.taxRate, r.taxType);
+  const money = n => '&#8377;' + slNum(n).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2});
+  const cell = (txt, st) => `<td style="padding:3px 6px; border:${G}; font-size:10.5px; vertical-align:middle; ${st || ''}">${txt}</td>`;
+  const lab = (txt, st) => cell(txt, 'font-weight:600; ' + (st || ''));
+  const PAD = Math.max(0, 6 - items.length);
+  const lines = items.concat(Array.from({length: PAD}, () => null)).map((it, i) => `<tr style="height:24px; break-inside:avoid;">
+      ${cell(it ? String(i + 1) : '', 'text-align:center;')}${cell(it ? esc(it.item || '') : '')}${cell(it ? esc(it.hsn || '') : '', 'text-align:center;')}
+      ${cell(it && it.unitPrice !== '' && it.unitPrice != null ? money(it.unitPrice) : '', 'text-align:right;')}
+      ${cell(it ? esc(it.qty || '') : '', 'text-align:center;')}
+      ${cell(it ? money(slNum(it.qty) * slNum(it.unitPrice)) : '', 'text-align:right;')}</tr>`).join('');
+  const tot = (l, val, st) => `<tr>${lab(l, 'text-align:right; ' + (st || ''))}${cell(val, 'text-align:right; font-weight:700; ' + (st || ''))}</tr>`;
+  const terms = OA_TERMS.map(t => `<tr>${lab(esc(t[1]).toUpperCase(), 'width:28%; font-size:9.5px;')}${cell(esc(r[t[0]] || ''))}</tr>`).join('');
+  const bank = (SA_RTGS[currentLocation] ? Object.values(SA_RTGS[currentLocation]).map(x => esc(x)).join('<br>') : esc(defaultBankDetails(currentLocation)));
+  const ship = (r.shipAddress || r.shipGst || r.shipEmail) ? r : {shipAddress: r.customerAddress, shipGst: r.billGst, shipEmail: r.billEmail};
+  const party = (head, name, addr, gst, mail) => `<td style="width:50%; border:${B}; padding:0; vertical-align:top;">
+      <div style="text-align:center; font-weight:700; padding:4px; border-bottom:${G};">${head}</div>
+      <div style="padding:4px 6px; min-height:44px; border-bottom:${G};"><b>${esc(name || '')}</b>${name ? '<br>' : ''}<span style="color:#333;">${esc(addr || '')}</span></div>
+      <div style="padding:3px 6px; border-bottom:${G};"><b>GST NO:</b> ${esc(gst || '')}</div>
+      <div style="padding:3px 6px;"><b>Email-Id:</b> ${esc(mail || '')}</div></td>`;
+  return `<div class="quote-sheet" style="background:#fff; color:#111; margin:0 auto; padding:18px 22px; font-family:'IBM Plex Sans',Arial,sans-serif; font-size:11px; line-height:1.35; -webkit-print-color-adjust:exact; print-color-adjust:exact;">
+  <table style="width:100%; border-collapse:collapse; border:2px solid #222;">
+    <tr><td colspan="2" style="text-align:center; font-weight:700; font-size:15px; letter-spacing:0.04em; padding:6px; border:${B};">ORDER ACKNOWLEDGEMENT</td></tr>
+    <tr>
+      <td style="width:50%; border:${B}; text-align:center; padding:8px 10px;">
+        <div style="font-size:15px; font-weight:700; color:${currentLocation === 'SOMTEK' ? '#1f3f73' : '#d32f2f'};">${esc(co.name)}</div>
+        <div style="margin-top:4px; font-size:9.5px; color:#444;">${esc(co.address || '')}</div>
+        ${co.gstin ? `<div style="font-size:9.5px; color:#444;">GSTIN: ${esc(co.gstin)}</div>` : ''}
+      </td>
+      <td style="width:50%; border:${B}; text-align:center; padding:8px;"><img src="${quoteLogoUri(currentLocation)}" alt="" style="height:52px; max-width:90%; object-fit:contain;"></td>
+    </tr>
+    <tr><td style="border:${B}; padding:0; vertical-align:top;"><table style="width:100%; border-collapse:collapse;">
+        <tr>${lab('Customer PO NO', 'width:40%; text-align:center;')}${cell(esc(r.poNo || ''))}</tr>
+        <tr>${lab('PO DATE', 'text-align:center;')}${cell(fd(r.poDate) || '')}</tr>
+        <tr>${lab('Quotation No.', 'text-align:center;')}${cell(esc(r.quoteRef || ''))}</tr>
+        <tr>${cell('&nbsp;')}${cell('')}</tr></table></td>
+      <td style="border:${B}; padding:0; vertical-align:top;"><table style="width:100%; border-collapse:collapse;">
+        <tr>${lab('SALES OA NO', 'width:40%; text-align:center;')}${cell(esc(r.soNo || ''))}</tr>
+        <tr>${lab('Acknowledgement Date', 'text-align:center;')}${cell(fd(r.date) || '')}</tr>
+        <tr>${lab('DELIVERY DATE', 'text-align:center;')}${cell(fd(r.deliveryDate) || '')}</tr>
+        <tr>${lab('Sales representative', 'text-align:center;')}${cell(esc(r.salesPerson || ''))}</tr></table></td></tr>
+    <tr>${party('Bill To,', r.customer, r.customerAddress, r.billGst, r.billEmail)}${party('Ship to,', r.customer, ship.shipAddress, ship.shipGst, ship.shipEmail)}</tr>
+    <tr><td colspan="2" style="border:${B}; padding:6px 10px; font-weight:700;">We are in receipt of your order as detailed below:</td></tr>
+    <tr><td colspan="2" style="padding:0; border:${B};"><table style="width:100%; border-collapse:collapse;">
+      <thead style="display:table-header-group;"><tr>
+        ${['SL NO','Description','HSN Code','Unit Price','Qty','Total'].map((h, i) => `<th style="background:${ACC}; color:#fff; padding:7px 6px; border:1px solid #fff; font-size:11px; width:${['8%','37%','12%','16%','9%','18%'][i]};">${h}</th>`).join('')}
+      </tr></thead><tbody>${lines}</tbody></table></td></tr>
+    <tr><td style="border:${B};"></td><td style="border:${B}; padding:0;"><table style="width:100%; border-collapse:collapse;">
+      ${tot('Sub Total', money(c.subTotal))}
+      ${tot('TAX RATE', r.taxRate !== '' && r.taxRate != null ? esc(r.taxRate) + '%' + (r.taxType ? ' (' + esc(r.taxType) + ')' : '') : '')}
+      ${tot('CGST', money(c.cgst))}
+      ${tot('SGST', money(c.sgst))}
+      ${tot('IGST', money(c.igst))}
+      ${tot('Total', money(c.grandTotal), 'color:' + ACC + '; font-size:12px;')}
+    </table></td></tr>
+    <tr><td colspan="2" style="border:${B}; padding:7px 8px;"><b>Amounts in Words :</b> ${esc(c.grandTotal ? numberToWordsINR(c.grandTotal) : '')}</td></tr>
+    <tr><td colspan="2" style="border:${B}; text-align:center; font-weight:700; font-size:13px; color:#444; padding:6px;">TERMS &amp; CONDITIONS</td></tr>
+    <tr><td style="border:${B}; padding:0; vertical-align:top;"><table style="width:100%; border-collapse:collapse;">${terms}</table></td>
+      <td style="border:${B}; padding:10px; text-align:center; vertical-align:middle;"><div style="font-weight:700; margin-bottom:6px;">BANK DETAILS</div><div>${bank}</div></td></tr>
+  </table>
+  ${r.remarks ? `<div style="margin-top:8px;"><b>Remarks:</b> ${esc(r.remarks)}</div>` : ''}
+  <div style="margin-top:34px; display:flex; justify-content:flex-end;"><div style="text-align:center; min-width:220px;">For <b>${esc(co.name)}</b><div style="margin-top:40px; border-top:1px solid #555; padding-top:4px;">Authorised Signatory</div></div></div>
+  </div>`;
+}
+function openOAPreview(id){
+  const d = DATA[currentLocation];
+  const r = (d.soAcks || []).find(x => x && x.id === id);
+  if(!r) return;
+  closeQuotePreview();
+  previewOAId = id;
+  const overlay = document.createElement('div');
+  overlay.id = 'quote-preview';
+  overlay.innerHTML = `
+    <div class="quote-actions">
+      <button type="button" class="btn" onclick="printOA()">&#128424; Print / Save as PDF</button>
+      <button type="button" class="btn quote-close-btn" onclick="closeQuotePreview()">&#10005; Close</button>
+    </div>
+    ${oaDocHtml(r)}`;
+  document.body.appendChild(overlay);
+  const pageStyle = document.createElement('style');
+  pageStyle.id = 'quote-page-style';
+  pageStyle.textContent = '@page{ size: A4 portrait; margin: 10mm; }';
+  document.head.appendChild(pageStyle);
+  document.body.classList.add('quote-open');
+}
+function printOA(){
+  const d = DATA[currentLocation];
+  const r = previewOAId ? (d.soAcks || []).find(x => x && x.id === previewOAId) : null;
+  const oldTitle = document.title;
+  document.title = r ? ('Order Acknowledgement - ' + (r.soNo || '') + (r.customer ? ' - ' + r.customer : '')) : 'Order Acknowledgement';
+  const restore = () => { document.title = oldTitle; window.removeEventListener('afterprint', restore); };
+  window.addEventListener('afterprint', restore);
+  window.print();
+  setTimeout(restore, 3000);
 }
 async function addCustomerPO(e){
   e.preventDefault();
@@ -9002,6 +9389,9 @@ function slInputHtml(f, id, required){
   if(f.type === 'select'){
     return `<div class="field"><label>${esc(f.label)}</label><select id="${id}"${req}>${(f.options||[]).map(o=>`<option value="${esc(o)}">${o===''?'Select':esc(o)}</option>`).join('')}</select></div>`;
   }
+  if(f.suggest){
+    return `<div class="field"><label>${esc(f.label)}${required?' *':''}</label><input type="text" id="${id}" list="${id}-dl" autocomplete="off" placeholder="Select or type"${req}><datalist id="${id}-dl">${f.suggest.map(o => `<option value="${esc(o)}"></option>`).join('')}</datalist></div>`;
+  }
   const t = f.type === 'date' ? 'date' : (f.type === 'number' ? 'number' : 'text');
   const dv = (f.type === 'date' && f.key === 'date') ? today() : '';
   return `<div class="field"><label>${esc(f.label)}${required?' *':''}</label><input type="${t}" id="${id}"${t==='number'?' step="any"':''}${dv?` value="${dv}"`:''}${req}></div>`;
@@ -9010,10 +9400,10 @@ function slFormHtml(table, sid, title, opts){
   const fixed = SL_FIXED[sid] || {};
   const fields = slFields(table, opts);
   const visible = fields.filter(f => fixed[f.key] === undefined);
-  const inputs = fields.map(f => {
+  const inputs = fields.map((f, fi) => {
     const id = 'sf-' + sid + '-' + f.key;
     if(fixed[f.key] !== undefined) return `<input type="hidden" id="${id}" value="${esc(fixed[f.key])}">`;
-    return slInputHtml(f, id, f === visible[0]);
+    return schemaSecHead(fields, fi) + slInputHtml(f, id, f === visible[0]);
   }).join('');
   return `<div class="panel"><div class="panel-head"><h3>New ${esc(title)} entry</h3></div>
   <div class="panel-body">
@@ -9554,6 +9944,144 @@ async function valveEnqAdd(e){
   render();
   return false;
 }
+/* ---- Pump enquiry data sheet: one row per question, one column per pump. Input ids: <pfx>-<key>-<column>. ---- */
+let PUMP_ENQ_DRAFT = null;
+let pumpEnqEditId = null;
+function pumpSheetTableHtml(pfx, items, opts){
+  opts = opts || {};
+  const fields = pumpEnqItemFields();
+  const n = Math.max(1, items.length);
+  const secNo = {};
+  let rows = '', lastSec = null;
+  fields.forEach(f => {
+    if(f.sec !== lastSec){ lastSec = f.sec; rows += `<tr class="ds-sec-row"><td colspan="${n + 1}">${esc(f.sec)}</td></tr>`; }
+    secNo[f.sec] = (secNo[f.sec] || 0) + 1;
+    let cells = '';
+    for(let i = 0; i < n; i++){
+      const it = items[i] || {};
+      const val = it[f.key] == null ? '' : String(it[f.key]);
+      cells += `<td><div class="field ds-a">${valveEnqBareInput(f, `${pfx}-${f.key}-${i}`, val, false, opts.disabled)}</div></td>`;
+    }
+    rows += `<tr><td class="ds-q"><span class="ds-no">${secNo[f.sec]}.</span> ${esc(f.label)}</td>${cells}</tr>`;
+  });
+  let head = '';
+  for(let i = 0; i < n; i++){
+    head += `<th>Pump ${i + 1}${opts.editable && n > 1 ? ` <button type="button" class="icon-btn" style="margin-left:6px;" title="Remove this pump" onclick="pumpEnqRemovePump(${i})">&#10005;</button>` : ''}</th>`;
+  }
+  return `<div class="ds-table-wrap"><table class="ds-table ds-multi" id="${pfx}-sheet" data-n="${n}">
+    <thead><tr><th class="ds-q">Question</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+function pumpSheetRead(pfx){
+  const t = document.getElementById(pfx + '-sheet');
+  if(!t) return null;
+  const fields = pumpEnqItemFields(), n = parseInt(t.dataset.n, 10) || 1, items = [];
+  for(let i = 0; i < n; i++){
+    const it = {};
+    fields.forEach(f => { const el = document.getElementById(`${pfx}-${f.key}-${i}`); if(el) it[f.key] = (el.value || '').trim(); });
+    items.push(it);
+  }
+  return items;
+}
+function pumpEnqCapture(){
+  const prev = PUMP_ENQ_DRAFT || {head: {}, items: [{}]};
+  const read = pumpSheetRead('sp');
+  if(!read) return prev;
+  const head = {};
+  pumpEnqHeadFields().forEach(f => { const el = document.getElementById('sf-pump-' + f.key); if(el) head[f.key] = el.value; });
+  return {head: head, items: read.map((it, i) => Object.assign({}, (prev.items || [])[i] || {}, it))};
+}
+function pumpEnqAddPump(copyLast){
+  const dr = pumpEnqCapture();
+  const last = dr.items[dr.items.length - 1] || {};
+  dr.items.push(copyLast ? Object.assign({}, last, {tagNo: ''}) : {});
+  PUMP_ENQ_DRAFT = dr;
+  render();
+}
+function pumpEnqRemovePump(i){
+  const dr = pumpEnqCapture();
+  if(dr.items.length <= 1) return;
+  if(!valveEnqItemBlank(dr.items[i]) && !confirm('Remove Pump ' + (i + 1) + ' and its answers?')) return;
+  dr.items.splice(i, 1);
+  PUMP_ENQ_DRAFT = dr;
+  render();
+}
+/* Register > Edit: loads the enquiry (all its pumps) back into the sheet. */
+function pumpEnqOpenEdit(id){
+  const d = DATA[currentLocation];
+  const rec = (d.pumpEnquiries || []).find(x => x && x.id === id);
+  if(!rec || !slVisible(rec)) return false;
+  const head = {};
+  pumpEnqHeadFields().forEach(f => { head[f.key] = rec[f.key] == null ? '' : String(rec[f.key]); });
+  PUMP_ENQ_DRAFT = {head: head, items: pumpEnqItems(rec).map(it => Object.assign({}, it))};
+  pumpEnqEditId = id;
+  enquirySection = 'pump';
+  render();
+  const el = document.getElementById('pump-enq-form');
+  if(el && el.scrollIntoView) el.scrollIntoView({behavior: 'smooth', block: 'start'});
+  return true;
+}
+function pumpEnqCancelEdit(){ pumpEnqEditId = null; PUMP_ENQ_DRAFT = null; render(); }
+function pumpEnqFormHtml(nextNo){
+  const d = DATA[currentLocation];
+  const editing = pumpEnqEditId ? (d.pumpEnquiries || []).find(x => x && x.id === pumpEnqEditId) : null;
+  if(pumpEnqEditId && !editing) pumpEnqEditId = null;
+  const dr = PUMP_ENQ_DRAFT || {head: {}, items: [{}]};
+  const required = {customer: true, date: true};
+  const headRows = pumpEnqHeadFields().map((f, i) => {
+    const id = 'sf-pump-' + f.key;
+    const v = dr.head[f.key];
+    let input;
+    if(f.key === 'enqNo') input = `<input type="text" id="${id}" value="${esc(editing ? (editing.enqNo || '') : nextNo)}" readonly style="background:var(--panel-2); color:var(--accent-2); font-weight:600; cursor:not-allowed;">`;
+    else if(f.key === 'salesPerson') input = `<input type="text" id="${id}" value="${esc(v != null && v !== '' ? v : actorLogin())}"${canSeeAllSales() ? '' : ' readonly style="opacity:.75;"'}>`;
+    else input = valveEnqBareInput(f, id, v != null ? String(v) : (f.key === 'date' ? today() : ''), !!required[f.key]);
+    return `<div class="ds-row"><span class="ds-no">${i + 1}.</span><label class="ds-q" for="${id}">${esc(f.label)}${required[f.key] ? ' *' : ''}</label><div class="field ds-a">${input}</div></div>`;
+  }).join('');
+  const n = Math.max(1, dr.items.length);
+  const title = editing ? `Edit enquiry ${esc(editing.enqNo || '')} &mdash; Pump data sheet` : 'Pump enquiry data sheet';
+  return `<div class="panel" id="pump-enq-form"><div class="panel-head"><h3>${title}</h3>${editing ? `<div class="panel-head-actions"><button type="button" class="export-btn" style="background:var(--muted);" onclick="pumpEnqCancelEdit()">Cancel Edit</button></div>` : ''}</div>
+  <div class="panel-body">
+  <form onsubmit="return pumpEnqAdd(event)">
+    <div class="ds-sheet"><div class="ds-sec">${VALVE_HEAD_SEC}</div><div class="ds-rows">${headRows}</div></div>
+    <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:14px 0 8px 0;">
+      <span style="font-size:13px; color:var(--muted); margin-right:auto;">${n} pump${n === 1 ? '' : 's'} in this enquiry &mdash; each column is one pump.</span>
+      <button type="button" class="btn btn-ghost" onclick="pumpEnqAddPump(false)">+ Add pump</button>
+      <button type="button" class="btn btn-ghost" onclick="pumpEnqAddPump(true)">+ Copy last pump</button>
+    </div>
+    <div class="ds-sheet">${pumpSheetTableHtml('sp', dr.items, {editable: true})}</div>
+    <div style="margin-top:14px;"><button type="submit" class="btn">${editing ? 'Save changes' : 'Save entry'}</button></div>
+  </form>
+  </div></div>`;
+}
+async function pumpEnqAdd(e){
+  e.preventDefault();
+  const d = DATA[currentLocation];
+  d.pumpEnquiries = d.pumpEnquiries || [];
+  const dr = pumpEnqCapture();
+  let items = dr.items.filter(it => !valveEnqItemBlank(it));
+  if(!items.length) items = [dr.items[0] || {}];
+  const head = {};
+  Object.keys(dr.head).forEach(k => { head[k] = String(dr.head[k] == null ? '' : dr.head[k]).trim(); });
+  let rec = pumpEnqEditId ? d.pumpEnquiries.find(x => x && x.id === pumpEnqEditId) : null;
+  if(rec && !slVisible(rec)) return false;
+  if(rec){
+    delete head.enqNo;
+    Object.assign(rec, head);
+  } else {
+    rec = Object.assign({id: uid()}, head);
+    if(!rec.salesPerson) rec.salesPerson = actorName();
+    rec.addedBy = actorName();
+    rec.addedByLogin = actorLogin();
+    d.pumpEnquiries.push(rec);
+  }
+  rec.items = items;
+  pumpEnqSync(rec);
+  pumpEnqEditId = null;
+  PUMP_ENQ_DRAFT = null;
+  await saveLocation(currentLocation);
+  render();
+  return false;
+}
+const PUMP_ENQ_LIST_COLS = ['enqNo','date','customer','region','followUp','pumpCount','tagNo','pumpType','application','media','flowRate','head','qty','salesPerson'];
 const VALVE_ENQ_LIST_COLS = ['enqNo','date','customer','region','followUp','valveCategory','valveCount','tagNo','valveType','valveSize','application','qty','salesPerson'];
 function enquiryFormSectionHtml(){
   const d = DATA[currentLocation];
@@ -9565,10 +10093,8 @@ function enquiryFormSectionHtml(){
   const stripHead = h => h.replace(/<div class="sec-head">[\s\S]*?<\/div>/, '');
   let body;
   if(isPump){
-    body = stripHead(slSection('pump', '&#9881;', 'Pump', 'pumpEnquiries', {formKeys: cols('pumpEnquiries'), cols: cols('pumpEnquiries')}));
-    /* Show the auto-generated number inside the Enquiry No. input and lock it. */
-    body = body.replace(/<input([^>]*\bid="[^"]*enqNo[^"]*"[^>]*)>/, (m, attrs) =>
-      `<input${attrs.replace(/\svalue="[^"]*"/, '')} value="${esc(nextNo)}" readonly style="background:var(--panel-2); color:var(--accent-2); font-weight:600; cursor:not-allowed;">`);
+    body = pumpEnqFormHtml(nextNo)
+      + stripHead(slSection('pump', '&#9881;', 'Pump', 'pumpEnquiries', {noForm: true, cols: PUMP_ENQ_LIST_COLS}));
   } else {
     body = valveEnqFormHtml(nextNo)
       + stripHead(slSection('valve', '&#9881;', 'Valve', 'valveEnquiries', {noForm: true, cols: VALVE_ENQ_LIST_COLS, rowActions: r => valveSheetViewBtn(r.id)}));
@@ -12070,6 +12596,14 @@ async function enqDeskSave(id, submit){
       valveEnqSync(r);
     }
   }
+  if(f.table === 'pumpEnquiries'){
+    const read = pumpSheetRead('dqp');
+    if(read){
+      const old = pumpEnqItems(r);
+      r.items = read.map((it, i) => Object.assign({}, old[i] || {}, it));
+      pumpEnqSync(r);
+    }
+  }
   r.deskNote = note;
   if(submit){
     r.deskStatus = 'Submitted';
@@ -12179,8 +12713,11 @@ function enqReviewHtml(f){
   const can = enqDeskCanEdit(r);
   const required = {customer: true, date: true};
   const isValveEnq = f.table === 'valveEnquiries';
-  const reviewSchema = isValveEnq ? valveEnqFields(r.valveCategory).filter(x => x.sec === VALVE_HEAD_SEC) : (EDIT_SCHEMAS[f.table] || []);
-  const valveSheet = isValveEnq ? `<div class="ds-sheet" style="margin-top:14px;">${valveSheetTableHtml('dqv', r.valveCategory, valveEnqItems(r), {disabled: !can})}</div>` : '';
+  const isPumpEnq = f.table === 'pumpEnquiries';
+  const reviewSchema = isValveEnq ? valveEnqFields(r.valveCategory).filter(x => x.sec === VALVE_HEAD_SEC)
+    : (isPumpEnq ? pumpEnqHeadFields() : (EDIT_SCHEMAS[f.table] || []));
+  const valveSheet = isValveEnq ? `<div class="ds-sheet" style="margin-top:14px;">${valveSheetTableHtml('dqv', r.valveCategory, valveEnqItems(r), {disabled: !can})}</div>`
+    : (isPumpEnq ? `<div class="ds-sheet" style="margin-top:14px;">${pumpSheetTableHtml('dqp', pumpEnqItems(r), {disabled: !can})}</div>` : '');
   const fields = reviewSchema.map((fld, fi) => schemaSecHead(reviewSchema, fi)
     + dqInputHtml(fld, r[fld.key] == null ? '' : String(r[fld.key]), !can, !!required[fld.key])).join('');
   const holdOpts = ENQ_DESK_HOLDS.map(o =>
@@ -16184,6 +16721,83 @@ function renderReports(){
    only:'S' = Shut-off valve sheet only, only:'C' = Control valve sheet only, none = both.
    suggest = pick-or-type list. Old enquiries (no category) show every field. */
 const VALVE_CATS = ['Shut-off Valve', 'Control Valve'];
+/* Pump Enquiry Data Sheet (Sales tab > Enquiry Form > Pump). */
+const PUMP_ENQ_SCHEMA = (() => {
+  const YN = ['', 'Yes', 'No'];
+  const out = [];
+  const add = (sec, list) => list.forEach(f => out.push(Object.assign({type:'text', sec:sec}, f)));
+  add('Enquiry Details', [
+    {key:'enqNo', label:'Enquiry No.'},
+    {key:'date', label:'Date', type:'date'},
+    {key:'customer', label:'Customer'},
+    {key:'region', label:'Region'},
+    {key:'followUp', label:'Due date', type:'date'},
+    {key:'salesPerson', label:'Sales Person (login name)'},
+    {key:'pumpCount', label:'No. of Pumps', derived:true}
+  ]);
+  add('Section 1 - General Information', [
+    {key:'tagNo', label:'Pump Tag No.'},
+    {key:'application', label:'Application / Service'},
+    {key:'pumpType', label:'Pump Type', suggest:['Centrifugal', 'Multistage', 'AODD', 'Rotary Lobe', 'Gear', 'Screw', 'Progressive Cavity', 'Other']},
+    {key:'qty', label:'Quantity', type:'number'},
+    {key:'earlierPoRef', label:'Earlier PO Reference (If Repeat)'},
+    {key:'installationType', label:'Installation Type', type:'select', options:['', 'Stationary', 'Mobile', 'Skid Mounted', 'Submerged']},
+    {key:'installationLocation', label:'Installation Location', type:'select', options:['', 'Indoor', 'Outdoor']},
+    {key:'operatingDuty', label:'Pump Operating Duty', type:'select', options:['', 'Continuous', 'Intermittent']}
+  ]);
+  add('Section 2 - Application & Fluid Information', [
+    {key:'media', label:'Medium / Fluid Name'},
+    {key:'fluidTemp', label:'Fluid Temperature (°C)'},
+    {key:'viscosity', label:'Viscosity (cP / mPa.s)'},
+    {key:'density', label:'Density (kg/m³)'},
+    {key:'specificGravity', label:'Specific Gravity'},
+    {key:'phValue', label:'pH Value'},
+    {key:'concentration', label:'Concentration (%)'},
+    {key:'solidContent', label:'Solid Content (%)'},
+    {key:'solidNature', label:'Nature of Solids', suggest:['Abrasive', 'Fibrous', 'Corrosive', 'Other']},
+    {key:'maxSolidSize', label:'Maximum Solid Particle Size (mm)'},
+    {key:'specialFluidChar', label:'Any Special Fluid Characteristics'}
+  ]);
+  add('Section 3 - Operating Conditions', [
+    {key:'flowRate', label:'Flow Rate (m³/hr)'},
+    {key:'suctionPressure', label:'Suction Pressure (bar)'},
+    {key:'dischargePressure', label:'Discharge Pressure (bar)'},
+    {key:'head', label:'Head (m)'},
+    {key:'diffPressure', label:'Differential Pressure (bar)'},
+    {key:'npsha', label:'NPSHa (m)'},
+    {key:'pitDepth', label:'Pit Depth (m)'},
+    {key:'pipelineSize', label:'Pipeline Size (mm)'},
+    {key:'pipeLength', label:'Pipe Length (Horizontal + Vertical) (mm)'},
+    {key:'numBends', label:'Number of Bends'},
+    {key:'numValves', label:'Number of Valves'}
+  ]);
+  add('Section 4 - Pump Construction', [
+    {key:'casingMoc', label:'Pump Casing Material'},
+    {key:'impellerMoc', label:'Impeller / Rotor / Diaphragm / Gear Material'},
+    {key:'suctionSize', label:'Suction Connection Size'},
+    {key:'dischargeSize', label:'Discharge Connection Size'},
+    {key:'connectionType', label:'Connection Type', suggest:['Flanged', 'Threaded', 'Other']},
+    {key:'specialConstruction', label:'Any Special Construction Requirements'}
+  ]);
+  add('Section 5 - Motor & Drive Requirements', [
+    {key:'driveType', label:'Drive Type', suggest:['Electric Motor', 'Gearbox', 'Other']},
+    {key:'motorRating', label:'Motor Rating (kW / HP)'},
+    {key:'motorProtection', label:'Motor Protection', type:'select', options:['', 'FLP', 'Non-FLP']},
+    {key:'motorType', label:'Motor Type', suggest:['Induction', 'Other']},
+    {key:'phase', label:'Phase', type:'select', options:['', 'Single Phase', 'Three Phase']},
+    {key:'enclosureProtection', label:'Enclosure Protection', suggest:['IP55', 'IP65', 'IP66', 'IP67', 'Other']},
+    {key:'hazArea', label:'Hazardous Area Classification'},
+    {key:'vfdRequired', label:'VFD Requirement', type:'select', options:YN}
+  ]);
+  add('Section 6 - Accessories & Special Requirements', [
+    {key:'specialAccessories', label:'Any Special Accessories'},
+    {key:'areaClassification', label:'Area Classification'},
+    {key:'documentationReq', label:'Any Special Documentation'},
+    {key:'jacketReq', label:'Heating / Cooling Jacket', type:'select', options:['', 'Required', 'Not Required']},
+    {key:'paintingReq', label:'Special Painting / Coating Requirements'}
+  ]);
+  return out;
+})();
 const VALVE_ENQ_SCHEMA = (() => {
   const YN = ['', 'Yes', 'No'], HAZ = ['', 'Safe Area', 'Explosion Proof'];
   const out = [];
@@ -16309,6 +16923,26 @@ function valveEnqSync(rec){
   }
   rec.valveCount = String(items.length);
 }
+/* One pump enquiry can hold several pumps, same as valves: each pump is one entry in rec.items;
+   the first pump is also copied onto the record so lists / desk / quotation keep working. */
+function pumpEnqHeadFields(){ return PUMP_ENQ_SCHEMA.filter(f => !f.derived && f.sec === VALVE_HEAD_SEC); }
+function pumpEnqItemFields(){ return PUMP_ENQ_SCHEMA.filter(f => !f.derived && f.sec !== VALVE_HEAD_SEC); }
+function pumpEnqItems(rec){
+  if(rec && Array.isArray(rec.items) && rec.items.length) return rec.items;
+  const it = {};
+  pumpEnqItemFields().forEach(f => { if(rec && rec[f.key] != null && rec[f.key] !== '') it[f.key] = rec[f.key]; });
+  return [it];
+}
+function pumpEnqSync(rec){
+  const items = rec.items;
+  if(!Array.isArray(items) || !items.length) return;
+  pumpEnqItemFields().forEach(f => { rec[f.key] = items[0][f.key] == null ? '' : items[0][f.key]; });
+  if(items.length > 1){
+    const total = items.reduce((t, it) => t + (parseFloat(it.qty) || 0), 0);
+    if(total) rec.qty = String(total);
+  }
+  rec.pumpCount = String(items.length);
+}
 /* Section heading shown inside a form grid wherever the section changes. */
 function schemaSecHead(list, i){
   const f = list[i];
@@ -16317,27 +16951,7 @@ function schemaSecHead(list, i){
 }
 const EDIT_SCHEMAS = {
   valveEnquiries: VALVE_ENQ_SCHEMA,
-  pumpEnquiries: [
-    {key:'enqNo', label:'Enquiry No.', type:'text'},
-    {key:'date', label:'Date', type:'date'},
-    {key:'customer', label:'Customer', type:'text'},
-    {key:'region', label:'Region', type:'text'},
-    {key:'followUp', label:'Due date', type:'date'},
-    {key:'application', label:'Application', type:'text'},
-    {key:'pumpType', label:'Pump Type', type:'select', options:['','Centrifugal','Gear','Diaphragm','Screw','Piston','Other']},
-    {key:'flowRate', label:'Flow Rate', type:'text'},
-    {key:'head', label:'Head', type:'text'},
-    {key:'bodyMoc', label:'Body MOC', type:'text'},
-    {key:'impellerMoc', label:'Impeller MOC', type:'text'},
-    {key:'sealType', label:'Seal Type', type:'select', options:['','Mechanical Seal','Gland Packing']},
-    {key:'media', label:'Media', type:'text'},
-    {key:'mediaType', label:'Media Type', type:'text'},
-    {key:'operatingTemp', label:'Operating Temperature', type:'text'},
-    {key:'operatingPressure', label:'Operating Pressure', type:'text'},
-    {key:'motorRating', label:'Motor Rating', type:'text'},
-    {key:'qty', label:'Qty', type:'number'},
-    {key:'salesPerson', label:'Sales Person (login name)', type:'text'}
-  ],
+  pumpEnquiries: PUMP_ENQ_SCHEMA,
   salesQuotes: [
     {key:'date', label:'Date', type:'date'},
     {key:'quoteNo', label:'Quotation No.', type:'text'},
@@ -16435,12 +17049,16 @@ const EDIT_SCHEMAS = {
     {key:'remarks', label:'Remarks', type:'text'}
   ],
   soAcks: [
-    {key:'date', label:'Order Date', type:'date'},
-    {key:'soNo', label:'SO / Ack No.', type:'text'},
+    {key:'date', label:'O.A Date', type:'date'},
+    {key:'soNo', label:'O.A No.', type:'text'},
     {key:'poNo', label:'Customer P.O No.', type:'text'},
+    {key:'poDate', label:'P.O Date', type:'date'},
     {key:'customer', label:'Customer', type:'text'},
-    {key:'orderValue', label:'Order Value', type:'number', money:true},
-    {key:'deliveryDate', label:'Committed Delivery', type:'date'},
+    {key:'customerAddress', label:'Customer Address', type:'text'},
+    {key:'quoteRef', label:'Quotation No.', type:'text'},
+    {key:'orderValue', label:'Sub Total', type:'number', money:true},
+    {key:'grandTotal', label:'Total (incl. GST)', type:'number', money:true},
+    {key:'deliveryDate', label:'Delivery Date', type:'date'},
     {key:'ackSentOn', label:'Ack Sent On', type:'date'},
     {key:'ackStatus', label:'Ack Status', type:'select', options:['Pending','Sent','Customer Confirmed','Revised','Cancelled']},
     {key:'salesPerson', label:'Sales Person', type:'text'},
@@ -16841,6 +17459,8 @@ function findEditRecord(table, id){
 
 function openEditModal(table, id){
   if(table === 'valveEnquiries' && valveEnqOpenEdit(id)) return;
+  if(table === 'pumpEnquiries' && pumpEnqOpenEdit(id)) return;
+  if(table === 'soAcks' && oaOpenEdit(id)) return;
   if(table === 'users' && !isAdmin()) return;
   if((table === 'purchaseAccounts' || table === 'salesAccounts') && !canSeeTab('accounts')) return;
   const record = findEditRecord(table, id);
@@ -16966,6 +17586,9 @@ function renderEditModal(record){
         </div>
         <input type="hidden" id="edit-f-${f.key}" value="${esc(val)}">
       </div>`;
+    }
+    if(f.suggest){
+      return `<div class="field"><label>${esc(f.label)}</label><input type="text" id="edit-f-${f.key}" list="edit-f-${f.key}-dl" value="${esc(val)}" autocomplete="off" placeholder="Select or type"><datalist id="edit-f-${f.key}-dl">${f.suggest.map(o => `<option value="${esc(o)}"></option>`).join('')}</datalist></div>`;
     }
     return `<div class="field"><label>${esc(f.label)}</label><input type="${f.type}" id="edit-f-${f.key}" value="${esc(val)}"></div>`;
   })()).join('');
