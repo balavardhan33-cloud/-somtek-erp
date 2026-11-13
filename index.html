@@ -3535,7 +3535,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'SEV7EN v12.28';
+const APP_VERSION_LABEL = 'SEV7EN v12.29';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -18663,6 +18663,20 @@ function openQuotePreview(id){
   document.head.appendChild(pageStyle);
   document.body.classList.add('quote-open');
 }
+/* Printouts keep each item row on one page. A row too tall for that (very long description) would jump to
+   the next page and leave the page before it nearly empty, so just before printing such rows are allowed
+   to flow across pages. ~420px on screen is roughly half a printed A4 page. */
+function relaxLongPrintRows(){
+  try{
+    document.querySelectorAll('#quote-preview tr').forEach(function(tr){
+      if(!/break-inside/.test(tr.getAttribute('style') || '')) return;
+      const tall = tr.offsetHeight > 420;
+      tr.style.breakInside = tall ? 'auto' : 'avoid';
+      tr.style.pageBreakInside = tall ? 'auto' : 'avoid';
+    });
+  }catch(e){}
+}
+window.addEventListener('beforeprint', relaxLongPrintRows);
 function closeQuotePreview(){
   previewQuoteId = null;
   const el = document.getElementById('quote-preview');
