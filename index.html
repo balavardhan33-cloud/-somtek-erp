@@ -672,6 +672,10 @@ form input[readonly]{background:var(--panel-2); color:var(--muted); cursor:defau
 }
 .export-btn:hover{filter:brightness(1.1);}
 .panel-head-actions{display:flex; align-items:center; gap:10px;}
+.panel-head{flex-wrap:wrap;}
+.panel-head-actions{margin-left:auto; flex-wrap:wrap;}
+.panel-search, .panel-head .panel-search-moved{width:220px; max-width:100%; flex:0 1 220px !important; min-width:140px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:7px 10px; font-family:'IBM Plex Sans',sans-serif; font-size:13px; border-radius:4px;}
+.panel-search:focus, .panel-head .panel-search-moved:focus{outline:none; border-color:var(--accent-2);}
 
 /* ---------- ICON INPUT FIELDS (login) ---------- */
 .icon-field-row{display:flex; align-items:center; gap:10px;}
@@ -1173,6 +1177,77 @@ function injectSerialNumbers(){
   }
 }
 
+/* Runs after every render: every section (panel) that holds a table gets a search box at the top right.
+   - If the panel already has the full register search (table toolbar), that box is moved to the top right
+     (it keeps searching all records, not just the rows on screen).
+   - Otherwise a quick search is added that hides the rows that don't match what is typed.
+   What was typed is remembered per section, so it stays after the screen refreshes. */
+const PANEL_SEARCH = {};
+function panelSearchKey(panel){
+  const h = panel.querySelector('.panel-head h3');
+  const sec = panel.getAttribute('data-tabsec') || '';
+  return currentTab + '|' + (typeof salesDeskSection !== 'undefined' && currentTab === 'salesdesk' ? salesDeskSection : '') + '|' + sec + '|' + (h ? h.textContent.trim() : '');
+}
+function panelSearchApply(panel, q){
+  q = String(q || '').trim().toLowerCase();
+  const words = q ? q.split(/\s+/) : [];
+  panel.querySelectorAll('.panel-body table').forEach(function(tbl){
+    if(tbl.closest('form')) return;
+    const body = tbl.tBodies[0];
+    if(!body) return;
+    let shown = 0, total = 0;
+    Array.prototype.forEach.call(body.rows, function(tr){
+      if(tr.classList.contains('ps-none')) return;
+      const spans = tr.cells.length === 1 && tr.cells[0].colSpan > 1;   /* "No records" / message rows */
+      if(spans){ tr.style.display = words.length ? 'none' : ''; return; }
+      total++;
+      const txt = tr.textContent.toLowerCase();
+      const ok = words.every(function(w){ return txt.indexOf(w) !== -1; });
+      tr.style.display = ok ? '' : 'none';
+      if(ok) shown++;
+    });
+    let none = body.querySelector('tr.ps-none');
+    if(words.length && total && !shown){
+      if(!none){
+        none = document.createElement('tr'); none.className = 'ps-none';
+        const td = document.createElement('td');
+        td.colSpan = Math.max(1, (tbl.tHead && tbl.tHead.rows[0]) ? tbl.tHead.rows[0].cells.length : 1);
+        td.style.cssText = 'text-align:center; color:var(--muted); padding:16px; font-family:\'IBM Plex Sans\',sans-serif;';
+        td.textContent = 'No matching records.';
+        none.appendChild(td); body.appendChild(none);
+      }
+      none.style.display = '';
+    } else if(none){ none.style.display = 'none'; }
+  });
+}
+function injectPanelSearch(){
+  const app = document.getElementById('app');
+  if(!app) return;
+  app.querySelectorAll('.panel').forEach(function(panel){
+    const head = panel.querySelector(':scope > .panel-head');
+    if(!head || head.querySelector('.panel-search, .tt-search')) return;
+    const tbl = panel.querySelector(':scope > .panel-body table');
+    if(!tbl || tbl.closest('form')) return;
+    let actions = head.querySelector(':scope > .panel-head-actions');
+    if(!actions){ actions = document.createElement('div'); actions.className = 'panel-head-actions'; head.appendChild(actions); }
+    const existing = panel.querySelector(':scope > .panel-body .table-tools .tt-search');
+    if(existing){
+      existing.classList.add('panel-search-moved');
+      actions.insertBefore(existing, actions.firstChild);
+      return;
+    }
+    const key = panelSearchKey(panel);
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.className = 'panel-search';
+    inp.placeholder = '🔍 Search...';
+    inp.value = PANEL_SEARCH[key] || '';
+    inp.defaultValue = inp.value;
+    inp.oninput = function(){ PANEL_SEARCH[key] = inp.value; inp.defaultValue = inp.value; panelSearchApply(panel, inp.value); };
+    actions.insertBefore(inp, actions.firstChild);
+    if(inp.value) panelSearchApply(panel, inp.value);
+  });
+}
 function injectBulkCheckboxes(){
   if(!isAdmin()) return;
   ensureBulkBar();
@@ -3198,6 +3273,7 @@ function render(customHtml){
   if(session && locationChosen){ setTimeout(injectCustomFieldInputs, 0); }
   if(session && locationChosen){ setTimeout(injectBulkCheckboxes, 0); }
   if(session && locationChosen){ setTimeout(injectSerialNumbers, 0); }
+  if(session && locationChosen){ setTimeout(injectPanelSearch, 0); }
   if(session && locationChosen){ setTimeout(()=>restoreScrollPositions(scrollSnap), 30); }
   cfPending = null;
 }
@@ -3459,7 +3535,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'SEV7EN v12.25';
+const APP_VERSION_LABEL = 'SEV7EN v12.27';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -4306,6 +4382,7 @@ function hasUnsavedFormInput(){
     const inputs = document.querySelectorAll('input, textarea');
     for(const el of inputs){
       if(el.type==='hidden' || el.readOnly || el.disabled) continue;
+      if(el.classList.contains('panel-search') || el.classList.contains('tt-search')) continue;
       if(el.type==='checkbox' || el.type==='radio'){
         if(el.checked !== el.defaultChecked) return true;
       } else if(el.value !== el.defaultValue){
@@ -6186,7 +6263,8 @@ function oaNextNo(d){
   });
   return oaPrefix() + '/' + today().replace(/-/g, '') + '/' + String(max + 1).padStart(3, '0');
 }
-function oaVisible(r){ return slVisible(r) || (r && (r.addedBy === actorName() || r.addedBy === actorLogin())); }
+/* O.A register lives in Sales Desk: everyone with Sales Desk access sees all O.As; others only their own. */
+function oaVisible(r){ return canSeeTab('salesdesk') || slVisible(r) || !!(r && (r.addedBy === actorName() || r.addedBy === actorLogin())); }
 function oaItems(r){
   if(r && Array.isArray(r.items) && r.items.length) return r.items;
   return [{item: '', qty: '', unitPrice: ''}];
@@ -6371,6 +6449,23 @@ function oaOpenEdit(id){
   return true;
 }
 function oaCancel(){ oaEditId = null; OA_DRAFT = null; render(); }
+/* Sales tab > Order Acknowledgement: sales persons see the O.As where they are the Sales Representative;
+   Admin / Sales Manager see all. View & print only (editing is done by the Sales Desk team). */
+function salesOaSectionHtml(){
+  const d = DATA[currentLocation];
+  const all = canSeeAllSales();
+  const rows = (d.soAcks || []).filter(r => r && (all || slOwn(r))).slice().reverse();
+  const body = rows.length === 0
+    ? `<tr><td colspan="10" style="text-align:center; color:var(--muted); padding:18px;">No order acknowledgements yet.</td></tr>`
+    : rows.map(r => `<tr>
+        <td>${esc(r.soNo || '')}</td><td>${fd(r.date)}</td><td>${esc(r.poNo || '')}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.customer || '')}</td>
+        <td>${Array.isArray(r.items) ? r.items.length : ''}</td><td>${r.grandTotal ? slMoney(r.grandTotal) : slMoney(r.orderValue)}</td><td>${fd(r.deliveryDate)}</td><td>${esc(r.ackStatus || '')}</td><td>${esc(r.salesPerson || '')}</td>
+        <td><button type="button" class="icon-btn" style="white-space:nowrap; background:var(--accent-2); color:#fff; border:2px solid var(--accent); font-weight:700;" onclick="openOAPreview('${esc(r.id)}')">View / Print</button></td>
+      </tr>`).join('');
+  return secHead('&#9989;', 'Order Acknowledgement')
+    + `<div class="panel"><div class="panel-head"><h3>${all ? 'All order acknowledgements' : 'My order acknowledgements'}</h3><div class="panel-head-actions"><span style="color:var(--muted); font-size:12px;">${rows.length} record${rows.length===1?'':'s'}</span></div></div>
+  <div class="panel-body table-scroll"><table><thead><tr><th>O.A No.</th><th>O.A Date</th><th>Customer P.O No.</th><th>Customer</th><th>Items</th><th>Total (incl. GST)</th><th>Delivery Date</th><th>Ack Status</th><th>Sales Person</th><th></th></tr></thead><tbody>${body}</tbody></table></div></div>`;
+}
 function oaSectionHtml(){
   const d = DATA[currentLocation];
   const rows = (d.soAcks || []).filter(oaVisible).slice().reverse();
@@ -10296,6 +10391,7 @@ function renderSales(){
   ${enquiryFormSectionHtml()}
   ${salesQuotationsSectionHtml()}
   ${customerPoSalesSectionHtml()}
+  ${salesOaSectionHtml()}
   ${salesDispatchesSectionHtml()}
   ${slSection('proj', '&#128200;', 'Project Tracker', 'projects', {})}
   ${slSection('tend', '&#128196;', 'Tenders', 'tenders', {})}`;
