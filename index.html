@@ -1627,7 +1627,27 @@ function authEmailFor(username){
 }
 function authClear(){
   AUTH = { idToken:'', refreshToken:'', expiresAt:0, email:'', active:false, lastError:'' };
+  try{ sessionStorage.removeItem('somtek_erp_auth'); }catch(e){}
 }
+/* Keep the database sign-in across F5 / refresh in the same tab (same lifetime as the login itself,
+   see saveSessionLocal): without this the padlock showed open after every refresh. */
+function authSaveLocal(){
+  try{ sessionStorage.setItem('somtek_erp_auth', JSON.stringify({idToken: AUTH.idToken, refreshToken: AUTH.refreshToken, expiresAt: AUTH.expiresAt, email: AUTH.email})); }catch(e){}
+}
+function authLoadLocal(){
+  try{
+    if(!sessionStorage.getItem('somtek_erp_session')) return;
+    const v = JSON.parse(sessionStorage.getItem('somtek_erp_auth') || 'null');
+    if(!v || !v.refreshToken) return;
+    AUTH.idToken = v.idToken || '';
+    AUTH.refreshToken = v.refreshToken;
+    AUTH.expiresAt = parseInt(v.expiresAt, 10) || 0;
+    AUTH.email = v.email || '';
+    AUTH.active = true;
+    AUTH.lastError = '';
+  }catch(e){}
+}
+authLoadLocal();
 /* Never throws - a failed cloud sign-in must not stop somebody working. */
 async function authSignIn(username, password){
   if(!FIREBASE_CONFIG || !FIREBASE_CONFIG.apiKey || FIREBASE_CONFIG.apiKey === 'YOUR_API_KEY') return false;
@@ -1653,6 +1673,7 @@ async function authSignIn(username, password){
     AUTH.email = email;
     AUTH.active = true;
     AUTH.lastError = '';
+    authSaveLocal();
     console.info('Cloud auth: active as ' + email);
     return true;
   }catch(e){
@@ -1684,6 +1705,7 @@ async function authRefresh(){
     AUTH.expiresAt = Date.now() + ((parseInt(j.expires_in, 10) || 3600) * 1000);
     AUTH.active = true;
     AUTH.lastError = '';
+    authSaveLocal();
     return AUTH.idToken;
   }catch(e){
     AUTH.lastError = e.message || 'network error';
@@ -3535,7 +3557,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'SEV7EN v12.29';
+const APP_VERSION_LABEL = 'SEV7EN v12.30';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
