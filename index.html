@@ -507,8 +507,10 @@ tr.access-row td{background:var(--panel-2); padding:14px 16px;}
 #quote-preview .quote-sheet{box-shadow:0 8px 40px rgba(0,0,0,0.5); border-radius:4px;}
 body.quote-open{overflow:hidden;}
 @media print{
+  /* every printout: plain white page, no grid background, no forced full-screen height (that caused blank extra pages) */
+  html, body.quote-open{background:#fff !important; min-height:0 !important; height:auto !important; margin:0 !important; padding:0 !important;}
   body.quote-open > *:not(#quote-preview){display:none !important;}
-  #quote-preview{position:static; inset:auto; background:#fff; overflow:visible; padding:0;}
+  #quote-preview{position:static; inset:auto; background:#fff; overflow:visible; padding:0; height:auto !important; min-height:0 !important;}
   #quote-preview .quote-actions{display:none !important;}
   #quote-preview .quote-sheet{box-shadow:none; border-radius:0; max-width:none;}
 }
@@ -6409,7 +6411,15 @@ function oaDocHtml(r){
       <div style="padding:4px 6px; min-height:44px; border-bottom:${G};"><b>${esc(name || '')}</b>${name ? '<br>' : ''}<span style="color:#333;">${esc(addr || '')}</span></div>
       <div style="padding:3px 6px; border-bottom:${G};"><b>GST NO:</b> ${esc(gst || '')}</div>
       <div style="padding:3px 6px;"><b>Email-Id:</b> ${esc(mail || '')}</div></td>`;
-  return `<div class="quote-sheet" style="background:#fff; color:#111; margin:0 auto; padding:18px 22px; font-family:'IBM Plex Sans',Arial,sans-serif; font-size:11px; line-height:1.35; -webkit-print-color-adjust:exact; print-color-adjust:exact;">
+  return `<style>
+    .oa-doc{max-width:794px !important;}
+    .oa-doc table{font-size:inherit; border-collapse:collapse;}
+    .oa-doc td, .oa-doc th{font-family:'IBM Plex Sans',Arial,sans-serif; text-transform:none; letter-spacing:0; white-space:normal; border-bottom:none; line-height:1.3;}
+    .oa-doc > table > tbody > tr > td{padding:0;}
+    .oa-doc thead th{text-align:center;}
+    @media print{ .oa-doc{max-width:none !important; padding:0 !important; margin:0 !important;} }
+  </style>
+  <div class="quote-sheet oa-doc" style="background:#fff; color:#111; margin:0 auto; padding:18px 22px; font-family:'IBM Plex Sans',Arial,sans-serif; font-size:11px; line-height:1.35; -webkit-print-color-adjust:exact; print-color-adjust:exact;">
   <table style="width:100%; border-collapse:collapse; border:2px solid #222;">
     <tr><td colspan="2" style="text-align:center; font-weight:700; font-size:15px; letter-spacing:0.04em; padding:6px; border:${B};">ORDER ACKNOWLEDGEMENT</td></tr>
     <tr>
@@ -6448,9 +6458,10 @@ function oaDocHtml(r){
     <tr><td colspan="2" style="border:${B}; text-align:center; font-weight:700; font-size:13px; color:#444; padding:6px;">TERMS &amp; CONDITIONS</td></tr>
     <tr><td style="border:${B}; padding:0; vertical-align:top;"><table style="width:100%; border-collapse:collapse;">${terms}</table></td>
       <td style="border:${B}; padding:10px; text-align:center; vertical-align:middle;"><div style="font-weight:700; margin-bottom:6px;">BANK DETAILS</div><div>${bank}</div></td></tr>
+    <tr style="break-inside:avoid;">
+      <td style="border:${B}; padding:6px 8px; vertical-align:top;">${r.remarks ? `<b>Remarks:</b> ${esc(r.remarks)}` : ''}</td>
+      <td style="border:${B}; padding:6px 8px; text-align:center; vertical-align:top;">For <b>${esc(co.name)}</b><div style="height:42px;"></div><div style="border-top:1px solid #555; padding-top:3px; margin:0 20px;">Authorised Signatory</div></td></tr>
   </table>
-  ${r.remarks ? `<div style="margin-top:8px;"><b>Remarks:</b> ${esc(r.remarks)}</div>` : ''}
-  <div style="margin-top:34px; display:flex; justify-content:flex-end;"><div style="text-align:center; min-width:220px;">For <b>${esc(co.name)}</b><div style="margin-top:40px; border-top:1px solid #555; padding-top:4px;">Authorised Signatory</div></div></div>
   </div>`;
 }
 function openOAPreview(id){
@@ -6470,7 +6481,7 @@ function openOAPreview(id){
   document.body.appendChild(overlay);
   const pageStyle = document.createElement('style');
   pageStyle.id = 'quote-page-style';
-  pageStyle.textContent = '@page{ size: A4 portrait; margin: 10mm; }';
+  pageStyle.textContent = '@page{ size: A4 portrait; margin: 10mm; } @media print{ html, body.quote-open{ background:#fff !important; min-height:0 !important; height:auto !important; margin:0 !important; padding:0 !important; } #quote-preview{ height:auto !important; min-height:0 !important; } }';
   document.head.appendChild(pageStyle);
   document.body.classList.add('quote-open');
 }
@@ -13634,7 +13645,7 @@ function openProformaPreview(id){
   document.body.appendChild(overlay);
   const pageStyle = document.createElement('style');
   pageStyle.id = 'quote-page-style';
-  pageStyle.textContent = '@page{ size: A4 portrait; margin: 10mm; }';
+  pageStyle.textContent = '@page{ size: A4 portrait; margin: 8mm; } @media print{ #quote-preview .quote-sheet{ zoom:0.93; } }';  /* proforma has extra rows vs the tax invoice: fit it on one A4 */
   document.head.appendChild(pageStyle);
   document.body.classList.add('quote-open');
 }
