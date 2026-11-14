@@ -960,6 +960,7 @@ let NOTICE = { text:'', updatedBy:'', updatedAt:'' };
 let loginError = '';
 /* ---------------- AUDIT LOG state ---------------- */
 let AUDIT = { list: [] };            /* loaded from Firestore doc 'audit_log' */
+let LAST_FULL_SNAP = {};             /* per-location full JSON snapshot, the base for merge-on-save */
 let LAST_SNAP = {};                  /* per-location JSON snapshots, for change diffing */
 let USERS_SNAP = '';                 /* JSON snapshot of USERS list */
 let ROLES_CF_SNAP = '';              /* JSON snapshot of roles + custom fields */
@@ -1051,11 +1052,7 @@ function locationLabel(loc, size){
 function enquiryNumPrefix(loc){
   return loc === 'SOMTEK' ? 'ST-' : loc === 'EVISSAT' ? 'ET-' : '';
 }
-function nextEnquiryNum(loc, d){
-  const prefix = enquiryNumPrefix(loc);
-  const n = (d.enquiry.length + 1).toString().padStart(4,'0');
-  return prefix + n;
-}
+function nextEnquiryNum(loc, d){ return numSuggest('enqsheet', d, loc); }
 function nextOaNumber(d){
   const n = (d.vendorPO.length + 1).toString().padStart(4,'0');
   return 'OA-' + n;
@@ -2127,12 +2124,36 @@ function schedSectionLabel(k){
   const r = REPORT_SOURCES.find(x => x.key === k); return r ? r.label : k;
 }
 
+let REPORT_SCHED_SNAP = null;   /* the schedules as last read / saved here: base for the merge */
 async function loadReportSchedules(){
   const doc = await fsGet('report_schedules');
   REPORT_SCHEDULES = (doc && Array.isArray(doc.list)) ? doc : { list: [] };
+  REPORT_SCHED_SNAP = docKeySnap(REPORT_SCHEDULES);
 }
 async function saveReportSchedules(){
+  /* the automatic mailer writes lastSent / lastStatus into this doc: merge so a save here never undoes that */
+  try{
+    const fresh = await fsGet('report_schedules');
+    if(fresh && Array.isArray(fresh.list) && REPORT_SCHED_SNAP){
+      const mine = REPORT_SCHEDULES;
+      const freshById = {};
+      fresh.list.forEach(x => { if(x && x.id) freshById[x.id] = x; });
+      const merged = mergeDocObjects(mine, fresh, REPORT_SCHED_SNAP).data;
+      /* lastSent / lastStatus belong to the mailer: always the cloud's. sendNow: this screen's only if it changed it here. */
+      let baseById = {};
+      try{ (JSON.parse(REPORT_SCHED_SNAP.list || '[]') || []).forEach(x => { if(x && x.id) baseById[x.id] = x; }); }catch(e){ baseById = {}; }
+      (merged.list || []).forEach(x => {
+        const f = x && x.id ? freshById[x.id] : null;
+        if(!f || f === x) return;
+        x.lastSent = f.lastSent; x.lastStatus = f.lastStatus;
+        const b = baseById[x.id];
+        if(!b || !!b.sendNow === !!x.sendNow) x.sendNow = f.sendNow;
+      });
+      REPORT_SCHEDULES = merged;
+    }
+  }catch(e){ console.warn('schedule merge skipped', e); }
   await fsSet('report_schedules', REPORT_SCHEDULES);
+  REPORT_SCHED_SNAP = docKeySnap(REPORT_SCHEDULES);
 }
 
 /* Is this schedule due, given when it last ran? */
@@ -2792,6 +2813,91 @@ function snapshotLocation(loc){
   const snap = {};
   auditTrackedKeys(d).forEach(k => { snap[k] = JSON.stringify(d[k] || []); });
   LAST_SNAP[loc] = snap;
+  /* every key as it was when this screen last matched the cloud: the base for mergeLocationWithCloud */
+  const full = {};
+  Object.keys(d).forEach(k => { full[k] = JSON.stringify(d[k] === undefined ? null : d[k]); });
+  LAST_FULL_SNAP[loc] = full;
+}
+/* Save = "my changes on top of the latest cloud copy", never "my whole (maybe stale) copy over the cloud".
+   Background sync pauses while someone types, so their screen can miss records others saved meanwhile;
+   writing that copy back used to delete those records. For each key:
+   - only the cloud changed  -> take the cloud's
+   - only this screen changed -> take this screen's
+   - both changed, a list     -> cloud's rows + rows this screen added, edited or deleted (matched by id)
+   - both changed, not a list -> this screen's */
+function mergeDocObjects(mine, cloud, base, skipKeys){
+  const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+  const skip = new Set(skipKeys || []);
+  const out = {};
+  let pulled = 0;
+  new Set([...Object.keys(mine), ...Object.keys(cloud)]).forEach(k => {
+    if(skip.has(k)){ if(has(mine, k)) out[k] = mine[k]; return; }
+    const mineStr = has(mine, k) ? JSON.stringify(mine[k] === undefined ? null : mine[k]) : undefined;
+    const cloudStr = has(cloud, k) ? JSON.stringify(cloud[k] === undefined ? null : cloud[k]) : undefined;
+    const baseStr = base[k];
+    if(mineStr === cloudStr){ if(has(mine, k)) out[k] = mine[k]; return; }
+    if(mineStr === baseStr){                        /* not changed here: take the cloud's */
+      if(cloudStr !== undefined){ out[k] = cloud[k]; pulled++; } else if(has(mine, k)) out[k] = mine[k];
+      return;
+    }
+    if(cloudStr === undefined || cloudStr === baseStr){ out[k] = mine[k]; return; }   /* only changed here */
+    if(Array.isArray(mine[k]) && Array.isArray(cloud[k])){
+      let baseArr = [];
+      try{ baseArr = JSON.parse(baseStr || '[]'); }catch(e){ baseArr = []; }
+      if(!Array.isArray(baseArr)) baseArr = [];
+      const bMap = new Map(baseArr.map(r => [auditRowKey(r), JSON.stringify(r)]));
+      const mMap = new Map(mine[k].map(r => [auditRowKey(r), r]));
+      const removedHere = new Set([...bMap.keys()].filter(x => !mMap.has(x)));
+      const res = cloud[k].filter(r => !removedHere.has(auditRowKey(r))).map(r => {
+        const kk = auditRowKey(r), m = mMap.get(kk);
+        if(m === undefined || !bMap.has(kk) || JSON.stringify(m) === bMap.get(kk)) return r;      /* not edited here */
+        if(JSON.stringify(r) === bMap.get(kk)) return m;                                           /* only edited here */
+        return mergeRowFields(k, m, r, bMap.get(kk));                                              /* edited on both sides */
+      });
+      const inRes = new Set(res.map(auditRowKey));
+      mine[k].forEach(r => { const kk = auditRowKey(r); if(!bMap.has(kk) && !inRes.has(kk)){ res.push(r); inRes.add(kk); } });   /* added here */
+      out[k] = res; pulled++;
+      return;
+    }
+    out[k] = mine[k];
+  });
+  return {data: out, pulled: pulled};
+}
+/* Number fields that hold a running count: two people's changes to them ADD UP instead of one replacing the other.
+   e.g. both issue 3 of the same item at the same time -> stock goes down by 6, not 3. */
+const MERGE_DELTA_FIELDS = { inventory: ['qty'] };
+/* A record changed on this screen AND in the cloud: start from the cloud's, put back the fields changed here. */
+function mergeRowFields(table, mine, cloud, baseStr){
+  if(!mine || !cloud || typeof mine !== 'object' || typeof cloud !== 'object' || Array.isArray(mine)) return mine;
+  let base = {};
+  try{ base = JSON.parse(baseStr) || {}; }catch(e){ base = {}; }
+  const out = Object.assign({}, cloud);
+  const deltas = MERGE_DELTA_FIELDS[table] || [];
+  Object.keys(mine).forEach(f => {
+    const mv = JSON.stringify(mine[f]), bv = JSON.stringify(base[f]);
+    if(mv === bv) return;                                   /* field not changed here: keep the cloud's */
+    if(deltas.indexOf(f) !== -1){
+      const num = v => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
+      const v = num(cloud[f]) + (num(mine[f]) - num(base[f]));
+      out[f] = String(Math.round(v * 1000) / 1000);
+    }else{
+      out[f] = mine[f];
+    }
+  });
+  Object.keys(base).forEach(f => { if(!(f in mine) && JSON.stringify(cloud[f]) === JSON.stringify(base[f])) delete out[f]; });  /* field removed here */
+  return out;
+}
+/* per-key JSON strings of an object: the "base" mergeDocObjects compares against */
+function docKeySnap(obj){
+  const snap = {};
+  Object.keys(obj || {}).forEach(k => { snap[k] = JSON.stringify(obj[k] === undefined ? null : obj[k]); });
+  return snap;
+}
+function mergeLocationWithCloud(loc, cloud){
+  const mine = DATA[loc], base = LAST_FULL_SNAP[loc];
+  if(!mine || !cloud || typeof cloud !== 'object' || !base) return {data: mine, pulled: 0};
+  /* HR lives in its own shared document (hr_shared) and is merged there, not from the company copy */
+  return mergeDocObjects(mine, cloud, base, HR_KEYS);
 }
 function auditRowKey(r){
   if(r && typeof r === 'object' && r.id !== undefined && r.id !== null && r.id !== '') return 'id:' + r.id;
@@ -2877,6 +2983,244 @@ function locationRecordCount(d){
   Object.keys(d).forEach(k=>{ if(Array.isArray(d[k])) n += d[k].length; });
   return n;
 }
+/* ---- AUTO NUMBERS: a number is held for you from the moment you start filling a form ----
+   Enquiries, quotations, O.As, inward P.Os and proformas: the first click / key in the form books the next
+   number in the shared doc 'number_holds', so two people filling forms at the same time never get the same one.
+   - saved: the number is used
+   - form left (not on screen for a minute), Cancel / logout, or no activity for 30 minutes: it is released
+   - the next person always gets the lowest released number first, so no number is skipped
+   Tax invoices are NOT held (GST: no gaps): their number is checked against the latest data when you click Save. */
+const NUM_HOLD_DOC = 'number_holds';
+const NUM_HOLD_MS = 30 * 60 * 1000;
+const NUM_TAB = Math.random().toString(36).slice(2, 10);
+const MY_HOLDS = {};         /* key -> {no, id, loc, at, seen} */
+const NUM_BUSY = {};
+let NUM_LAST_ACTIVITY = Date.now();
+let NUM_LAST_RENEW = Date.now();
+const NUM_SERIES = {
+  enq:      {inputs:['sf-valve-enqNo','sf-pump-enqNo'], tables:['valveEnquiries','pumpEnquiries'], field:'enqNo', prefix: loc => enqPrefix(loc), pad:3},
+  enqsheet: {inputs:['eq-enum'], tables:['enquiry'], field:'enum', prefix: loc => enquiryNumPrefix(loc), pad:4, counted:true},
+  quote:    {inputs:['q-number'], tables:['quotations'], field:'quoteNumber', prefix: loc => quotePrefix(loc), pad:3, counted:true},
+  oa:       {inputs:['oa-soNo'], tables:['soAcks'], field:'soNo', counted:true, pad:3,
+             fmt: (loc, n) => (OA_PREFIX[loc] || 'OA') + '/' + today().replace(/-/g, '') + '/' + String(n).padStart(3, '0'),
+             parse: v => { const m = v.match(/\/(\d+)$/) || v.match(/^\d{8}(\d{6})$/); return m ? parseInt(m[1], 10) : 0; }},
+  inpo:     {inputs:['in-po-number'], tables:['inward'], field:'poNumber', pad:3,
+             fmt: (loc, n) => inwardPoPrefix(loc) + '-' + String(n).padStart(3, '0'),
+             parse: (v, loc) => { const m = v.toUpperCase().match(new RegExp('^' + numReEsc(inwardPoPrefix(loc).toUpperCase()) + '[-\\s]?(\\d+)$')); return m ? parseInt(m[1], 10) : 0; }},
+  pi:       {inputs:['pf-invno'], tables:['proformaInvoices'], field:'invNo', prefix: loc => (loc === 'SOMTEK' ? 'SE/PI/' : 'ET/PI/'), pad:3, counted:true},
+  inv:      {inputs:[], tables:['salesAccounts'], field:'invNo', prefix: loc => invoicePrefix(loc), pad:3, counted:true, noHold:true}
+};
+function numReEsc(x){ return String(x).replace(/[.*+?^${}()|[\]\\\/]/g, '\\$&'); }
+function numKey(id, loc){ return id + ':' + loc; }
+function numFmt(id, loc, n){ const sd = NUM_SERIES[id]; return sd.fmt ? sd.fmt(loc, n) : sd.prefix(loc) + String(n).padStart(sd.pad || 3, '0'); }
+function numParse(id, loc, v){
+  const sd = NUM_SERIES[id]; v = String(v == null ? '' : v).trim();
+  if(!v) return 0;
+  if(sd.parse) return sd.parse(v, loc) || 0;
+  const m = v.match(new RegExp('^' + numReEsc(sd.prefix(loc)) + '(\\d+)$', 'i'));
+  return m ? parseInt(m[1], 10) : 0;
+}
+function numUsedSet(id, loc, d){
+  const sd = NUM_SERIES[id], set = new Set();
+  sd.tables.forEach(t => (d && Array.isArray(d[t]) ? d[t] : []).forEach(r => { const n = numParse(id, loc, r && r[sd.field]); if(n) set.add(n); }));
+  return set;
+}
+function numMaxUsed(id, loc, d){
+  const sd = NUM_SERIES[id];
+  let max = 0, count = 0;
+  sd.tables.forEach(t => (d && Array.isArray(d[t]) ? d[t] : []).forEach(r => { if(!r) return; count++; const n = numParse(id, loc, r[sd.field]); if(n > max) max = n; }));
+  return sd.counted ? Math.max(max, count) : max;
+}
+/* what the form shows: the number held for you, else the next one by the data on screen */
+function numSuggest(id, d, loc){
+  loc = loc || currentLocation;
+  const h = MY_HOLDS[numKey(id, loc)];
+  return numFmt(id, loc, h ? h.no : numMaxUsed(id, loc, d || {}) + 1);
+}
+/* small documents with a version check: two people booking at once cannot both win */
+async function fsReadVersioned(docId){
+  const res = await fsFetch(FS_REST_BASE + docId, { method:'GET' }, 'Reading '+docId);
+  if(res.status === 404) return { missing:true, data:null, updateTime:null };
+  if(!res.ok) throw new Error('HTTP ' + res.status);
+  const j = await res.json();
+  const raw = j.fields && j.fields.data && j.fields.data.stringValue;
+  return { missing:false, data: raw ? JSON.parse(raw) : null, updateTime: j.updateTime || null };
+}
+async function fsWriteIfVersion(docId, data, updateTime){
+  const pre = updateTime ? 'currentDocument.updateTime=' + encodeURIComponent(updateTime) : 'currentDocument.exists=false';
+  const res = await fsFetch(FS_REST_BASE + docId + '?' + pre, {
+    method:'PATCH', headers:{ 'Content-Type':'application/json' },
+    body: JSON.stringify({ fields: { data: { stringValue: JSON.stringify(data) } } })
+  }, 'Saving '+docId);
+  if(res.ok) return 'ok';
+  if(res.status === 400 || res.status === 409 || res.status === 412) return 'conflict';
+  return 'error';
+}
+async function numHoldUpdate(fn){
+  if(!firebaseReady) return null;
+  for(let i = 0; i < 6; i++){
+    try{
+      const cur = await fsReadVersioned(NUM_HOLD_DOC);
+      const doc = (cur.data && typeof cur.data === 'object') ? cur.data : { series:{} };
+      const result = fn(doc);
+      const w = await fsWriteIfVersion(NUM_HOLD_DOC, doc, cur.missing ? null : cur.updateTime);
+      if(w === 'ok') return result;
+      if(w !== 'conflict') return null;
+    }catch(e){ console.warn('number hold', e); return null; }
+    await new Promise(r => setTimeout(r, 120 + Math.random() * 250));
+  }
+  return null;
+}
+function numSeriesState(doc, key){
+  doc.series = (doc.series && typeof doc.series === 'object') ? doc.series : {};
+  const sr = doc.series[key] = (doc.series[key] && typeof doc.series[key] === 'object') ? doc.series[key] : {};
+  sr.holds = Array.isArray(sr.holds) ? sr.holds : [];
+  sr.free = Array.isArray(sr.free) ? sr.free : [];
+  sr.top = sr.top || 0;
+  return sr;
+}
+/* expired holds go back to the free list (unless the number got used) */
+function numPrune(sr, used){
+  const cutoff = Date.now() - NUM_HOLD_MS, keep = [];
+  sr.holds.forEach(h => { if(!h || !(h.at >= cutoff)){ if(h && h.no && !used.has(h.no)) sr.free.push(h.no); } else keep.push(h); });
+  sr.holds = keep;
+  sr.free = [...new Set(sr.free)].filter(n => n > 0 && !used.has(n) && !keep.some(h => h.no === n)).sort((a, b) => a - b).slice(0, 200);
+}
+async function numReserve(id){
+  const loc = currentLocation, key = numKey(id, loc);
+  if(MY_HOLDS[key]) return MY_HOLDS[key];
+  if(NUM_BUSY[key]) return null;
+  NUM_BUSY[key] = true;
+  try{
+    const d = DATA[loc] || {};
+    const used = numUsedSet(id, loc, d), localMax = numMaxUsed(id, loc, d);
+    const by = session ? session.username : '';
+    const no = await numHoldUpdate(doc => {
+      const sr = numSeriesState(doc, key);
+      numPrune(sr, used);
+      const busy = n => used.has(n) || sr.holds.some(h => h.no === n);
+      let pick = sr.free.find(n => !busy(n));
+      if(!pick){ pick = Math.max(sr.top, localMax) + 1; while(busy(pick)) pick++; }
+      sr.free = sr.free.filter(n => n !== pick);
+      sr.holds.push({ no: pick, tab: NUM_TAB, by: by, at: Date.now() });
+      sr.top = Math.max(sr.top, pick);
+      return pick;
+    });
+    if(!no) return null;
+    MY_HOLDS[key] = { no: no, id: id, loc: loc, at: Date.now(), seen: Date.now() };
+    return MY_HOLDS[key];
+  }finally{ delete NUM_BUSY[key]; }
+}
+/* used = keep it taken; released = give it back for the next person */
+async function numFinish(key, release){
+  const h = MY_HOLDS[key];
+  if(!h) return;
+  delete MY_HOLDS[key];
+  const used = numUsedSet(h.id, h.loc, DATA[h.loc] || {});
+  await numHoldUpdate(doc => {
+    const sr = numSeriesState(doc, key);
+    sr.holds = sr.holds.filter(x => !(x && x.no === h.no && x.tab === NUM_TAB));
+    if(release && !used.has(h.no)) sr.free.push(h.no);
+    numPrune(sr, used);
+    return true;
+  });
+}
+async function numReleaseAll(){ for(const k of Object.keys(MY_HOLDS)){ try{ await numFinish(k, true); }catch(e){} } }
+/* after a save: numbers that are now in the data are used */
+function numAfterSave(loc){
+  Object.keys(MY_HOLDS).forEach(k => {
+    const h = MY_HOLDS[k];
+    if(h && h.loc === loc && numUsedSet(h.id, loc, DATA[loc] || {}).has(h.no)) numFinish(k, false).catch(() => {});
+  });
+}
+/* the form with this number on screen? */
+function numInputOnScreen(h){
+  return NUM_SERIES[h.id].inputs.map(x => document.getElementById(x)).find(el => el && (el.value || '').trim() === numFmt(h.id, h.loc, h.no)) || null;
+}
+/* every sync tick: release numbers whose form is gone; keep active holds alive; re-book one that was lost */
+async function numHousekeeping(){
+  const now = Date.now();
+  for(const k of Object.keys(MY_HOLDS)){
+    const h = MY_HOLDS[k];
+    if(!h) continue;
+    if(numInputOnScreen(h)) h.seen = now;
+    else if(now - h.seen > 60000){ await numFinish(k, true); continue; }
+  }
+  if(!Object.keys(MY_HOLDS).length || now - NUM_LAST_RENEW < 5 * 60 * 1000) return;
+  NUM_LAST_RENEW = now;
+  if(now - NUM_LAST_ACTIVITY > NUM_HOLD_MS){ await numReleaseAll(); return; }     /* walked away: let them go */
+  const lost = [];
+  await numHoldUpdate(doc => {
+    Object.keys(MY_HOLDS).forEach(k => {
+      const h = MY_HOLDS[k], sr = numSeriesState(doc, k);
+      const mine = sr.holds.find(x => x && x.no === h.no && x.tab === NUM_TAB);
+      if(mine) mine.at = now; else lost.push(k);
+    });
+    return true;
+  });
+  for(const k of lost){
+    const h = MY_HOLDS[k]; if(!h) continue;
+    const inp = numInputOnScreen(h);
+    delete MY_HOLDS[k];
+    if(inp && h.loc === currentLocation){
+      const nh = await numReserve(h.id);
+      if(nh){ inp.value = numFmt(nh.id, nh.loc, nh.no); inp.defaultValue = inp.value; alert('Your form number changed to ' + inp.value + ' (the earlier one was released after a long pause).'); }
+    }
+  }
+}
+['keydown','input','mousedown','touchstart'].forEach(ev => document.addEventListener(ev, () => { NUM_LAST_ACTIVITY = Date.now(); }, true));
+/* first click / key inside a form that shows the next number: book it */
+document.addEventListener('focusin', ev => {
+  const form = ev.target && ev.target.closest ? ev.target.closest('form') : null;
+  if(!form || !session || !locationChosen) return;
+  const d = DATA[currentLocation];
+  if(!d) return;
+  Object.keys(NUM_SERIES).forEach(id => {
+    const sd = NUM_SERIES[id];
+    if(sd.noHold || MY_HOLDS[numKey(id, currentLocation)]) return;
+    const inp = sd.inputs.map(x => form.querySelector('[id="' + x + '"]')).find(Boolean);
+    if(!inp) return;
+    const shown = (inp.value || '').trim();
+    if(shown !== numSuggest(id, d)) return;          /* editing a saved record, or a number typed by hand */
+    numReserve(id).then(h => {
+      if(h && document.body.contains(inp) && (inp.value || '').trim() === shown){
+        inp.value = numFmt(id, h.loc, h.no); inp.defaultValue = inp.value;
+      }
+    }).catch(() => {});
+  });
+}, true);
+
+/* ---- unsaved changes after a failed save ----
+   Until the save goes through: a red bar with Retry stays on screen, background sync will not replace this
+   screen's data (which used to make the record vanish), the save is retried every few seconds and when the
+   connection comes back, and closing the tab asks first. */
+const SAVE_PENDING = {};
+let SAVE_RETRYING = false;
+function savePendingLocs(){ return Object.keys(SAVE_PENDING).filter(l => SAVE_PENDING[l]); }
+function showSaveFailed(){
+  let bar = document.getElementById('save-fail-bar');
+  const locs = savePendingLocs();
+  if(!locs.length){ if(bar) bar.remove(); return; }
+  if(!bar){
+    bar = document.createElement('div');
+    bar.id = 'save-fail-bar';
+    bar.setAttribute('role', 'alert');
+    bar.style.cssText = 'position:fixed; left:50%; top:12px; transform:translateX(-50%); z-index:99999; background:#b3261e; color:#fff; padding:12px 18px; border-radius:8px; box-shadow:0 6px 24px rgba(0,0,0,.35); font-family:IBM Plex Sans,Arial,sans-serif; font-size:14px; display:flex; gap:14px; align-items:center; max-width:92vw;';
+    document.body.appendChild(bar);
+  }
+  bar.innerHTML = '<span>&#9888; <b>Not saved</b> &mdash; your last change (' + esc(locs.join(', ')) + ') did not reach the server. Check the internet. It stays on this screen and is retried automatically. Do not close this tab.</span>'
+    + '<button type="button" onclick="retryPendingSaves(true)" style="background:#fff; color:#b3261e; border:none; border-radius:6px; padding:7px 14px; font-weight:700; cursor:pointer;">Retry now</button>';
+}
+async function retryPendingSaves(byHand){
+  if(SAVE_RETRYING) return;
+  const locs = savePendingLocs();
+  if(!locs.length) return;
+  SAVE_RETRYING = true;
+  try{ for(const l of locs){ await saveLocation(l); } }finally{ SAVE_RETRYING = false; }
+  if(byHand && !savePendingLocs().length){ render(); }
+}
+window.addEventListener('online', () => { retryPendingSaves(false); });
+window.addEventListener('beforeunload', e => { if(savePendingLocs().length){ e.preventDefault(); e.returnValue = 'Some changes are not saved yet.'; return e.returnValue; } });
 async function saveLocation(loc){
   if(_bulkSuppress){ _bulkDirtyLocs.add(loc); return; }
   applyCfPending(loc);
@@ -2895,8 +3239,26 @@ async function saveLocation(loc){
     }
   }
   const changes = diffLocationChanges(loc);
+  /* merge onto the latest cloud copy so records others saved meanwhile are kept */
+  try{
+    const cloudNow = await fsGet('loc_'+loc);
+    if(cloudNow && typeof cloudNow === 'object'){
+      const m = mergeLocationWithCloud(loc, ensureShape(cloudNow));
+      if(m.pulled) DATA[loc] = ensureShape(m.data);
+    }else if(fsGetLastStatus !== 'missing'){
+      console.warn('saveLocation: could not read the cloud copy to merge - saving this screen as it is.');
+    }
+  }catch(e){ console.warn('saveLocation: merge skipped', e); }
   const ok = await fsSet('loc_'+loc, DATA[loc]);
+  if(!ok){
+    /* keep the changes on screen, keep the old base (so a retry merges them correctly) and say so clearly */
+    SAVE_PENDING[loc] = true;
+    showSaveFailed();
+    return;
+  }
   snapshotLocation(loc);
+  if(SAVE_PENDING[loc]){ delete SAVE_PENDING[loc]; showSaveFailed(); }
+  try{ numAfterSave(loc); }catch(e){}
   if(ok && session && changes.length) logAudit('DATA CHANGE', changes.join(' | '), loc);
   /* push HR changes to the shared HR document (both companies) */
   try{ await syncHrSharedIfChanged(loc); }catch(e){ console.error('shared HR sync failed', e); }
@@ -2946,12 +3308,21 @@ async function loadHrShared(){
 
 async function syncHrSharedIfChanged(loc){
   if(!DATA[loc]) return;
-  const cur = pickHr(DATA[loc]);
-  const j = JSON.stringify(cur);
-  if(j === HR_SNAP) return;
+  let cur = pickHr(DATA[loc]);
+  if(JSON.stringify(cur) === HR_SNAP) return;
+  /* my HR changes on top of the latest shared copy, so other people's attendance / leave entries are kept */
+  try{
+    const fresh = await fsGet('hr_shared');
+    if(fresh && typeof fresh === 'object' && HR_SNAP){
+      let baseObj = {};
+      try{ baseObj = JSON.parse(HR_SNAP) || {}; }catch(e){ baseObj = {}; }
+      cur = pickHr(mergeDocObjects(cur, pickHr(fresh), docKeySnap(baseObj)).data);
+    }
+  }catch(e){ console.warn('HR merge skipped', e); }
   SHARED_HR = cur;
-  HR_SNAP = j;
+  HR_SNAP = JSON.stringify(cur);
   applySharedHrEverywhere();
+  snapshotLocation(loc);
   await fsSet('hr_shared', SHARED_HR);
 }
 
@@ -2974,11 +3345,13 @@ let syncTickCount = 0;
 const SYNC_INTERVAL_MS = 6000;
 
 async function syncTick(){
+  numHousekeeping().catch(() => {});
+  if(savePendingLocs().length){ await retryPendingSaves(false); if(savePendingLocs().length) return; }
   if(!firebaseReady || isUserTyping() || hasUnsavedFormInput() || isUserScrolling() || !session) return;
   const loc = currentLocation;
   const [locDoc, usersDoc, noticeDoc] = await Promise.all([ fsGet('loc_'+loc), fsGet(USERS_DOC), fsGet('notice') ]);
   /* user may have started typing while we were waiting on the network */
-  if(isUserTyping() || hasUnsavedFormInput() || isUserScrolling() || !session || currentLocation!==loc) return;
+  if(isUserTyping() || hasUnsavedFormInput() || isUserScrolling() || !session || currentLocation!==loc || SAVE_PENDING[loc]) return;
   let changed = false;
   if(locDoc){
     const fresh = ensureShape(locDoc);
@@ -3557,7 +3930,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'SEV7EN v12.30';
+const APP_VERSION_LABEL = 'SEV7EN v12.35';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -4244,6 +4617,7 @@ async function chooseLocation(loc){
 }
 
 async function handleLogout(){
+  try{ await numReleaseAll(); }catch(e){}
   if(session) logAudit('LOGOUT', 'Signed out');
   session = null;
   authClear();
@@ -6199,10 +6573,28 @@ function cpoRecordRowHtml(p, extraCells, actionsHtml){
 }
 let cpoOaView = 'pending';   /* Customer P.O sub-section: 'pending' or 'completed' */
 function switchCpoOaView(v){ cpoOaView = v; render(); }
+/* value of one Customer P.O row: Qty x Unit Price, else the Total Value typed in */
+function cpoRowValue(p){
+  const q = parseFloat(p && p.qty), u = parseFloat(p && p.unitPrice);
+  if(!isNaN(q) && !isNaN(u)) return q * u;
+  return parseFloat(String((p && p.totalValue) || '').replace(/[^0-9.\-]/g, '')) || 0;
+}
+/* bottom row: total of every record in this tab (all pages, after the search filter), under Total Value */
+function cpoTotalFoot(rows, colCount){
+  const total = rows.reduce((t, p) => t + cpoRowValue(p), 0);
+  const pos = new Set(rows.map(p => cpoKeyOf(p))).size;
+  const cell = 'padding:14px 10px; border-top:2px solid var(--border); font-family:IBM Plex Sans,sans-serif;';
+  return `<tfoot><tr style="background:var(--panel-2);">
+    <td colspan="8" style="${cell} text-align:right; padding-right:24px; font-size:12.5px; color:var(--muted);">Total &mdash; ${pos} P.O${pos === 1 ? '' : "'s"}, ${rows.length} item row${rows.length === 1 ? '' : 's'}</td>
+    <td style="${cell} white-space:nowrap; font-weight:700; font-size:14px;">&#8377; ${total.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
+    <td colspan="${Math.max(1, colCount - 9)}" style="${cell}"></td>
+  </tr></tfoot>`;
+}
 function cpoOaSplitHtml(cpoAll){
   const d = DATA[currentLocation];
   const pending = [], done = [];
   cpoAll.forEach(p => (oaForCpoKey(d, cpoKeyOf(p)) ? done : pending).push(p));
+  const cfN = cfDefs('customerPO').length;
   const baseHead = `<th>P.O Number</th><th>P.O Date</th><th>Customer Name</th><th>Customer Address</th><th>Vendor P.O Num</th><th>Item Description</th><th>Qty</th><th>Unit Price</th><th>Total Value</th><th>DOD</th><th>Status</th>`;
   const tail = `${cfHeaders('customerPO')}<th>Added By</th><th></th>`;
   /* All row buttons sit in one line: [select] [Create O.A / View O.A] [Edit] [Delete] */
@@ -6232,14 +6624,14 @@ function cpoOaSplitHtml(cpoAll){
   ${tableToolbar('customerPO', d.customerPO)}
   <table><thead><tr>${baseHead}${tail}</tr></thead><tbody>
   ${pRows || empty(14, 'No pending Customer P.O.')}
-  </tbody></table>
+  </tbody>${pending.length ? cpoTotalFoot(pending, 13 + cfN) : ''}</table>
   ${showMoreBar('customerPO', pending.length)}
   </div></div>`) + (cpoOaView !== 'completed' ? '' : `
   <div class="panel"><div class="panel-head"><h3>Customer P.O &mdash; O.A created</h3><div class="panel-head-actions"><span style="color:var(--muted); font-size:12px;">${done.length} row${done.length===1?'':'s'}</span></div></div>
   <div class="panel-body table-scroll">
   <table><thead><tr>${baseHead}<th>O.A No.</th><th>O.A Date</th>${tail}</tr></thead><tbody>
   ${dRows || empty(16, 'No O.A created yet.')}
-  </tbody></table>
+  </tbody>${done.length ? cpoTotalFoot(done, 15 + cfN) : ''}</table>
   ${showMoreBar('customerPO', done.length)}
   </div></div>`);
 }
@@ -6275,16 +6667,7 @@ let oaEditId = null;
    Count = highest count already used (read from the end of any existing O.A No.) or the number of O.As, whichever is bigger, + 1. */
 const OA_PREFIX = {SOMTEK: 'SOM/OA', EVISSAT: 'EVI/OA'};
 function oaPrefix(){ return OA_PREFIX[currentLocation] || 'OA'; }
-function oaNextNo(d){
-  const list = (d.soAcks || []).filter(Boolean);
-  let max = list.length;
-  list.forEach(a => {
-    const no = String(a.soNo || '').trim();
-    const m = no.match(/\/(\d+)$/) || no.match(/^\d{8}(\d{6})$/);   /* new SOM|EVI/OA/date/count, or old yyyymmdd000000 */
-    if(m){ const v = parseInt(m[1], 10); if(v > max) max = v; }
-  });
-  return oaPrefix() + '/' + today().replace(/-/g, '') + '/' + String(max + 1).padStart(3, '0');
-}
+function oaNextNo(d){ return numSuggest('oa', d); }
 /* O.A register lives in Sales Desk: everyone with Sales Desk access sees all O.As; others only their own. */
 function oaVisible(r){ return canSeeTab('salesdesk') || slVisible(r) || !!(r && (r.addedBy === actorName() || r.addedBy === actorLogin())); }
 function oaItems(r){
@@ -7645,15 +8028,7 @@ function updateInLinesTotal(){
   });
   totEl.innerHTML = 'Total Qty: <b>' + totalQty.toLocaleString('en-IN') + '</b> &nbsp;|&nbsp; Total Value: <b style="color:var(--success);">&#8377; ' + totalValue.toLocaleString('en-IN',{minimumFractionDigits:2, maximumFractionDigits:2}) + '</b>';
 }
-function nextInwardPoNumber(d){
-  const prefix = inwardPoPrefix(currentLocation);
-  let maxN = 0;
-  (d.inward||[]).forEach(r=>{
-    const m = String(r.poNumber||'').toUpperCase().match(new RegExp('^' + prefix.toUpperCase() + '[-\\s]?(\\d+)$'));
-    if(m){ const n = parseInt(m[1], 10); if(n > maxN) maxN = n; }
-  });
-  return prefix + '-' + String(maxN + 1).padStart(3, '0');
-}
+function nextInwardPoNumber(d){ return numSuggest('inpo', d); }
 async function addInward(e){
 
 /* NEW: Generate next inward barcode code (BBSOM-0001, BBSOM-0002, etc.) */
@@ -9808,7 +10183,7 @@ function enqMaxNumber(d){
   });
   return max;
 }
-function enqNextNumber(d){ return enqPrefix(currentLocation) + String(enqMaxNumber(d) + 1).padStart(3, '0'); }
+function enqNextNumber(d){ return numSuggest('enq', d); }
 /* Gives every enquiry without a number the next one in the series. */
 function enqStampNumbers(d){
   const prefix = enqPrefix(currentLocation);
@@ -13539,10 +13914,7 @@ function pfAdvanceWordsPreview(){
   el.textContent = (v > 0) ? numberToWordsINR(String(v))
     : 'Leave blank to show the total invoice value in words.';
 }
-function nextProformaNumber(d){
-  const n = (d.proformaInvoices||[]).length + 1;
-  return (currentLocation==='SOMTEK' ? 'SE/PI/' : 'ET/PI/') + String(n).padStart(3,'0');
-}
+function nextProformaNumber(d){ return numSuggest('pi', d); }
 function proformaSection(d){
   const list = applyTableTools('proformaInvoices', (d.proformaInvoices||[]).slice().reverse());
   const rows = limitRows('proformaInvoices', list);
@@ -14248,9 +14620,7 @@ function saContactDisplay(r){
   return [r.contactPerson, r.contactMobile].map(v=>String(v==null?'':v).trim()).filter(Boolean).join(', ');
 }
 function invoicePrefix(loc){ return loc==='SOMTEK' ? 'ST-INV-' : 'ET-INV-'; }
-function nextInvoiceNumber(d){
-  return invoicePrefix(currentLocation) + String((d.salesAccounts||[]).length + 1).padStart(3,'0');
-}
+function nextInvoiceNumber(d){ return numSuggest('inv', d); }
 /* The sales queue currently on screen. Click handlers reference rows by a plain
    integer index instead of the P.O key, because real P.O numbers contain spaces,
    slashes, brackets and quotes which break an inline onclick attribute. */
@@ -14415,6 +14785,18 @@ async function addSalesAccount(e){
     if(focusId){ const el = document.getElementById(focusId); if(el){ el.focus(); el.scrollIntoView({behavior:'smooth', block:'center'}); } }
     return false;
   }
+  /* GST-safe: invoice numbers are given at Save. If the suggested number was just used by someone else, take the next free one. */
+  try{
+    const typed = gv('sa-invno');
+    if(typed === nextInvoiceNumber(d)){
+      const fresh = await fsGet('loc_' + currentLocation);
+      if(fresh && Array.isArray(fresh.salesAccounts) && fresh.salesAccounts.some(r => r && String(r.invNo || '').toLowerCase() === typed.toLowerCase())){
+        const next = numFmt('inv', currentLocation, Math.max(numMaxUsed('inv', currentLocation, fresh), numMaxUsed('inv', currentLocation, d)) + 1);
+        document.getElementById('sa-invno').value = next;
+        alert('Invoice No ' + typed + ' was just used by someone else.\n\nThis invoice will be saved as ' + next + '.');
+      }
+    }
+  }catch(e){ console.warn('invoice number check skipped', e); }
   const dupInv = gv('sa-invno');
   if(dupInv && d.salesAccounts.some(r=>(r.invNo||'').toLowerCase() === dupInv.toLowerCase())){
     if(!confirm('Invoice No "' + dupInv + '" already exists in the Sales register. Save it again anyway?')) return false;
@@ -17976,9 +18358,7 @@ function quoteFromEnquiry(id){
   }, 0);
 }
 function quotePrefix(loc){ return loc==='SOMTEK' ? 'ST-QTN-' : 'ET-QTN-'; }
-function nextQuoteNumber(d){
-  return quotePrefix(currentLocation) + String((d.quotations||[]).length + 1).padStart(3,'0');
-}
+function nextQuoteNumber(d){ return numSuggest('quote', d); }
 /* Item columns exactly as per the official template (sheet R0) */
 const QUOTE_ITEM_GROUPS = [
   {label:'RFQ Data', cols:[{key:'slNo', label:'Sl No', auto:true},{key:'tagNo', label:'TAG NO'}]},
