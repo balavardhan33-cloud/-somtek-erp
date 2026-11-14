@@ -384,6 +384,8 @@ def is_due(s, now):
 
 
 def send_mail(to_list, subject, body, filename, data):
+    if isinstance(to_list, str) or not to_list or not all("@" in str(x) for x in to_list):
+        raise RuntimeError("no valid recipient email addresses for this report: " + repr(to_list)[:80])
     user = os.environ.get("SMTP_USER", "").strip()
     pw = os.environ.get("SMTP_PASS", "").replace(" ", "").strip()
     if not user or not pw:
@@ -448,10 +450,10 @@ def main():
             per = (s.get("builder") or {}).get("period") if s.get("builder") else s.get("period")
             per_txt = ""
             if per and per != "all":
-                fr, to = period_range(per, s.get("builder") or {})
-                if fr:
+                p_from, p_to = period_range(per, s.get("builder") or {})
+                if p_from:
                     fmt = lambda x: datetime.strptime(x, "%Y-%m-%d").strftime("%d-%m-%Y")
-                    per_txt = f"\nPeriod: {fmt(fr)} to {fmt(to)}"
+                    per_txt = f"\nPeriod: {fmt(p_from)} to {fmt(p_to)}"
             body = (f"Hello,\n\nPlease find attached the {s.get('freq', '').lower()} report \"{s.get('name')}\" "
                     f"({s.get('loc')}) generated on {stamp}.{per_txt}\n\nSections: {secs}\n\n- SEV7EN ERP (automatic email)\n")
             send_mail(to, f"[SEV7EN] {s.get('name')} - {stamp}", body, fname, data)
