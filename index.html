@@ -3930,7 +3930,7 @@ async function forgotSetPassword(e){
 }
 
 /* ---------------- THEME (dark / light, saved per device) ---------------- */
-const APP_VERSION_LABEL = 'SEV7EN v12.35';
+const APP_VERSION_LABEL = 'SEV7EN v12.36';
 function currentTheme(){
   try{ return localStorage.getItem('somtek_theme') === 'dark' ? 'dark' : 'light'; }catch(e){ return 'light'; }
 }
@@ -19815,24 +19815,57 @@ function exportUsers(){
   const rows = USERS.map(u=>[u.name, u.username, u.role, u.mobile||'', u.dob||'', u.address||'']);
   exportToExcel('Users', headers, rows);
 }
+/* Creates the Firebase Authentication login for a new ERP user, so the
+   admin no longer has to add it by hand in the Firebase console.
+   Uses the public signUp endpoint; does NOT touch the admin's own session.
+   Returns 'created' | 'exists' | error message. Never throws. */
+async function authCreateAccount(username, password){
+  if(!FIREBASE_CONFIG || !FIREBASE_CONFIG.apiKey || FIREBASE_CONFIG.apiKey === 'YOUR_API_KEY') return 'Firebase not configured';
+  try{
+    const res = await withTimeout(fetch('https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=' + FIREBASE_CONFIG.apiKey, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: authEmailFor(username), password: password, returnSecureToken: false })
+    }), FS_TIMEOUT_MS, 'Create cloud login');
+    let j = {};
+    try{ j = await res.json(); }catch(e2){}
+    if(res.ok) return 'created';
+    const m = (j.error && j.error.message) || ('HTTP ' + res.status);
+    if(m.indexOf('EMAIL_EXISTS') === 0) return 'exists';
+    return m;
+  }catch(e){
+    return e.message || 'network error';
+  }
+}
 async function addUser(e){
   e.preventDefault();
   if(!isAdmin()) return false;
   const username = document.getElementById('u-username').value.trim();
+  const password = document.getElementById('u-password').value;
   if(USERS.some(u=>u.username===username)){
     alert('That username already exists.');
     return false;
   }
+  if(password.length < 6){
+    alert('Password must be at least 6 characters.');
+    return false;
+  }
+  const authResult = await authCreateAccount(username, password);
   USERS.push({
     name: document.getElementById('u-name').value.trim(),
     username: username,
-    password: document.getElementById('u-password').value,
+    password: password,
     role: document.getElementById('u-role').value,
     extraTabs: [],
     deniedTabs: []
   });
   await saveUsers();
   render();
+  if(authResult === 'exists'){
+    alert('User added.\n\nNote: a Firebase login for "' + username + '" already existed, so its old password is unchanged. If they cannot log in, delete ' + authEmailFor(username) + ' in Firebase Authentication and add the user again.');
+  } else if(authResult !== 'created'){
+    alert('User added in the ERP, but the Firebase login could not be created (' + authResult + ').\n\nAdd it by hand in Firebase Authentication: ' + authEmailFor(username));
+  }
   return false;
 }
 async function deleteUser(username){
