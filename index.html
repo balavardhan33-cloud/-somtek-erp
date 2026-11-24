@@ -5687,7 +5687,6 @@ const GLOBAL_SEARCH_TABLES = [
   {table:'sales', tab:'sales', label:'Sales'},
   {table:'vendorPO', tab:'po', label:'Vendor PO'},
   {table:'customerPO', tab:'po', label:'Customer PO'},
-  {table:'purchaseAccounts', tab:'accounts', label:'Accounts &middot; Purchase', section:()=>{ accountsSection='purchase'; }},
   {table:'salesAccounts', tab:'accounts', label:'Accounts &middot; Sales', section:()=>{ accountsSection='sales'; }},
   {table:'enquiry', tab:'enquiry', label:'Enquiry'},
   {table:'quotations', tab:'quotation', label:'Quotation'},
@@ -13507,8 +13506,8 @@ function monthlySummarySection(d){
   </div>
   </div></div>`;
 }
-let accountsSection = 'purchase';
-function switchAccountsSection(sec){ accountsSection = sec; render(); }
+let accountsSection = 'sales';
+function switchAccountsSection(sec){ accountsSection = sec === 'purchase' ? 'sales' : sec; render(); }
 function renderAccounts(){
   const d = DATA[currentLocation];
 
@@ -13664,7 +13663,7 @@ function renderAccounts(){
       <td>${fd(q.poDate)}</td>
       <td style="font-family:'IBM Plex Sans',sans-serif;">${esc(q.customer)}</td>
       <td style="max-width:340px; min-width:200px; white-space:normal; word-break:break-word;">${queueItemsCell(qi, itemsTxt)}</td>
-      <td style="font-family:'IBM Plex Mono',monospace; text-align:right;">${esc(queueQtyText(q))}${(st.partInvoices||[]).length ? `<div style="font-family:'IBM Plex Sans',sans-serif; font-size:10.5px; color:#e6a23c; font-weight:600; white-space:nowrap;" title="Already invoiced: ${esc((st.partInvoices||[]).join(', '))}">PART SHIPPED &middot; balance</div>` : ''}</td>
+      <td style="font-family:'IBM Plex Mono',monospace; text-align:right;">${esc(queueQtyText(q))}${(st.partInvoices||[]).length ? `<div style="font-family:'IBM Plex Sans',sans-serif; font-size:10.5px; color:#e6a23c; font-weight:600; white-space:nowrap;" title="Already invoiced: ${esc((st.partInvoices||[]).join(', '))}">PART SHIPMENT &middot; balance</div>` : ''}</td>
       <td style="font-family:'IBM Plex Mono',monospace; text-align:right;">${esc(queueUnitPriceText(q))}</td>
       <td style="font-family:'IBM Plex Mono',monospace; text-align:right;">${q.total ? q.total.toLocaleString('en-IN',{minimumFractionDigits:2, maximumFractionDigits:2}) : '-'}</td>
       <td>${st.pickedBy ? `<span style="font-weight:600; color:var(--success);">${esc(st.pickedBy)}</span>` : '<span style="opacity:.5;">-</span>'}</td>
@@ -13755,7 +13754,7 @@ function renderAccounts(){
       const rate = its.length===1 ? (its[0].rate||'') : (its.length>1 ? 'multi' : '');
       const uom = [...new Set(its.map(it=>it.uom).filter(Boolean))].join(', ');
       return `<tr>
-      <td>${esc(r.invNo)}</td><td>${fd(r.date)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.customer)}</td>
+      <td>${esc(r.invNo)}${r.partShipment==='Yes' ? `<div style="font-family:'IBM Plex Sans',sans-serif; font-size:10.5px; color:#e6a23c; font-weight:600; white-space:nowrap;">PART SHIPMENT</div>` : ''}</td><td>${fd(r.date)}</td><td style="font-family:'IBM Plex Sans',sans-serif;">${esc(r.customer)}</td>
       <td style="font-family:'IBM Plex Sans',sans-serif; max-width:180px; white-space:normal;">${descCellHtml('salesAccounts:'+r.id+':billTo', r.billTo, 45)}</td><td>${esc(r.gstin)}</td>
       <td>${esc(r.dcNo)}</td><td>${fd(r.dcDate)}</td><td>${esc(r.poNo)}</td><td>${fd(r.poDate)}</td>
       <td style="max-width:160px; white-space:normal;">${descCellHtml('salesAccounts:'+r.id+':placeOfSupply', r.placeOfSupply, 45)}</td><td>${esc(r.stateCode)}</td><td style="max-width:150px; white-space:normal;">${descCellHtml('salesAccounts:'+r.id+':contact', saContactDisplay(r), 40)}</td>
@@ -13799,10 +13798,6 @@ function renderAccounts(){
   ${tabHeader(currentLocation, 'Accounts')}
 
   <div class="stat-row">
-    <div class="stat-card stat-card-purchase"><div class="stat-card-top"><div class="val mono">${esc(fmt(purchaseTotal))}</div><div class="stat-ico">&#128176;</div></div><div class="lbl">Total Purchase Value</div></div>
-    <div class="stat-card stat-card-purchase"><div class="stat-card-top"><div class="val mono">${esc(fmt(purchaseOutstanding))}</div><div class="stat-ico">&#9888;</div></div><div class="lbl">Purchase Balance Outstanding</div></div>
-    <div class="stat-card stat-card-purchase"><div class="stat-card-top"><div class="val mono">${esc(purchasePendingCount)}</div><div class="stat-ico">&#8987;</div></div><div class="lbl">Purchase Payments Pending</div></div>
-    <div class="stat-card stat-card-purchase"><div class="stat-card-top"><div class="val mono" style="color:#e6577a;">${esc(d.purchaseAccounts.filter(r=>purchaseDueInfo(r).overdue).length)}</div><div class="stat-ico">&#9203;</div></div><div class="lbl">Purchase Payments Overdue</div></div>
     <div class="stat-card stat-card-sales"><div class="stat-card-top"><div class="val mono">${esc(fmt(salesTotal))}</div><div class="stat-ico">&#128179;</div></div><div class="lbl">Total Sales (Invoice Value)</div></div>
     <div class="stat-card stat-card-sales"><div class="stat-card-top"><div class="val mono">${esc(fmt(salesOutstanding))}</div><div class="stat-ico">&#9888;</div></div><div class="lbl">Sales Balance Outstanding</div></div>
     <div class="stat-card stat-card-sales"><div class="stat-card-top"><div class="val mono">${esc(salesPendingCount)}</div><div class="stat-ico">&#8987;</div></div><div class="lbl">Sales Payments Pending</div></div>
@@ -13810,13 +13805,12 @@ function renderAccounts(){
   </div>
 
   <div class="acct-switch">
-    <button type="button" class="acct-switch-btn ${accountsSection==='purchase'?'active':''}" onclick="switchAccountsSection('purchase')">&#128176; Purchase</button>
     <button type="button" class="acct-switch-btn ${accountsSection==='sales'?'active':''}" onclick="switchAccountsSection('sales')">&#128179; Sales${salesQueueCount?` <span style="background:var(--success); color:#fff; border-radius:9px; padding:1px 7px; font-size:11px;">${salesQueueCount}</span>`:''}</button>
     <button type="button" class="acct-switch-btn ${accountsSection==='proforma'?'active':''}" onclick="switchAccountsSection('proforma')">&#129534; Proforma Invoice</button>
     <button type="button" class="acct-switch-btn ${accountsSection==='summary'?'active':''}" onclick="switchAccountsSection('summary')">&#128197; Monthly Summary</button>
   </div>
 
-  ${accountsSection==='purchase' ? purchaseSection : accountsSection==='summary' ? monthlySummarySection(d) : accountsSection==='proforma' ? proformaSection(d) : salesSection}`;
+  ${accountsSection==='summary' ? monthlySummarySection(d) : accountsSection==='proforma' ? proformaSection(d) : salesSection}`;
 }
 /* =====================  PROFORMA INVOICE  =====================
    A proforma is issued before the sale (for advance payment / customer
@@ -13930,7 +13924,7 @@ function proformaSection(d){
       <div class="field"><label>Date <span style="color:var(--danger);">*</span></label><input type="date" id="pf-date" value="${today()}" required></div>
       <div class="field"><label>Valid Until</label><input type="date" id="pf-validity"></div>
       <div class="field"><label>Name of the Customer <span style="color:var(--danger);">*</span></label>
-        <input type="text" id="pf-customer" list="pf-customer-list" placeholder="Customer name" required oninput="saCustomerAutofillInto(this.value, 'pf')">
+        <input type="text" id="pf-customer" list="pf-customer-list" placeholder="Customer name" required oninput="pfCopyCustomerNames(this.value); saCustomerAutofillInto(this.value, 'pf')">
         <datalist id="pf-customer-list">${saCustomerOptions()}</datalist>
       </div>
       <div class="field"><label>GST No.</label><input type="text" id="pf-gstin" placeholder="Customer GSTIN"></div>
@@ -13942,6 +13936,8 @@ function proformaSection(d){
       <div class="field"><label>Mobile Number</label><input type="text" id="pf-mobile" placeholder="Optional"></div>
     </div>
     <div class="form-grid" style="margin-top:14px;">
+      <div class="field"><label>Bill To Name</label><input type="text" id="pf-billname" placeholder="Copied from customer name" oninput="this.dataset.edited = this.value ? '1' : ''"></div>
+      <div class="field"><label>Ship To Name</label><input type="text" id="pf-shipname" placeholder="Copied from customer name" oninput="this.dataset.edited = this.value ? '1' : ''"></div>
       <div class="field" style="grid-column:1/-1;"><label>Bill To (Name &amp; Address)</label><textarea id="pf-billto" rows="2" placeholder="Customer billing address"></textarea></div>
       <div class="field" style="grid-column:1/-1;"><label>Ship To Address</label><textarea id="pf-shipto" rows="2" placeholder="Optional"></textarea></div>
     </div>
@@ -14018,6 +14014,13 @@ function proformaSection(d){
   ${showMoreBar('proformaInvoices', list.length)}
   </div></div>`;
 }
+/* Proforma: customer name flows into Bill To Name / Ship To Name until the user edits them. */
+function pfCopyCustomerNames(name){
+  ['pf-billname','pf-shipname'].forEach(id => {
+    const el = document.getElementById(id);
+    if(el && !el.dataset.edited) el.value = name || '';
+  });
+}
 /* Fills customer details into either the sales (sa) or proforma (pf) form. */
 function saCustomerAutofillInto(name, prefix){
   const d = DATA[currentLocation];
@@ -14064,6 +14067,8 @@ async function addProformaInvoice(e){
     date: gv('pf-date'),
     validity: gv('pf-validity'),
     customer: gv('pf-customer'),
+    billToName: gv('pf-billname') || gv('pf-customer'),
+    shipToName: gv('pf-shipname') || gv('pf-customer'),
     billTo: gv('pf-billto'),
     shipTo: gv('pf-shipto'),
     gstin: gv('pf-gstin'),
@@ -14548,6 +14553,7 @@ function readSaItemLines(){
   }).filter(it => it.description!=='' || it.qty!=='' || it.rate!=='');
 }
 function saRecalc(){
+  try{ saAutoPartShip(); }catch(e){}
   const r2 = n => Math.round(n*100)/100;
   let taxable = 0;
   document.querySelectorAll('#sa-item-lines .sa-item-line').forEach(line=>{
@@ -14717,6 +14723,26 @@ function saPartShipChanged(v){
     const el = document.querySelector('#sa-item-lines .sa-line-qty'); if(el) el.focus();
   }
 }
+/* Auto part-shipment: true when a queue P.O line ships less than its balance (or is removed) */
+function saIsShortShipment(){
+  if(!saQueueKey) return false;
+  const d = DATA[currentLocation];
+  const st = sqState(d)[saQueueKey] || {};
+  const ship = saLineShipments();
+  const recs = (d.customerPO||[]).filter(p => p && ((p.poNumber && String(p.poNumber).trim()) ? 'po_'+String(p.poNumber).trim() : 'rec_'+p.id) === saQueueKey);
+  return recs.some(p => {
+    const r = sqRemainingQty(st, p);
+    if(r === null || r <= 0) return false;
+    return (ship[p.id] || 0) < r - 1e-9;
+  });
+}
+function saAutoPartShip(){
+  if(!saQueueKey) return;
+  const el = document.getElementById('sa-partship');
+  if(!el) return;
+  const st = sqState(DATA[currentLocation])[saQueueKey] || {};
+  el.value = (saIsShortShipment() || (st.partInvoices||[]).length) ? 'Yes' : 'No';
+}
 /* qty shipped now per P.O line, read from the item lines that came from the queue */
 function saLineShipments(){
   const out = {};
@@ -14755,8 +14781,8 @@ function saFillFromQueue(key){
       recId: r === null ? '' : p.id, remaining: r === null ? '' : String(r), poQty: p.qty||''});
   }).join(''); }
   set('sa-partship', (st.partInvoices||[]).length ? 'Yes' : 'No');
-  saRecalc();
   saQueueKey = key;
+  saRecalc();
   const anchor = document.getElementById('sa-invno');
   /* open the "New Entry" section so the user lands on the filled form */
   const sec = anchor && anchor.closest('[data-tabsec]');
@@ -14801,7 +14827,7 @@ async function addSalesAccount(e){
   if(dupInv && d.salesAccounts.some(r=>(r.invNo||'').toLowerCase() === dupInv.toLowerCase())){
     if(!confirm('Invoice No "' + dupInv + '" already exists in the Sales register. Save it again anyway?')) return false;
   }
-  const partShip = gv('sa-partship') === 'Yes';
+  const partShip = gv('sa-partship') === 'Yes' || saIsShortShipment();
   let ship = null;
   if(saQueueKey && partShip){
     ship = saLineShipments();
@@ -15360,7 +15386,7 @@ function printAllInvoiceCopies(id){
 
 function posBlockHtml(r){
   /* Mirrors the Bill To cell: bold name line + regular-weight address line. */
-  let name = String(r.customer || '').trim();
+  let name = String(r.shipToName || r.customer || '').trim();
   let addr = String(r.shipTo || '').trim() || String(r.billTo || '').trim();
   if(name && addr){
     const norm = c => c.toLowerCase().replace(/[^a-z0-9]/g,'');
@@ -15442,8 +15468,8 @@ function invoiceDocumentHtml(r, heading, docTitle){
       <tr>
         <td rowspan="2" style="${cell} width:33%;">
           <div style="font-size:9.5px; font-weight:700;">Bill To:</div>
-          <div style="font-weight:800; font-size:12px; margin-top:2px;">${esc(dash(r.customer))}</div>
-          ${(r.billTo && String(r.billTo).trim() && String(r.billTo).trim() !== String(r.customer||'').trim()) ? `<div style="font-weight:400; font-size:11px; line-height:1.5; margin-top:2px;">${esc(r.billTo)}</div>` : ''}
+          <div style="font-weight:800; font-size:12px; margin-top:2px;">${esc(dash(r.billToName || r.customer))}</div>
+          ${(r.billTo && String(r.billTo).trim() && String(r.billTo).trim() !== String(r.billToName || r.customer || '').trim()) ? `<div style="font-weight:400; font-size:11px; line-height:1.5; margin-top:2px;">${esc(r.billTo)}</div>` : ''}
           <div style="margin-top:14px;">Contact Person : ${esc(dash(saContactDisplay(r) || ''))}</div>
           <div style="font-weight:800; margin-top:3px;">GSTIN No. ${esc(dash(r.gstin))}</div>
         </td>
@@ -15577,8 +15603,8 @@ function invoiceDocumentHtml(r, heading, docTitle){
         </td>
         <td style="${cell}">
           <div style="font-size:8.5px; line-height:1.45;">Certified that the particulars given above are true and correct and the amount indicated represent the price actually charged and that there is no flow of additional consideration directly or indirectly from the buyer</div>
-          <div style="font-size:9.5px; font-weight:800; text-decoration:underline; margin-top:5px;">OUR INSURANCE DETAILS:</div>
-          <div style="font-size:9.5px; font-weight:700; line-height:1.5;">${insuranceHtml}</div>
+          ${isPf ? '' : `<div style="font-size:9.5px; font-weight:800; text-decoration:underline; margin-top:5px;">OUR INSURANCE DETAILS:</div>
+          <div style="font-size:9.5px; font-weight:700; line-height:1.5;">${insuranceHtml}</div>`}
         </td>
       </tr>
     </table>
@@ -17860,6 +17886,8 @@ const EDIT_SCHEMAS = {
     {key:'date', label:'Date', type:'date'},
     {key:'validity', label:'Valid Until', type:'date'},
     {key:'customer', label:'Name of the Customer', type:'text'},
+    {key:'billToName', label:'Bill To Name', type:'text'},
+    {key:'shipToName', label:'Ship To Name', type:'text'},
     {key:'billTo', label:'Bill To (Name & Address)', type:'text'},
     {key:'shipTo', label:'Ship To Address', type:'text'},
     {key:'gstin', label:'GST No.', type:'text'},
