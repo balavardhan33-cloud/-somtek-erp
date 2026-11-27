@@ -9948,21 +9948,70 @@ function slCell(f, v){
   if(f.money) return slMoney(v);
   return esc(v);
 }
+/* Sales register filter + sort bar: Sales Person, Customer, date range, sort */
+const SL_TOOLS = {};
+function slToolsState(t){ return SL_TOOLS[t] || (SL_TOOLS[t] = {person:'', customer:'', from:'', to:'', sort:'dateDesc'}); }
+function slToolSet(t, k, v){ slToolsState(t)[k] = v; render(); }
+function slToolClear(t){ delete SL_TOOLS[t]; render(); }
+function slPersonOf(r){ return String(r.salesPerson || r.addedBy || '').trim(); }
+function slApplyTools(t, rows){
+  const st = slToolsState(t);
+  const from = st.from ? dparse(st.from) : NaN, to = st.to ? dparse(st.to) : NaN;
+  let out = rows.filter(r => {
+    if(st.person && slPersonOf(r) !== st.person) return false;
+    if(st.customer && String(r.customer || '').trim() !== st.customer) return false;
+    if(!isNaN(from) || !isNaN(to)){
+      const dt = dparse(r.date);
+      if(isNaN(dt)) return false;
+      if(!isNaN(from) && dt < from) return false;
+      if(!isNaN(to) && dt > to) return false;
+    }
+    return true;
+  });
+  const txt = k => (a, b) => String(a[k] || '').localeCompare(String(b[k] || ''), undefined, {sensitivity:'base'});
+  const byDate = dir => (a, b) => ((dparse(a.date) || 0) - (dparse(b.date) || 0)) * dir;
+  const sorters = {
+    dateDesc: byDate(-1), dateAsc: byDate(1),
+    custAsc: txt('customer'), custDesc: (a, b) => -txt('customer')(a, b),
+    personAsc: (a, b) => slPersonOf(a).localeCompare(slPersonOf(b), undefined, {sensitivity:'base'})
+  };
+  return out.slice().sort(sorters[st.sort] || sorters.dateDesc);
+}
+function slToolsBar(t, rows){
+  const st = slToolsState(t);
+  const uniq = f => [...new Set(rows.map(f).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const opt = (v, cur, lbl) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(lbl == null ? v : lbl)}</option>`;
+  const people = uniq(slPersonOf), custs = uniq(r => String(r.customer || '').trim());
+  const active = st.person || st.customer || st.from || st.to || st.sort !== 'dateDesc';
+  return `<div class="table-tools">
+    <select class="tt-select" title="Sales Person" onchange="slToolSet('${t}','person',this.value)">${opt('', st.person, 'All Sales Persons')}${people.map(v => opt(v, st.person)).join('')}</select>
+    <select class="tt-select" title="Customer" onchange="slToolSet('${t}','customer',this.value)">${opt('', st.customer, 'All Customers')}${custs.map(v => opt(v, st.customer)).join('')}</select>
+    <label style="font-size:12px; color:var(--muted);">From <input type="date" class="tt-select" value="${esc(st.from)}" onchange="slToolSet('${t}','from',this.value)"></label>
+    <label style="font-size:12px; color:var(--muted);">To <input type="date" class="tt-select" value="${esc(st.to)}" onchange="slToolSet('${t}','to',this.value)"></label>
+    <select class="tt-select" title="Sort" onchange="slToolSet('${t}','sort',this.value)">
+      ${opt('dateDesc', st.sort, 'Sort: Date (newest first)')}${opt('dateAsc', st.sort, 'Sort: Date (oldest first)')}
+      ${opt('custAsc', st.sort, 'Sort: Customer A-Z')}${opt('custDesc', st.sort, 'Sort: Customer Z-A')}
+      ${opt('personAsc', st.sort, 'Sort: Sales Person A-Z')}
+    </select>
+    ${active ? `<button type="button" class="tt-clear" onclick="slToolClear('${t}')">&#10005; Clear</button>` : ''}
+  </div>`;
+}
 function slSection(sid, icon, label, table, opts){
   opts = opts || {};
   const d = DATA[currentLocation];
-  const rows = (d[table] || []).filter(r => slVisible(r) && (!opts.filter || opts.filter(r))).slice().reverse();
+  const allRows = (d[table] || []).filter(r => slVisible(r) && (!opts.filter || opts.filter(r))).slice().reverse();
+  const rows = opts.tools ? slApplyTools(table, allRows) : allRows;
   const schema = EDIT_SCHEMAS[table] || [];
   const fixed = SL_FIXED[sid] || {};
   const cols = (opts.cols ? opts.cols.map(k => schema.find(f => f.key === k)).filter(Boolean) : schema)
                  .filter(f => fixed[f.key] === undefined);
   const head = cols.map(f => `<th>${esc(f.label)}</th>`).join('') + '<th></th>';
   const body = rows.length === 0
-    ? `<tr><td colspan="${cols.length + 1}" style="text-align:center; color:var(--muted); padding:18px;">No records yet.</td></tr>`
+    ? `<tr><td colspan="${cols.length + 1}" style="text-align:center; color:var(--muted); padding:18px;">${allRows.length ? 'No records match the filters.' : 'No records yet.'}</td></tr>`
     : rows.map(r => `<tr>${cols.map(f => `<td>${slCell(f, r[f.key])}</td>`).join('')}<td>${actionCell((opts.rowActions ? opts.rowActions(r) : '') + editBtn(table, r.id), deleteBtn(`slDelete('${table}','${r.id}')`))}</td></tr>`).join('');
   const form = opts.noForm ? '' : slFormHtml(table, sid, label, opts);
-  return secHead(icon, label) + form + `<div class="panel"><div class="panel-head"><h3>${esc(label)} register</h3><div class="panel-head-actions">${salesIoButtons(table)}<span style="color:var(--muted); font-size:12px;">${rows.length} record${rows.length===1?'':'s'}</span></div></div>
-  <div class="panel-body table-scroll"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div></div>`;
+  return secHead(icon, label) + form + `<div class="panel"><div class="panel-head"><h3>${esc(label)} register</h3><div class="panel-head-actions">${salesIoButtons(table)}<span style="color:var(--muted); font-size:12px;">${rows.length}${rows.length !== allRows.length ? ' of ' + allRows.length : ''} record${allRows.length===1?'':'s'}</span></div></div>
+  <div class="panel-body table-scroll">${opts.tools ? slToolsBar(table, allRows) : ''}<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div></div>`;
 }
 function slPerformanceHtml(){
   const d = DATA[currentLocation];
@@ -10783,7 +10832,7 @@ function renderSales(){
   ${secHead('&#128100;', 'My Customers')}
   ${custFormHtml('cu', 'Customer')}
   ${custTableHtml(myCustomers, 'My Customers')}
-  ${slSection('act', '&#128337;', 'Sales Activity', 'salesActivities', {})}
+  ${slSection('act', '&#128337;', 'Sales Activity', 'salesActivities', {tools:true})}
   ${enquiryFormSectionHtml()}
   ${salesQuotationsSectionHtml()}
   ${customerPoSalesSectionHtml()}
