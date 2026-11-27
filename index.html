@@ -2998,8 +2998,10 @@ const NUM_BUSY = {};
 let NUM_LAST_ACTIVITY = Date.now();
 let NUM_LAST_RENEW = Date.now();
 const NUM_SERIES = {
-  enq:      {inputs:['sf-valve-enqNo','sf-pump-enqNo'], tables:['valveEnquiries','pumpEnquiries'], field:'enqNo', prefix: loc => enqPrefix(loc), pad:3},
-  enqsheet: {inputs:['eq-enum'], tables:['enquiry'], field:'enum', prefix: loc => enquiryNumPrefix(loc), pad:4, counted:true},
+  enq:      {inputs:['sf-valve-enqNo','sf-pump-enqNo'], tables:['valveEnquiries','pumpEnquiries'], field:'enqNo', prefix: loc => enqPrefix(loc), pad:3,
+             link:[{table:'enquiry', field:'enum'}], linkSeries:['enqsheet']},
+  enqsheet: {inputs:['eq-enum'], tables:['enquiry'], field:'enum', prefix: loc => enquiryNumPrefix(loc), pad:4, counted:true,
+             link:[{table:'valveEnquiries', field:'enqNo'}, {table:'pumpEnquiries', field:'enqNo'}], linkSeries:['enq']},
   quote:    {inputs:['q-number'], tables:['quotations'], field:'quoteNumber', prefix: loc => quotePrefix(loc), pad:3, counted:true},
   oa:       {inputs:['oa-soNo'], tables:['soAcks'], field:'soNo', counted:true, pad:3,
              fmt: (loc, n) => (OA_PREFIX[loc] || 'OA') + '/' + today().replace(/-/g, '') + '/' + String(n).padStart(3, '0'),
@@ -3020,15 +3022,26 @@ function numParse(id, loc, v){
   const m = v.match(new RegExp('^' + numReEsc(sd.prefix(loc)) + '(\\d+)$', 'i'));
   return m ? parseInt(m[1], 10) : 0;
 }
+function numLinkedNos(id, loc, d){
+  const sd = NUM_SERIES[id], out = [];
+  (sd.link || []).forEach(l => (d && Array.isArray(d[l.table]) ? d[l.table] : []).forEach(r => {
+    const v = String((r && r[l.field]) == null ? '' : r[l.field]).trim();
+    const m = v.match(new RegExp('^(?:' + numReEsc(sd.prefix(loc)) + ')?(\\d+)$', 'i'));
+    if(m){ const n = parseInt(m[1], 10); if(n) out.push(n); }
+  }));
+  return out;
+}
 function numUsedSet(id, loc, d){
   const sd = NUM_SERIES[id], set = new Set();
   sd.tables.forEach(t => (d && Array.isArray(d[t]) ? d[t] : []).forEach(r => { const n = numParse(id, loc, r && r[sd.field]); if(n) set.add(n); }));
+  numLinkedNos(id, loc, d).forEach(n => set.add(n));
   return set;
 }
 function numMaxUsed(id, loc, d){
   const sd = NUM_SERIES[id];
   let max = 0, count = 0;
   sd.tables.forEach(t => (d && Array.isArray(d[t]) ? d[t] : []).forEach(r => { if(!r) return; count++; const n = numParse(id, loc, r[sd.field]); if(n > max) max = n; }));
+  numLinkedNos(id, loc, d).forEach(n => { if(n > max) max = n; });
   return sd.counted ? Math.max(max, count) : max;
 }
 /* what the form shows: the number held for you, else the next one by the data on screen */
@@ -3098,7 +3111,8 @@ async function numReserve(id){
     const no = await numHoldUpdate(doc => {
       const sr = numSeriesState(doc, key);
       numPrune(sr, used);
-      const busy = n => used.has(n) || sr.holds.some(h => h.no === n);
+      const others = (NUM_SERIES[id].linkSeries || []).map(o => numSeriesState(doc, numKey(o, loc)));
+      const busy = n => used.has(n) || sr.holds.some(h => h.no === n) || others.some(o => o.holds.some(h => h && h.no === n && h.at >= Date.now() - NUM_HOLD_MS));
       let pick = sr.free.find(n => !busy(n));
       if(!pick){ pick = Math.max(sr.top, localMax) + 1; while(busy(pick)) pick++; }
       sr.free = sr.free.filter(n => n !== pick);
@@ -10223,13 +10237,7 @@ function switchEnquirySection(id){ enquirySection = id; render(); }
    One series per location, shared by valve and pump enquiries. */
 function enqPrefix(loc){ return loc === 'SOMTEK' ? 'ST-' : 'ET-'; }
 function enqMaxNumber(d){
-  const prefix = enqPrefix(currentLocation);
-  let max = 0;
-  [...(d.valveEnquiries || []), ...(d.pumpEnquiries || [])].forEach(r => {
-    const m = String((r && r.enqNo) || '').trim().match(new RegExp('^' + prefix + '(\\d+)$'));
-    if(m) max = Math.max(max, parseInt(m[1], 10));
-  });
-  return max;
+  return numMaxUsed('enq', currentLocation, d);
 }
 function enqNextNumber(d){ return numSuggest('enq', d); }
 /* Gives every enquiry without a number the next one in the series. */
